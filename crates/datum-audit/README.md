@@ -1,65 +1,53 @@
 # datum-audit
 
-The audit trail written by the database: `audit.event`, row-change and
-truncate triggers attached at `CREATE TABLE`, fail-closed context,
-per-transaction hash chain, off-box anchors, verify, redaction, and export.
+The audit trail written by the database: `audit.event`, row-change and truncate
+triggers attached at `CREATE TABLE`, fail-closed context, per-transaction hash
+chain, off-box anchors, verify, redaction, and export. Rust is not trusted to
+produce an audit row; `Tx::begin` supplies actor and intent as GUCs.
 
-Rust is not trusted to produce an audit row. `Tx::begin` supplies actor and
-intent as transaction-local settings; the trigger writes the row.
+## Public API (`src/lib.rs`)
 
-## IQ tests (stable names)
+- `Error` / `Result` — `Unimplemented` (PDF hook until `datum-print`), `Core`/`Db`/`Io`/`Json`
+- `MIGRATOR` — `placeholder` + `0001_audit`
+- `AuditCtx` — actor / reason / source for `record`
+- `AuditEntry` — typed view of one `audit.event` row
+- `record` — kernel `app_event` via `audit.log_event`
+- `attach` — attach `zz_audit_row` / `zz_audit_truncate` to `schema.table`
+- `verify` — recompute seals in `[from_seq, to_seq]`; first divergent `seq` or `None`
+- `Head` — chain head (`seq`, hash, xid, sealed_at, row_count, chain_algo)
+- `head` — `audit.head()`
+- `anchor::record` — persist an off-box anchor of `(seq, hash)` at `sink`
+- `bundle` — export bundle (`events.ndjson`/`csv`, `seals.ndjson`, `manifest.json`, `dictionary.md`)
+- `install_privileged` / `uninstall_privileged` — event triggers and writer-role owners (superuser)
+- `export` / `install` / `sha256` — modules (`sha256::digest`, `sha256::hex`)
 
-The integration binary is `tests/iq.rs`. The documented home of the stable
-names is `tests/iq/` (`tests/iq/README.md`). These names never change after
-the first release (PLAN §7):
+## Migrations
 
-- `author_forgets_audit_still_audited`
-- `app_cannot_insert_audit_event`
-- `app_cannot_update_audit_event`
-- `app_cannot_delete_audit_event`
-- `log_event_cannot_forge_row_change`
-- `tamper_breaks_verify_at_seq`
-- `reseal_diverges_from_anchor`
-- `aborted_tx_leaves_no_seal_and_same_head`
-- `export_bundle_is_self_describing`
-- `require_context_refuses_missing_actor`
-- `require_context_refuses_foreign_txid`
-- `require_context_refuses_missing_action`
-- `scrub_redacts_listed_columns`
-- `transient_tables_carry_no_trigger`
-- `truncate_is_recorded_when_owner_truncates`
-- `at_is_same_for_all_rows_of_one_transaction`
-- `stmt_at_orders_within_transaction`
-- `seal_trigger_fires_at_commit_not_insert`
-- `migrate_login_cannot_drop_or_disable_audit_trigger`
-- `module_trigger_can_be_disabled_by_migrate_login`
-- `superuser_can_drop_audit_trigger_for_migrate_down`
-- `verify_is_independent_of_session_timezone`
+- `00000000000000_placeholder` — no-op
+- `00000000000001_audit` — schema `audit` (class audit): `audit.event`, `audit.redact`,
+  `audit.reason_policy`, `audit.exempt`, `audit.tx_seal`, `audit.anchor`
+
+## Tests (`tests/`)
+
+IQ (`tests/iq.rs`; PLAN §7 names): `author_forgets_audit_still_audited`,
+`app_cannot_insert_audit_event`, `app_cannot_update_audit_event`,
+`app_cannot_delete_audit_event`, `log_event_cannot_forge_row_change`,
+`tamper_breaks_verify_at_seq`, `reseal_diverges_from_anchor`,
+`aborted_tx_leaves_no_seal_and_same_head`, `export_bundle_is_self_describing`,
+`require_context_refuses_missing_actor`, `require_context_refuses_foreign_txid`,
+`require_context_refuses_missing_action`, `scrub_redacts_listed_columns`,
+`transient_tables_carry_no_trigger`, `truncate_is_recorded_when_owner_truncates`,
+`at_is_same_for_all_rows_of_one_transaction`, `stmt_at_orders_within_transaction`,
+`seal_trigger_fires_at_commit_not_insert`, `migrate_login_cannot_drop_or_disable_audit_trigger`,
+`module_trigger_can_be_disabled_by_migrate_login`,
+`superuser_can_drop_audit_trigger_for_migrate_down`,
+`verify_is_independent_of_session_timezone`.
 
 Also: `migrate_down_then_up`, `grants_match_d3_section_1_3`.
 
-## Install
+## Frozen / seams
 
-Migrations run as `datum_migrate`. PostgreSQL requires a superuser to
-`CREATE EVENT TRIGGER` and to `ALTER FUNCTION ... OWNER TO` the writer
-roles (`datum_audit_row`, `datum_audit_event`). After the SQL migrator,
-call `datum_audit::install_privileged` on a bootstrap/superuser
-connection to the same database.
-
-`audit_protect` (and `audit_protect_drop`) refuse `DROP TRIGGER` of
-`zz_audit_*`, `ALTER TABLE ... DISABLE TRIGGER` / `ENABLE [REPLICA|ALWAYS]
-TRIGGER` of `zz_audit_*` (and `DISABLE TRIGGER ALL` / `USER` on an audited
-table), and `DROP FUNCTION` of the audit functions unless `session_user` is a
-superuser (`pg_roles.rolsuper`). A module's own trigger on an audited table
-remains manageable by `datum_migrate`. Membership in `datum_owner` grants
-nothing here: `datum_owner` cannot log in, and the migrate login is the
-role the defence exists against. Reverse migrations that must drop
-audit triggers on audited tables run under the bootstrap superuser
-(`TestDb` already migrates down through it; call
-`datum_audit::uninstall_privileged` first).
-
-## Export
-
-`export::bundle` writes `events.ndjson`, `events.csv`, `seals.ndjson`,
-`manifest.json`, and `dictionary.md`. `report.pdf` is `datum-print`
-(Wave 2b); the manifest lists it as absent.
+Frozen: `attach`, `install_privileged`, `require_context` (inv. 3, 4, 5, 17).
+`report.pdf` in the export bundle is `datum-print` (Wave 2b); the manifest lists
+it as absent. `Error::Unimplemented` is that PDF hook. Event-trigger create is
+superuser-only; migrations run as `datum_migrate`, then `install_privileged`.
