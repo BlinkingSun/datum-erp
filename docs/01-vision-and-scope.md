@@ -33,20 +33,28 @@ manufacturers never have to see the regulated parts.
 Three claims, in priority order.
 
 **It is modular in a way that matters.** The core knows about items, inventory,
-orders, and work. It does not know what a medical device is. Everything specific to a
-regulated industry, and eventually everything specific to any industry, is a module
-that can be switched off. A job shop making motorcycle brackets and a contract
-manufacturer making bone screws run the same core with different modules enabled.
+orders, and work. It does not know what a medical device is. Regulated workflows, and
+eventually anything specific to any industry, are modules that can be switched off.
+Regulated record properties are kernel, and they stay on. A job shop making motorcycle
+brackets and a contract manufacturer making bone screws run the same core with
+different modules enabled.
 
 **It treats compliance as architecture rather than as a feature.** Audit trails,
 electronic signatures, record immutability, and lot genealogy are properties of the
 kernel, present from the first commit, applying automatically to every module
-including ones nobody has written yet. This is the one thing that cannot be retrofitted
-and the one thing every existing open source ERP got wrong.
+including ones nobody has written yet. This is the one thing that cannot be retrofitted.
+No open source ERP has a compliant electronic signature. The closest comparable
+project's change tracking is opt-in per record type, and its history rows are
+deletable by an administrator. See `_team/reports/sweep-plan-competitive.md`.
 
-**It runs anywhere with nothing to install.** One binary per platform, on macOS,
-Windows, and Linux. A shop should be able to download a file, double-click it, and
-have a working system on a spare machine within ten minutes.
+**It installs next to a PostgreSQL the operating system already owns.** One binary per
+platform, on macOS, Windows, and Linux. On a machine that already runs PostgreSQL 16 or
+later, a shop installs Datum and is entering data in under ten minutes, with no database
+administrator and no container runtime. On a bare machine the honest number is thirty
+minutes, because PostgreSQL is installed first from its own platform installer. An
+evaluator who wants to see the product before installing anything runs one downloaded
+file and is looking at seeded data in under five minutes, on a throwaway database that
+cannot become a production one.
 
 ## 3. Who it is for
 
@@ -61,7 +69,9 @@ This shop today is doing one of four things, all of them bad.
    electronic quality system, plus spreadsheets to reconcile them.
 2. Running a paper quality system alongside an ERP, which means the audit trail lives
    in binders.
-3. Paying $40,000 to $150,000 a year for an integrated commercial suite.
+3. Paying for an integrated commercial suite. Counted contracts put Arena at about
+   $48,700 a year, Greenlight Guru about $44,000, and MasterControl about $115,700.
+   See `_team/reports/spike-landscape.md`.
 4. Running entirely on spreadsheets and hoping the next audit goes well.
 
 **Why this beachhead.** It is the hardest target, and hard targets are defensible. A
@@ -102,10 +112,15 @@ Every question an auditor asks spans the seam. Closing it is the product.
 A fuller competitive assessment lives in `08-competitive-landscape.md`. The short
 version of the design consequences:
 
-**Against general open source ERP.** Quality is a first-class subsystem rather than a
-bolt-on. Audit trail and electronic signature are kernel properties rather than
-add-ons. Lot and serial genealogy is a designed capability rather than a report you
-write yourself.
+**Against general open source ERP.** Quality is deeper than what already ships, not
+absent from it. ERPNext ships quality inspection and non-conformance in core. Odoo
+Enterprise has a quality app. Tryton has one. Ours is meant to go further: CAPA, a
+Device History Record assembled from the same postings, training veto, calibration
+impact. That depth is a Phase 4 promise rather than a present fact. Audit trail and
+electronic signature are kernel properties rather than add-ons. Lot and serial
+genealogy is a graph over the ledger rather than a report you write yourself. ERPNext
+already ships a serial and batch traceability report. The graph is a better design,
+not a missing capability.
 
 **Against commercial regulated suites.** Open source, self-hosted, no per-seat pricing,
 and no vendor holding a shop's quality records hostage. The validation package ships
@@ -113,11 +128,14 @@ with the release rather than costing a five-figure consulting engagement.
 
 **Against building it yourself in spreadsheets.** It survives the audit.
 
-**One unfair advantage worth naming.** This project is being started by someone who
-already builds CAD tooling: mesh to B-Rep conversion, STEP to DXF profile extraction,
-and a CAD application. A CAD-native ERP that can ingest a STEP file, pull features and
-material volume out of it, and use that to seed an estimate is something no ERP on the
-market does well. That is a later-phase module, but the core should not make it hard.
+**CAD-native estimating is a genuine later-phase capability, not an unfair advantage.**
+This project is being started by someone who already builds CAD tooling: mesh to B-Rep
+conversion, STEP to DXF profile extraction, and a CAD application. A CAD-native ERP that
+can ingest a STEP file, pull features and material volume out of it, and use that to
+seed an estimate remains a genuine capability for an open source, self-hosted system.
+It is a Phase 7 module. It is not an unfair advantage. Paperless Parts already owns
+CAD-to-estimate for job shops and medical device contract manufacturers, and it already
+integrates with JobBOSS, ProShop, and Epicor. The core should not make the module hard.
 See the `cad` module in `04-module-catalog.md`.
 
 ## 6. Non-goals
@@ -144,8 +162,18 @@ Stating these plainly now saves arguments later.
 
 Concrete tests, in rough order of when they become answerable.
 
-1. A shop can install it on any of three operating systems in under ten minutes with
-   no database administrator and no container runtime.
+1. **Install.** On a machine that already runs PostgreSQL 16 or later, a shop installs
+   Datum and is entering data in under ten minutes, on any of three operating systems,
+   with no database administrator and no container runtime. On a bare machine the honest
+   number is thirty minutes, because PostgreSQL is installed first from its own platform
+   installer — one administrator prompt on Windows, one package manager command on
+   Linux, one Homebrew formula on macOS — and the shop is told exactly which version,
+   which download, and what to click. Datum's first-run wizard does every remaining step
+   itself: it finds the cluster, creates the database, the roles and the grants, runs the
+   migrations, and verifies them. Nobody writes a connection string and nobody runs
+   `psql`. An evaluator who wants to see the product before installing anything runs one
+   downloaded file and is looking at seeded data in under five minutes, on a throwaway
+   database that is built so it cannot become a production one.
 2. A machinist can log in at a work order, scan a traveler, log time, and report scrap
    in under fifteen seconds, on a tablet, with gloves on.
 3. Given a finished device serial number, the system produces the complete genealogy,
@@ -173,8 +201,6 @@ Things that genuinely are not decided. Tracked here rather than pretended away.
 - **Where the eQMS boundary actually sits.** Document control and training records are
   clearly in. Design controls and the Design History File are probably out. Internal
   audit management is genuinely unclear.
-- **Whether to bundle a database or require one.** Affects the ten-minute install test
-  directly. See `adr/0003-database.md`.
 - **How modules are distributed.** Compiled in, or loaded at runtime. See
   `03-module-system.md`.
 

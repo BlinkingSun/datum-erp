@@ -40,12 +40,14 @@ The specific conditions that should reopen this.
 |---|---|---|
 | [0001](0001-modular-monolith.md) | Modular monolith, not microservices | Proposed |
 | [0002](0002-backend-language.md) | Rust for the backend | Proposed |
-| [0003](0003-database.md) | PostgreSQL, bundled with the installer | Proposed |
+| [0003](0003-database.md) | PostgreSQL, installed and managed by the operating system | Accepted, amended |
 | [0004](0004-append-only-ledger.md) | All quantities and values are derived from an append-only ledger | Proposed |
 | [0005](0005-compliance-in-kernel.md) | Audit trail and electronic signature live in the kernel | Proposed |
 | [0006](0006-license.md) | License | **Open — needs a decision** |
 | [0007](0007-defer-general-ledger.md) | Do not build a general ledger | Proposed |
-| [0008](0008-single-tenant.md) | Single-tenant self-hosted, not multi-tenant SaaS | Proposed |
+| [0008](0008-single-tenant.md) | Single tenant per installation; residency is an installation property | Proposed |
+| [0009](0009-ui-stack.md) | TypeScript and React for the UI, Tauri for the desktop shell | Proposed |
 
-Nothing here is Accepted yet. Proposed means it is the current recommendation and the
-docs are written as though it holds. Moving to Accepted is a deliberate act.
+0003 is Accepted, as amended. Everything else that is not open is Proposed. Proposed
+means it is the current recommendation and the docs are written as though it holds.
+Moving to Accepted is a deliberate act.

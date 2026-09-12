@@ -36,7 +36,7 @@ retrofitted. See `02-architecture.md` section 2.
 | Component | Size | Notes |
 |---|---|---|
 | Identity, authentication, RBAC | M | Argon2id, sessions, optional OIDC, permissions declared by modules |
-| Audit trail | M | Produced by the persistence layer so module code cannot forget or falsify it |
+| Audit trail | M | Written by a database trigger attached at table creation, so module code never writes one and cannot forget or falsify it |
 | Electronic signature | M | Bound to a record version by hash, captures meaning, re-authenticates |
 | Ledger engine | L | Postings, groups, the balance-to-zero constraint, projections, rebuild |
 | State machine engine | M | Declarative states and transitions, uniformly audited and signable |
