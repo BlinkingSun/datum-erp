@@ -1,42 +1,44 @@
-//! Background jobs (stub API).
+//! Durable background jobs: enqueue in the caller transaction, workers as service principals.
 
-/// Crate error.
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum Error {
-    /// Not implemented.
-    #[error("unimplemented")]
-    Unimplemented,
-    /// Core error.
-    #[error(transparent)]
-    Core(#[from] datum_core::Error),
-    /// Database error.
-    #[error(transparent)]
-    Db(#[from] datum_db::Error),
-}
+pub mod error;
+pub mod events;
+pub mod handler;
+pub mod progress;
+pub mod queue;
+mod sql;
+pub mod worker;
 
-/// Crate result alias.
-pub type Result<T> = core::result::Result<T, Error>;
+pub use error::{Error, Result};
+pub use handler::{HandlerOutcome, JobHandler, Registry};
+pub use progress::Progress;
+pub use queue::{
+    DEFAULT_MAX_ATTEMPTS, EnqueueOptions, JobState, JobStatus, cancel, enqueue, progress, status,
+};
+pub use worker::{Worker, register_maintenance};
 
-/// Embedded placeholder migrator.
+use datum_core::{Actor, Identifier};
+
+/// Embedded migrator (`placeholder` + `0001_jobs`).
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
 /// Job id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct JobId(pub datum_core::Identifier);
+pub struct JobId(pub Identifier);
 
-/// Enqueue a job. Unimplemented.
-pub async fn enqueue(
-    _tx: &mut datum_db::Tx<'_>,
-    _run_at: chrono::DateTime<chrono::Utc>,
-) -> Result<JobId> {
-    let _ = core::any::type_name::<datum_events::Error>();
-    Err(Error::Unimplemented)
+impl JobId {
+    /// Underlying identifier.
+    pub fn id(self) -> Identifier {
+        self.0
+    }
 }
+
+/// Named service principal for background work ([`Actor`] with [`ActorKind::ServicePrincipal`]).
+pub type ServicePrincipal = Actor;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use datum_audit as _;
     use proptest::prelude::*;
     use tokio as _;
 
@@ -46,8 +48,9 @@ mod tests {
     }
 
     #[test]
-    fn migrator_has_placeholder() {
-        assert!(!MIGRATOR.migrations.is_empty());
+    fn migrator_has_jobs_migration() {
+        assert!(MIGRATOR.migrations.len() >= 2);
+        assert!(MIGRATOR.iter().any(|m| m.version == 1));
     }
 
     #[test]
