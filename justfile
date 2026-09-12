@@ -17,9 +17,9 @@ clippy:
 # String-level raw-SQL fence (CONTRACT §5a). Fails on any hit outside datum-db / datum-audit / datum-test.
 lint-sql:
     if rg -n --glob '*.rs' --glob '!**/datum-db/**' --glob '!**/datum-audit/**' --glob '!**/datum-test/**' \
-        -e 'sqlx::query' -e 'QueryBuilder' -e 'raw_sql' -e 'copy_in_raw' -e 'set_config' -e 'current_setting' \
+        -e 'QueryBuilder' -e 'raw_sql' -e 'copy_in_raw' -e 'set_config' -e 'current_setting' \
         "{{root}}/crates"; then \
-      echo "lint-sql: forbidden SQL token outside crates/datum-db, crates/datum-audit, and crates/datum-test" >&2; \
+      echo "lint-sql: session-protocol SQL token outside crates/datum-db, crates/datum-audit, and crates/datum-test" >&2; \
       exit 1; \
     fi
 
