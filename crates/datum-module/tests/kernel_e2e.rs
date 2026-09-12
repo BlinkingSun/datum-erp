@@ -483,21 +483,21 @@ async fn composed_path(db: &datum_test::TestDb, profile: Profile, rebuild_projec
     assert_eq!(recv_postings, 4, "receive group {recv_group} posting count");
 
     let mut tx = Tx::begin(&write, &recv_ctx).await.expect("immut tx");
-    let err = tx
-        .execute(
-            sqlx::query("UPDATE uom.item_stock SET stock_scale = 2 WHERE item_id = $1")
-                .bind(item.as_uuid()),
-        )
-        .await
-        .expect_err("stock unit immutable while ledger.posting rows exist");
-    let code = match &err {
-        datum_db::Error::Sqlx(e) => e
-            .as_database_error()
-            .and_then(|d| d.code().map(|c| c.into_owned()))
-            .unwrap_or_default(),
-        other => other.to_string(),
-    };
-    assert_eq!(code, "23514", "got {err}");
+    let err = datum_uom::update_item_stock(
+        &mut tx,
+        item,
+        datum_uom::ItemStockMeasure {
+            stock_unit: EA,
+            stock_scale: 2,
+            residual_tolerance: Decimal::ZERO,
+        },
+    )
+    .await
+    .expect_err("stock unit immutable while ledger.posting rows exist");
+    assert!(
+        matches!(err, datum_uom::Error::StockMeasureImmutable),
+        "got {err:?}"
+    );
     tx.rollback().await.expect("rollback immut");
 
     let mut tx = Tx::begin(&write, &recv_ctx).await.expect("uom/event tx");
