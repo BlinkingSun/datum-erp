@@ -25,9 +25,12 @@ Read this section first if you read v1.
    before anything works end to end. v2 makes the slice the target: the kernel batches are
    ordered by what the slice needs, and the four crates the slice does not need
    (`datum-esign`, `datum-documents`, `datum-print`, `datum-customfields`) move to Wave 2b,
-   after the slice runs on real data. Nothing regulated is lost: those four are workflows
-   and mechanisms, and the record properties they rely on (identity lifecycle, server time,
-   audit trigger, version stamping, no deletes) are all in the batches that precede them.
+   after the slice runs on real data. What is preserved is precise: the **row properties**
+   built in batches 2.1–2.5 (identity lifecycle, server time, audit trigger and chain, version
+   stamping, no hard deletes of records, constrained lot and serial identifiers, package
+   hierarchy, expiry precision). What is **gated on Wave 2b**, and must not be claimed before
+   it: 11.50(b) signature manifestation and archival print, 11.200 two-component signature
+   minting, controlled documents, and custom fields. The slice is unsigned by declaration.
 4. **A second trait inversion.** `PostingSink` (from the plan audit) removes the
    statemachine/ledger cycle. v2 adds `SignatureGate` in `datum-core` so that a state
    transition that requires a signature asks a trait, not `datum-esign` directly. This
@@ -50,7 +53,10 @@ Read this section first if you read v1.
    are carried into the specs: five roles, two connection URLs, a raw-SQL fence, and a real
    `Tx::begin` in the `datum-db` stub; per-test databases from a template; two contested
    points (money column scale, the application role's DELETE grant) went to the decision
-   authority as `DECISION-w1-contracts.md`; invariant 19 added. The owner's stated goal is a
+   authority as `DECISION-w1-contracts.md`; invariant 19 added. The two core traits were
+   completed after the traits slice: consumption edges, a group header, one finalize point,
+   and a content hash on the signature token, with the state machine obliged to call the
+   gate from edge metadata (CONTRACT §6.2–6.3). The owner's stated goal is a
    system that replaces their company's ERP *and* can be configured for other kinds of
    business. The module system was already designed for that; v2 makes the plain-shop
    profile an acceptance target rather than an implication.
@@ -89,11 +95,18 @@ and an open source system another company in another trade can configure for its
 matters here: *a shop can run only what it needs; a bracket shop never sees a CAPA
 screen.* What v2 adds is an acceptance target, so the claim is tested rather than assumed:
 
-- **Two installation profiles ship from the first release**, expressed purely as the set
-  of enabled modules and declarative configuration: `regulated-device` (the beachhead)
-  and `plain-shop` (no regulated module enabled, no signature requirement on any
-  transition, no validation manifest surfaced). The kernel's record properties are
-  identical in both; they are invisible and cost nothing when unused.
+- **Two installation profiles ship from the first release.** A profile is **runtime
+  enablement of compiled-in modules** plus declarative configuration (`docs/03` §5 Phase 1
+  and §6 lifecycle): one binary, one license, one schema, never a second build.
+  `regulated-device` (the beachhead) enables the regulated modules and declares
+  signature-bearing transitions; `plain-shop` enables no module marked `regulated = true`
+  and declares no signature requirement on any transition. The kernel's record properties
+  are identical in both and always on: the audit trigger and hash chain, server-side time,
+  attributable actors, no hard deletes of records, version stamping, the constrained lot
+  and serial identifier, and the audit export. A plain shop sees none of it in its screens
+  and pays for it only in storage; it is not free and the plan does not say it is. The
+  profile definitions are frozen in `_team/specs/SPEC-profiles.md` before Wave 2s and
+  consumed by `datum-module` and `server-slice`.
 - Wave 3's phase-end test runs the whole-program API test under **both** profiles.
 - **No customer-specific code, ever** (invariant 18). Anything the owner's own company
   needs that another shop would not is configuration or a module, never a branch.
@@ -203,8 +216,15 @@ batch run in parallel.
 | 2.2 | `datum-audit` | Nothing else may create a table before the trigger attachment exists, or its writes go unaudited. Includes the hash chain. |
 | 2.3 | `datum-identity`, `datum-numbering`, `datum-uom`, `datum-events` | Independent of each other. Identity reserves the separable signing credential (invariant 14) now, so Wave 2b adds no column to a table with history. |
 | 2.4 | `datum-ledger` | **The gate.** Deep audit, doubled, rework race pre-declared. Wave 2 does not close until the property suite in §7 passes in commit mode with the canary armed. |
-| 2.5 | `datum-statemachine`, `datum-jobs` | The work order needs states; background work needs a named service principal. Statemachine depends on `SignatureGate`, not on `datum-esign`. |
-| 2.6 | `datum-module` (minimal composition root) | Composes every crate above; never a parallel lane. |
+| 2.5 | `datum-statemachine`, `datum-jobs` | The work order needs states; background work needs a named service principal. Statemachine depends on `SignatureGate`, not on `datum-esign`. **`SPEC-statemachine.md` freezes the hook ABI** (`docs/03` §3.2): topological hook order, the time budget and its loud failure, the veto shape, one sink per transaction and the mandatory `verify` call from edge metadata. |
+| 2.6 | `datum-module` (minimal composition root) | Composes every crate above; never a parallel lane. Consumes `SPEC-profiles.md` (frozen after decision D-W1-5, before this batch). |
+
+Wave 2 specs are written one batch ahead: `SPEC-datum-db.md` and `SPEC-audit.md` at Wave 1
+integration, `SPEC-identity.md`, `SPEC-numbering.md`, `SPEC-uom.md`, `SPEC-events.md` when
+2.2 lands, `SPEC-ledger.md` when 2.3 lands, and so on. No batch is dispatched on prose; every
+lane has a spec with acceptance criteria an auditor can fail. Ownership of
+`crates/datum-server/**` is per wave: `ws-skeleton` owns the stub in Wave 1 and
+`server-slice` owns the crate from Wave 2s.
 
 ### Wave 2s — the vertical slice (the milestone that matters)
 
@@ -222,11 +242,41 @@ architecture and it is the screen that demonstrates the product.
 | `mod-genealogy` | Forward and backward trace over the ledger's consumption edges. Read-only. Returns the tree the mockup draws. |
 | `server-slice` | `datum-server`: HTTP API + OpenAPI for exactly the slice, both installation profiles, headless test script. |
 
-Acceptance for the slice, run headlessly against the API: receive a bar-stock lot under a
-supplier lot; release a work order; issue the bar; complete and receive a finished lot;
-trace forward from the mill heat and backward from the finished lot and get the same tree;
-rebuild every projection from scratch and get the same balances; the ledger property suite
-green with its canary case failing as designed.
+The slice runs in dependency order, not as one flat fan-out: 2s.1 `mod-items`,
+`mod-locations`, `mod-lots` (parallel); 2s.2 `mod-inventory`; 2s.3 `mod-production-min` and
+`mod-genealogy` (parallel); 2s.4 `server-slice`. Lots and serials are **kernel lot entities
+from the first posting** (invariants 10 and 11), never string columns; a slice that stores a
+lot as text has failed even if every screen works.
+
+Acceptance for the slice is a headless script against the API using the canonical example
+set, and it **must assert**, not merely perform:
+
+1. The mill heat and the bar-stock lot exist as lot entities with package hierarchy, and every
+   posting references the lot entity; receiving two cases posts as forty-eight pieces (inv. 11).
+2. A lot identifier with a lowercase letter, a space, or twenty-one characters is refused at
+   generation with a typed error (inv. 9).
+3. A serial is a unit within a lot, and a finished serial traces to its lot and its heat
+   (inv. 10).
+4. Material received into quarantine is not available to the work order until released;
+   the status change is a posting and an audit row, not an update (case b of the ledger
+   decision).
+5. The work-order completion is a priced `TRANSFORMATION` group whose consumption edges
+   reproduce the issued quantity and its money (case d; P3).
+6. A write with no transaction-local actor aborts and leaves nothing behind (inv. 5).
+7. A transition that declares a signature requirement refuses to run under `NoSignatures`
+   with a typed error, and the profile manifest lists that edge (unsigned-by-declaration is
+   visible, unsigned-by-accident is impossible).
+8. Forward trace from the heat and backward trace from the finished lot return the same tree.
+9. Every projection rebuilt from scratch equals the ledger fold, and any balance is
+   reconstructible at a past instant.
+10. The ledger property suite is green with its canary failing as designed, in commit mode.
+11. The whole script passes under both installation profiles, with the regulated profile
+    declaring the signature-bearing edge and the plain profile declaring none.
+12. A lot received with a month-only expiry keeps that precision through storage and the
+    API; no day is invented (inv. 12).
+13. Every mutating API step leaves exactly one audit row attributed to the acting identity,
+    stamped with the application and configuration versions (inv. 3, 5, 17); the versions
+    columns exist from batch 2.1, before the first item or lot row is ever written.
 
 ### Wave 2b — the remaining kernel crates (after the slice runs)
 
@@ -501,7 +551,7 @@ items. The Tauri shell, until ADR 0009's revisit condition fires.
 
 | Node | Role | State 2026-09-12 |
 |---|---|---|
-| MacBook (Apple Silicon) | **Primary build node.** All lanes, all worktrees, integration. | rustc 1.98.1 (pinned), cargo, PostgreSQL 17 (Homebrew, `/opt/homebrew/opt/postgresql@17`), `just`, `sqlx-cli`, node 26. |
+| MacBook (Apple Silicon) | **Primary build node.** All lanes, all worktrees, integration. | named toolchain `1.98.1` with rustfmt and clippy installed (plus stable 1.98.1), cargo, PostgreSQL 17.11 (Homebrew, keg-only but linked; client path `$(brew --prefix postgresql@17)/bin`; loopback `trust`), `just`, `sqlx-cli` **0.9.0** (the crate is pinned to the 0.9 line to match), node 26. No docker. |
 | NUC (Linux, `ssh cnc`) | Linux CI node, single tenant. | No PostgreSQL, no docker. Provision before the first Linux CI round. |
 | Shop PC (Windows) | Windows CI node, single tenant. | Rust present from the v1 run; PostgreSQL unknown. Provision before the first Windows CI round. |
 
@@ -517,10 +567,11 @@ Conventions every lane must follow:
 - `dev/compose.yml` is the portable path for machines with a container runtime; on this
   MacBook the Homebrew service plays the same role and `dev/sql/` is applied to it. Both
   paths must produce the same roles and grants.
-- **LOCAL CI FIRST.** GitHub Actions stay **off** on every repository until the workflow
-  has passed on the MacBook, the NUC and the shop PC. The workflow file is written in
-  Wave 1 and exercised locally; it is enabled remotely only by the orchestrator after a
-  three-node green round.
+- **LOCAL CI FIRST** means the `just` recipes against the OS-managed PostgreSQL on each node
+  (`just ci`, then `just db-reset` and `just ci-db`), not the GitHub workflow file, which is
+  GitHub-shaped (a `postgres:17` service) and cannot run on nodes without docker. GitHub
+  Actions stay **off** on every repository until those recipes are green on the MacBook, the
+  NUC and the shop PC; the orchestrator enables them after a three-node green round.
 
 ## 12. Repository and publication
 
