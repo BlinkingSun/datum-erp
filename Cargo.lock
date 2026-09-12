@@ -609,6 +609,7 @@ dependencies = [
  "datum-test",
  "datum-uom",
  "proptest",
+ "rust_decimal",
  "serde",
  "serde_json",
  "sqlx",
