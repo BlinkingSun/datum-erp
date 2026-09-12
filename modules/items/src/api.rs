@@ -137,6 +137,26 @@ impl From<&Item> for ItemBody {
     }
 }
 
+/// Map crate errors to the `docs/10` §2.6 `code` token.
+pub fn error_code(err: &crate::Error) -> &'static str {
+    err.code()
+}
+
+/// HTTP status for [`error_code`] (`docs/10` §2.6).
+pub fn http_status(err: &crate::Error) -> u16 {
+    match err.code() {
+        "VALIDATION" => 400,
+        "UNAUTHENTICATED" => 401,
+        "FORBIDDEN" => 403,
+        "NOT_FOUND" => 404,
+        "CONFLICT" | "IDEMPOTENCY_CONFLICT" | "SIGNATURE_NO_PROVIDER" => 409,
+        "PAYLOAD_TOO_LARGE" => 413,
+        "RATE_LIMITED" => 429,
+        "TIMEOUT" => 504,
+        _ => 500,
+    }
+}
+
 /// OpenAPI 3 document generated from [`ROUTES`].
 pub fn openapi_document() -> Value {
     let mut paths = serde_json::Map::new();

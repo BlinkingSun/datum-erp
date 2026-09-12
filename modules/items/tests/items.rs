@@ -6,7 +6,7 @@ mod common;
 
 use datum_core::ItemId;
 use datum_db::Tx;
-use datum_ledger::load_stock_item;
+use datum_ledger::{has_postings, load_stock_item};
 use datum_mod_items::domain::number_is_valid;
 use datum_mod_items::{
     Kind, ListFilter, Status, UpdateItem, create, get, list, obsolete, release, update,
@@ -73,6 +73,10 @@ async fn stock_unit_immutable_after_first_posting() {
     let mut tx = Tx::begin(&write, &create_ctx(actor)).await.expect("begin");
     let item = create(&mut tx, &kernel, screw()).await.expect("create");
     post_one_receipt(&mut tx, item.id).await;
+    assert!(
+        has_postings(&mut tx, item.id).await.expect("ledger seam"),
+        "D2 R5 refusal is gated on datum_ledger::has_postings"
+    );
     tx.commit().await.expect("commit");
 
     let mut tx = Tx::begin(&write, &update_ctx(actor)).await.expect("begin2");
@@ -309,5 +313,62 @@ async fn writes_go_through_tx() {
         .await
         .expect("after");
     assert_eq!(after, before);
+    db.finish().await.expect("finish");
+}
+
+#[tokio::test]
+async fn revision_history_carries_version_stamps() {
+    let db = db_case!("items_rev_stamp");
+    let kernel = boot_kernel(&db).await;
+    let write = write_pool(&db);
+    let actor = actor_with_item_perms(&write).await;
+    let mut ctx = create_ctx(actor);
+    ctx.config_version = Some(kernel.profile.spec_version.clone());
+    let mut tx = Tx::begin(&write, &ctx).await.expect("begin");
+    let item = create(&mut tx, &kernel, screw()).await.expect("create");
+    tx.commit().await.expect("commit");
+
+    let row: (String, String) = sqlx::query_as(
+        "SELECT application_version, configuration_version
+           FROM items.item_revision_history
+          WHERE item_id = $1
+          ORDER BY recorded_at
+          LIMIT 1",
+    )
+    .bind(item.id.as_uuid())
+    .fetch_one(db.app_pool())
+    .await
+    .expect("history stamps");
+    assert!(
+        !row.0.is_empty(),
+        "application_version must be stamped on the revision row"
+    );
+    assert_eq!(row.0, datum_db::app_version());
+    assert!(
+        !row.1.is_empty(),
+        "configuration_version must be stamped on the revision row"
+    );
+    assert_eq!(row.1, kernel.profile.spec_version);
+    db.finish().await.expect("finish");
+}
+
+#[tokio::test]
+async fn duplicate_number_is_conflict() {
+    let db = db_case!("items_dup");
+    let kernel = boot_kernel(&db).await;
+    let write = write_pool(&db);
+    let actor = actor_with_item_perms(&write).await;
+    let mut tx = Tx::begin(&write, &create_ctx(actor)).await.expect("begin");
+    create(&mut tx, &kernel, screw()).await.expect("first");
+    let err = create(&mut tx, &kernel, screw())
+        .await
+        .expect_err("duplicate");
+    assert!(
+        matches!(err, datum_mod_items::Error::DuplicateNumber),
+        "got {err:?}"
+    );
+    assert_eq!(err.code(), "CONFLICT", "docs/10 uniqueness is 409 CONFLICT");
+    assert_eq!(datum_mod_items::error_code(&err), "CONFLICT");
+    tx.rollback().await.expect("rollback");
     db.finish().await.expect("finish");
 }

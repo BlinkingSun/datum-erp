@@ -39,6 +39,9 @@ pub enum Error {
     /// Item number failed the charset / length rule.
     #[error("item number must be A-Z, a-z, digits, hyphen, or '.', at most 40 characters")]
     InvalidNumber,
+    /// Item number already exists (`item_number_unique`).
+    #[error("item number already exists")]
+    DuplicateNumber,
     /// Client supplied an id on create.
     #[error("clients must not mint identifiers")]
     ClientMintedId,
@@ -73,5 +76,23 @@ pub enum Error {
 impl From<sqlx::Error> for Error {
     fn from(err: sqlx::Error) -> Self {
         Error::Db(err.into())
+    }
+}
+
+impl Error {
+    /// `docs/10` §2.6 `code` token.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Error::DuplicateNumber | Error::VersionConflict => "CONFLICT",
+            Error::NotFound(_) => "NOT_FOUND",
+            Error::InvalidNumber
+            | Error::ClientMintedId
+            | Error::InvalidLimit
+            | Error::StockMeasureImmutable
+            | Error::StandardCostRequired
+            | Error::InvalidTransition { .. }
+            | Error::Manifest(_) => "VALIDATION",
+            _ => "INTERNAL",
+        }
     }
 }

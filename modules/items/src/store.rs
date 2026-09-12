@@ -3,7 +3,7 @@
 use chrono::{DateTime, Utc};
 use datum_core::{Identifier, ItemId, UnitId};
 use datum_db::{Pool, Tx, WriteContext};
-use datum_ledger::{cost_method_from_sql, upsert_stock_item};
+use datum_ledger::{cost_method_from_sql, has_postings, upsert_stock_item};
 use datum_module::Kernel;
 use datum_statemachine::DocRef;
 use rust_decimal::Decimal;
@@ -290,16 +290,6 @@ async fn transition_to(
     Ok(())
 }
 
-/// Items-side `has_postings` (D2 R5). The ledger crate does not publish
-/// `registry::has_postings`; `items.item_has_postings` is the SECURITY DEFINER
-/// wrapper over `ledger.posting`.
-pub async fn has_postings(tx: &mut Tx<'_>, item: ItemId) -> Result<bool> {
-    let row: (bool,) = tx
-        .fetch_one(sqlx::query_as("SELECT items.item_has_postings($1)").bind(item.as_uuid()))
-        .await?;
-    Ok(row.0)
-}
-
 async fn load_in_tx(tx: &mut Tx<'_>, id: ItemId) -> Result<Item> {
     let row: Option<ItemRow> = tx
         .fetch_optional(sqlx::query_as(GET_SQL).bind(id.as_uuid()))
@@ -311,17 +301,27 @@ async fn load_in_tx(tx: &mut Tx<'_>, id: ItemId) -> Result<Item> {
 }
 
 async fn append_revision(tx: &mut Tx<'_>, item: ItemId, revision: &str) -> Result<()> {
+    let (app, cfg) = stamps(tx).await?;
     tx.execute(
         sqlx::query(
-            "INSERT INTO items.item_revision_history (id, item_id, revision)
-             VALUES ($1, $2, $3)",
+            "INSERT INTO items.item_revision_history
+                 (id, item_id, revision, application_version, configuration_version)
+             VALUES ($1, $2, $3, $4, $5)",
         )
         .bind(Uuid::now_v7())
         .bind(item.as_uuid())
-        .bind(revision),
+        .bind(revision)
+        .bind(&app)
+        .bind(&cfg),
     )
     .await?;
     Ok(())
+}
+
+async fn stamps(tx: &mut Tx<'_>) -> Result<(String, String)> {
+    let app = datum_db::app_version();
+    let cfg = tx.setting("datum.config_version").await?;
+    Ok((app, cfg))
 }
 
 fn doc_ref(id: ItemId) -> DocRef {
@@ -375,7 +375,7 @@ fn map_number_unique(err: datum_db::Error) -> Error {
     if let datum_db::Error::Sqlx(sql) = &err
         && sql.as_database_error().and_then(|d| d.constraint()) == Some("item_number_unique")
     {
-        return Error::InvalidNumber;
+        return Error::DuplicateNumber;
     }
     Error::Db(err)
 }

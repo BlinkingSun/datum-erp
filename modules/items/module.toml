@@ -18,14 +18,27 @@ regulated = false
 
 [[routes]]
 path = "/api/v1/items"
+method = "GET"
+permission = "items.view"
+
+[[routes]]
+path = "/api/v1/items"
+method = "POST"
+permission = "items.edit"
+
+[[routes]]
+path = "/api/v1/items/{id}"
+method = "GET"
 permission = "items.view"
 
 [[routes]]
 path = "/api/v1/items/{id}"
-permission = "items.view"
+method = "PATCH"
+permission = "items.edit"
 
 [[routes]]
 path = "/api/v1/items/{id}/release"
+method = "POST"
 permission = "items.release"
 
 [[machines]]

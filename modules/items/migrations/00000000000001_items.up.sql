@@ -63,22 +63,8 @@ ALTER TABLE items.item_revision_history OWNER TO datum_owner;
 COMMENT ON TABLE items.item_revision_history IS
   'Append-only revision log. Rows are never updated.';
 
--- Published has_postings seam: ledger.registry::has_postings is not on the
--- kernel surface; this SECURITY DEFINER wrapper is the items-side read.
-CREATE FUNCTION items.item_has_postings(p_item_id uuid) RETURNS boolean
-LANGUAGE plpgsql STABLE SECURITY DEFINER
-SET search_path = pg_catalog, items, ledger
-AS $items$
-BEGIN
-  IF to_regclass('ledger.posting') IS NOT NULL THEN
-    RETURN EXISTS (
-      SELECT 1 FROM ledger.posting p WHERE p.item_id = p_item_id
-    );
-  END IF;
-  RETURN false;
-END
-$items$;
-ALTER FUNCTION items.item_has_postings(uuid) OWNER TO datum_owner;
+-- D2 R5 is served by datum_ledger::has_postings (R-2s-3 / R-2s-8).
+-- Do not recreate items.item_has_postings here; 0002 drops any leftover.
 
 SELECT audit.attach('items.item'::regclass);
 SELECT audit.attach('items.item_revision_history'::regclass);
@@ -87,6 +73,5 @@ GRANT SELECT, INSERT, UPDATE ON TABLE items.item TO datum_app;
 GRANT SELECT, INSERT ON TABLE items.item_revision_history TO datum_app;
 REVOKE UPDATE, DELETE ON TABLE items.item_revision_history FROM datum_app, PUBLIC;
 REVOKE DELETE ON TABLE items.item FROM datum_app, PUBLIC;
-GRANT EXECUTE ON FUNCTION items.item_has_postings(uuid) TO datum_app, datum_owner, datum_migrate;
 
 ALTER SCHEMA items OWNER TO datum_owner;

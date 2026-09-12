@@ -21,7 +21,7 @@ pub mod hooks;
 pub mod states;
 pub mod store;
 
-pub use api::{ROUTES, openapi_document};
+pub use api::{ROUTES, error_code, http_status, openapi_document};
 pub use domain::{DOC_TYPE, Item, Kind, ListFilter, NewItem, Page, Status, UpdateItem};
 pub use error::{Error, Result};
 pub use states::item_machine;
@@ -29,7 +29,7 @@ pub use store::{create, get, list, obsolete, release, update};
 
 use datum_module::{KernelBuilder, ModuleManifest, Profile};
 
-/// Embedded migrator (`placeholder` + `0001_items`).
+/// Embedded migrator (`placeholder` + `0001_items` + `0002_drop_item_has_postings` + `0003_revision_history_stamps`).
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
 /// Parsed `module.toml`.
@@ -72,9 +72,18 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_number_code_is_conflict() {
+        assert_eq!(Error::DuplicateNumber.code(), "CONFLICT");
+        assert_eq!(error_code(&Error::DuplicateNumber), "CONFLICT");
+        assert_eq!(http_status(&Error::DuplicateNumber), 409);
+    }
+
+    #[test]
     fn migrator_has_placeholder() {
-        assert!(MIGRATOR.migrations.len() >= 2);
+        assert!(MIGRATOR.migrations.len() >= 4);
         assert!(MIGRATOR.iter().any(|m| m.version == 1));
+        assert!(MIGRATOR.iter().any(|m| m.version == 2));
+        assert!(MIGRATOR.iter().any(|m| m.version == 3));
     }
 
     #[test]
@@ -143,6 +152,86 @@ mod tests {
                 other => panic!("expected NotRequired, got {other:?}"),
             }
         }
+    }
+
+    #[test]
+    fn http_routes_declare_method_level_permissions() {
+        const EXPECTED: &[(&str, &str, &str)] = &[
+            ("GET", "/api/v1/items", "items.view"),
+            ("POST", "/api/v1/items", "items.edit"),
+            ("GET", "/api/v1/items/{id}", "items.view"),
+            ("PATCH", "/api/v1/items/{id}", "items.edit"),
+            ("POST", "/api/v1/items/{id}/release", "items.release"),
+        ];
+        assert_eq!(ROUTES.len(), EXPECTED.len());
+        for (route, (method, path, perm)) in ROUTES.iter().zip(EXPECTED) {
+            assert_eq!(route.method, *method, "ROUTES method for {}", route.path);
+            assert_eq!(route.path, *path);
+            assert_eq!(
+                route.permission, *perm,
+                "ROUTES permission for {method} {path}"
+            );
+        }
+
+        let toml_routes = parse_toml_routes(include_str!("../module.toml"));
+        assert_eq!(
+            toml_routes, EXPECTED,
+            "module.toml [[routes]] must match ROUTES"
+        );
+
+        let m = manifest().expect("module.toml");
+        let release = m
+            .machines
+            .iter()
+            .flat_map(|mach| &mach.edges)
+            .find(|e| e.name == "release")
+            .expect("release edge");
+        assert_eq!(release.permission, "items.release");
+    }
+
+    fn parse_toml_routes(toml: &str) -> Vec<(&str, &str, &str)> {
+        let mut out = Vec::new();
+        let mut path = None;
+        let mut method = None;
+        let mut permission = None;
+        let mut in_routes = false;
+        for line in toml.lines() {
+            let line = line.trim();
+            if line == "[[routes]]" {
+                if let (Some(p), Some(m), Some(perm)) = (path, method, permission) {
+                    out.push((m, p, perm));
+                }
+                path = None;
+                method = None;
+                permission = None;
+                in_routes = true;
+                continue;
+            }
+            if line.starts_with('[') && line != "[[routes]]" {
+                if in_routes && let (Some(p), Some(m), Some(perm)) = (path, method, permission) {
+                    out.push((m, p, perm));
+                }
+                in_routes = false;
+                path = None;
+                method = None;
+                permission = None;
+                continue;
+            }
+            if !in_routes {
+                continue;
+            }
+            if let Some(v) = line.strip_prefix("path = ") {
+                path = Some(v.trim_matches('"'));
+            } else if let Some(v) = line.strip_prefix("method = ") {
+                method = Some(v.trim_matches('"'));
+            } else if let Some(v) = line.strip_prefix("permission = ") {
+                permission = Some(v.trim_matches('"'));
+            }
+        }
+        if in_routes && let (Some(p), Some(m), Some(perm)) = (path, method, permission) {
+            out.push((m, p, perm));
+        }
+        out
     }
 
     use serde_json::Value;
