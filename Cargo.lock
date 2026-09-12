@@ -684,16 +684,20 @@ dependencies = [
 name = "datum-statemachine"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "datum-audit",
  "datum-core",
  "datum-db",
  "datum-identity",
  "datum-test",
  "proptest",
+ "rust_decimal",
  "serde",
  "sqlx",
  "thiserror",
  "tokio",
+ "trybuild",
+ "uuid",
 ]
 
 [[package]]
