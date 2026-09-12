@@ -817,6 +817,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "chrono",
  "clap",
  "datum-audit",
  "datum-core",
@@ -828,6 +829,12 @@ dependencies = [
  "datum-identity",
  "datum-jobs",
  "datum-ledger",
+ "datum-mod-genealogy",
+ "datum-mod-inventory",
+ "datum-mod-items",
+ "datum-mod-locations",
+ "datum-mod-lots",
+ "datum-mod-production-min",
  "datum-module",
  "datum-numbering",
  "datum-print",
@@ -835,6 +842,7 @@ dependencies = [
  "datum-test",
  "datum-uom",
  "proptest",
+ "rust_decimal",
  "serde",
  "serde_json",
  "sqlx",
@@ -843,6 +851,7 @@ dependencies = [
  "tower",
  "tower-http",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
