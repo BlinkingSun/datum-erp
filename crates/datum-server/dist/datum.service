@@ -1,0 +1,22 @@
+[Unit]
+Description=Datum ERP HTTP API
+Documentation=https://github.com/BlinkingSun/datum-erp
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=datum
+Group=datum
+Environment=DATUM_DATABASE_URL=postgres://datum_app@127.0.0.1:5432/datum?sslmode=disable
+Environment=DATUM_MIGRATE_DATABASE_URL=postgres://datum_migrate@127.0.0.1:5432/datum?sslmode=disable
+Environment=DATUM_BOOTSTRAP_URL=postgres://127.0.0.1:5432/postgres?sslmode=disable
+ExecStart=/usr/local/bin/datum serve --profile regulated-device --bind 0.0.0.0:8080
+Restart=on-failure
+RestartSec=5
+
+# Datum never owns the database. PostgreSQL is an external cluster (D5 / ADR 0003
+# as amended). This unit starts the API process only.
+
+[Install]
+WantedBy=multi-user.target

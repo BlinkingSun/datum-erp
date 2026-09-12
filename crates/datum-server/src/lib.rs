@@ -1,31 +1,42 @@
-//! HTTP API library surface. The binary does not bind a port in tests.
+//! HTTP API library. The binary binds a port; tests drive [`http::router`].
+
+#![cfg_attr(
+    test,
+    allow(clippy::unwrap_used, clippy::expect_used, unused_crate_dependencies)
+)]
 
 use anyhow as _;
-use axum::{Router, routing::get};
-use clap as _;
-use serde as _;
-use tower::ServiceBuilder;
-use tower_http::trace::TraceLayer;
+use datum_customfields as _;
+use datum_documents as _;
+use datum_esign as _;
+use datum_events as _;
+use datum_jobs as _;
+use datum_numbering as _;
+use datum_print as _;
+use datum_uom as _;
 
-/// Crate error.
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum Error {
-    /// Not implemented.
-    #[error("unimplemented")]
-    Unimplemented,
-    /// Core error.
-    #[error(transparent)]
-    Core(#[from] datum_core::Error),
-    /// Database error.
-    #[error(transparent)]
-    Db(#[from] datum_db::Error),
-}
+mod boot;
+mod cli;
+mod config;
+mod envelope;
+mod error;
+mod extract;
+mod handlers;
+mod http;
+mod idempotency;
+mod openapi;
+mod read;
+mod session;
+mod wire;
 
-/// Crate result alias.
-pub type Result<T> = core::result::Result<T, Error>;
+pub use boot::{App, AppState, build_kernel, migrate_slice_modules, run_iq, startup_guard_release};
+pub use config::{Config, bootstrap_against_app, rewrite_database, with_os_userinfo};
+pub use envelope::{ErrorBody, ListBody};
+pub use error::{Error, Result};
+pub use http::{router, serve};
+pub use openapi::{document as openapi_document, mounted_operations, registered_operations};
 
-/// Embedded placeholder migrator.
+/// Embedded migrator (`placeholder` + `0001_server`).
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
 /// Crate version.
@@ -33,47 +44,15 @@ pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
-/// Health handler. Async so it satisfies axum's `Handler` bound.
-async fn health() -> &'static str {
-    version()
-}
-
-/// Router that does not listen. Used so axum / tower / tracing stay linked.
-pub fn router() -> Router {
-    let _ = core::any::type_name::<datum_core::Error>();
-    let _ = core::any::type_name::<datum_db::Error>();
-    let _ = core::any::type_name::<datum_audit::Error>();
-    let _ = core::any::type_name::<datum_identity::Error>();
-    let _ = core::any::type_name::<datum_numbering::Error>();
-    let _ = core::any::type_name::<datum_uom::Error>();
-    let _ = core::any::type_name::<datum_events::Error>();
-    let _ = core::any::type_name::<datum_jobs::Error>();
-    let _ = core::any::type_name::<datum_ledger::Error>();
-    let _ = core::any::type_name::<datum_statemachine::Error>();
-    let _ = core::any::type_name::<datum_esign::Error>();
-    let _ = core::any::type_name::<datum_customfields::Error>();
-    let _ = core::any::type_name::<datum_documents::Error>();
-    let _ = core::any::type_name::<datum_print::Error>();
-    let _ = core::any::type_name::<datum_module::Error>();
-    let _ = serde_json::json!({ "version": version() });
-    let _ = tracing::info_span!("router");
-    let _ = core::any::type_name::<tokio::runtime::Runtime>();
-    Router::new()
-        .route("/health", get(health))
-        .layer(ServiceBuilder::new().layer(TraceLayer::new_for_http()))
-}
-
-/// Composition entry. Unimplemented.
-pub fn serve() -> Result<()> {
-    let _ = router();
-    Err(Error::Unimplemented)
+/// CLI entry used by the `datum` binary.
+pub async fn run_cli() -> Result<()> {
+    cli::run().await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use proptest::prelude::*;
-    use tokio as _;
 
     #[test]
     fn unimplemented_formats() {
@@ -82,7 +61,7 @@ mod tests {
 
     #[test]
     fn migrator_has_placeholder() {
-        assert!(!MIGRATOR.migrations.is_empty());
+        assert!(MIGRATOR.migrations.len() >= 2);
     }
 
     #[test]
@@ -93,6 +72,7 @@ mod tests {
     #[test]
     fn postgres_helper_is_callable() {
         let _ = datum_test::postgres_available();
+        let _ = crate::idempotency::body_hash(b"{}");
     }
 
     proptest! {
