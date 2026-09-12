@@ -39,3 +39,5 @@ thiserror.workspace = true
 datum-test.workspace = true
 tokio.workspace = true
 proptest.workspace = true
+rust_decimal.workspace = true
+serde_json.workspace = true

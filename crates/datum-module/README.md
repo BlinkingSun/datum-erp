@@ -1,53 +1,51 @@
 # datum-module
 
-Composition root: module registry, profiles, and kernel wiring. Wires
-`datum_core::PostingSink` (`datum_ledger::GroupBuilder`) and
-`datum_core::SignatureGate` (`NoSignatures` until `datum-esign`).
+Composition root: module registry, installation profiles, and the assembled
+`Kernel` handle Wave 2s (`datum-server` / first-party modules) drives.
+Frozen public API for Wave 2s.
 
-## Public API (`src/lib.rs`)
+## What this crate owns
 
-- `ConfigurationManifest` / `ManifestModule` / `export_manifest` / `verify` — `docs/03` §8 dump
-- `Error` / `Result`
-- `Kernel` — `build`, `posting_sink`, `signature_gate`, `gate_is_noop`, `hook_order`, `module_order`, `catalog`, `profile_id`
-- `edges_from_registry` / `module_nodes` / `posting_sink` / `startup_fails_if_required_meets_no_signatures`
-- `ModuleManifest` / `compiled_in` / `compiled_in_graph`
-- `CONTRACT_KERNEL_EDGES` / `KERNEL_ORDER` / `MIGRATE_PREFIX` — CONTRACT §4 graph
-- `ModuleNode` / `topological_order` / `is_topological_sort`
-- `kernel_crates` / `kernel_migrators` / `migrate_prefix` / `migrate_suffix` / `run_migrations` / `attach_kernel_audit`
-- `DELTA_ALLOWED` / `GateBinding` / `Profile` / `ProfileId` / `ProfileModule` / `SignatureEdge`
-- `delta_keys` / `profile_does_not_rewrite_edges`
-- `InstalledRow` / `install` / `uninstall` / `enable` / `disable` / `upgrade` / `list_installed`
-- `Range` / `Version` — semver for manifests
-- `manifest_export` — `export` / `verify` / `ConfigurationManifest`
-- `MIGRATOR` — `placeholder` + `0001_module`
+- Parsed `module.toml` (`ModuleManifest`) and the two
+  installation profiles (`profiles/regulated-device.toml`,
+  `profiles/plain-shop.toml`).
+- Lifecycle: `install` / `enable` / `disable` / `upgrade` against
+  `module.installed` (`docs/03` §6). Disable never drops; disabling a depended-on
+  module is refused with the dependents named.
+- `KERNEL_ORDER` and `run_migrations` / `migrate_prefix` / `migrate_suffix`.
+- Configuration manifest export/verify (`docs/03` §8).
+- The composed kernel path (ADDENDUM 1).
 
-## Migrations
+## Kernel (Wave 2s)
 
-- `00000000000000_placeholder` — no-op
-- `00000000000001_module` — schema `module` (app): `module.installed`,
-  `module.configuration`, `module.install_log`
+```text
+Kernel::builder(pool, profile)
+    .register_machine(machine)?          // before freeze
+    .register_hook(module, doc, edge, h) // before freeze
+    .apply_manifest(&module_toml)?       // machines, routes, events, jobs
+    .build().await?                      // freeze, persist, gate, events, jobs
 
-## Tests (`tests/`)
+Kernel::build(pool, profile).await?      // same, compiled-in catalog only
+```
 
-- `kernel_order_is_a_topological_sort_of_contract_graph`
-- `both_profiles_carry_eleven_keys_and_load` / `profiles_delta_is_subset_of_allowed_keys`
-- `plain_shop_required_signature_set_is_empty` / `signature_edges_come_from_registry_not_toml`
-- `startup_fails_release_required_edge_with_no_signatures`
-- `hook_order_matches_statemachine_hook_order`
-- `schema_history_trigger_is_present`
-- `install_runs_migrations_in_one_transaction_and_records`
-- `enable_closes_over_dependencies` / `disable_depended_on_module_is_refused_naming_dependents`
-- `disable_never_drops_tables` / `manifest_hash_changes_when_enabled_set_changes`
-- `configuration_manifest_round_trips_and_verifies` / `writes_go_through_tx`
-- `list_installed_after_kernel_build`
+| Method | Role |
+|---|---|
+| `Kernel::spawn` | `Engine::spawn` after freeze |
+| `Kernel::transition` | wraps the executor with the profile `SignatureGate`; one `GroupBuilder` is `bind_tx`'d, hooks contribute, `datum_ledger::post` writes the group in the same `Tx` |
+| `Kernel::signature_gate` | bound from the profile TOML `gate` field (`NoSignatures` until `datum-esign`) |
+| `Kernel::posting_sink` / `bind_sink` | `PostingSink` factory; unfinalized Drop poisons via `datum_ledger::commit` |
+| `Kernel::to_stock` / `convert` | `datum_uom` on the caller's `Tx` (a lot factor pinned earlier in that `Tx` is honoured) |
+| `Kernel::publish_event` | outbox insert in the caller's `Tx` |
+| `Kernel::dispatch_tick` / `worker_tick` | live events dispatcher + jobs worker as the service principal |
+| `export_manifest` / `verify` | hashed configuration manifest |
 
-## Frozen / seams
+Registries (machines, routes, event subscriptions, job kinds, permissions) are
+populated from module manifests (`docs/03` §2 / §3), not from constants in this
+crate. `Kernel::build` freezes only after every enabled module has registered.
+Registration after freeze is `datum_statemachine::Error::Frozen`.
 
-Frozen: `KERNEL_ORDER` / `CONTRACT_KERNEL_EDGES` (CONTRACT §4), `posting_sink`
-factory, `startup_fails_if_required_meets_no_signatures` (CONTRACT §6.3).
-Seams (FINDINGS-0 #1/#2): `Kernel::build` freezes with zero `register_machine`;
-gate is `NoSignatures` (Wave 2b `datum-esign`); profile `gate` TOML field is not
-the bound gate; `enable` has no profile check; key-10 currency/UOM/tz discarded;
-`enable_genealogy_bridge` unused; `install` is registry DML, not module migrations
-in the install Tx. `0001_module.down.sql` exists; no `migrate_down_then_up`
-(FINDINGS-0 #4).
+`enable_genealogy_bridge` is wired when `mod-genealogy` is enabled; worker ticks
+run `genealogy.refresh` under the system service principal.
+
+Writes go through `datum_db::Tx`. Session-protocol SQL stays out of this crate
+(CONTRACT §5a / §5a.1).

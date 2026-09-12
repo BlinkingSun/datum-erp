@@ -2,7 +2,11 @@
 
 #![allow(dead_code, unused_imports)]
 
-use datum_db::WritePool;
+use datum_core::{Actor, ActorKind, Identifier};
+use datum_db::{Tx, WriteContext, WritePool};
+use datum_identity::rbac::{RoleBundle, assign_role, seed_bundles};
+use datum_identity::{PrincipalKind, create_principal};
+use datum_statemachine::{DocRef, with_action};
 use sqlx::{PgPool, query_scalar as sql_query_scalar};
 
 use datum_module::{attach_kernel_audit, migrate_prefix, migrate_suffix};
@@ -119,4 +123,62 @@ regulated = true
 "#
     );
     datum_module::ModuleManifest::parse(&src).expect("regulated toy")
+}
+
+/// Principal holding `permission`, and a WriteContext for `doc`/`edge`.
+pub async fn actor_with_perm(
+    write: &WritePool,
+    permission: &str,
+    doc: &DocRef,
+    edge: &str,
+) -> (Actor, WriteContext) {
+    let slug = Identifier::generate().to_string();
+    let short: String = slug
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .take(12)
+        .collect();
+    let mut tx = Tx::begin(write, &boot_ctx()).await.expect("begin actor");
+    let p = create_principal(
+        &mut tx,
+        PrincipalKind::User,
+        &format!("u{short}"),
+        "Operator",
+    )
+    .await
+    .expect("principal");
+    let roles = seed_bundles(
+        &mut tx,
+        &[RoleBundle {
+            name: format!("r{short}"),
+            permissions: vec![permission.to_owned()],
+        }],
+    )
+    .await
+    .expect("role");
+    assign_role(&mut tx, p.id, roles[0]).await.expect("assign");
+    tx.commit().await.expect("commit actor");
+    let actor = Actor {
+        id: p.id.0,
+        kind: ActorKind::User,
+    };
+    let mut ctx = WriteContext::new(actor, "pending", "ui");
+    ctx.actor_display = Some("Operator".into());
+    ctx.reason = Some("module-glue-test".into());
+    let ctx = with_action(ctx, doc, edge);
+    (actor, ctx)
+}
+
+fn boot_ctx() -> WriteContext {
+    let mut ctx = WriteContext::new(
+        Actor {
+            id: Identifier::from_uuid(datum_identity::SYSTEM_ID),
+            kind: ActorKind::ServicePrincipal,
+        },
+        "module.boot",
+        "maintenance",
+    );
+    ctx.actor_display = Some("system".into());
+    ctx.reason = Some("module-test".into());
+    ctx
 }

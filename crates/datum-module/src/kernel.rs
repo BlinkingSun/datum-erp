@@ -1,20 +1,63 @@
-//! `Kernel::build`: wiring, seeds, freeze, startup guard.
+//! `Kernel::build`: wiring, seeds, freeze, spawn/transition glue, startup guard.
+
+use std::sync::Arc;
+use std::time::Duration;
 
 use datum_core::{
-    Actor, ActorKind, GroupKind, Identifier, NoSignatures, PermissionKey, PostingGroupHeader,
-    PostingSink, SignatureGate, SignatureMeaning, SignatureRequirement,
+    Actor, ActorKind, AnyQuantity, ConversionContext, Converted, Dimension, GroupKind, Identifier,
+    ItemId, NoSignatures, PermissionKey, PostingError, PostingGroupHeader, PostingHandle,
+    PostingIntent, PostingSink, Quantity, SignatureGate, SignatureMeaning, SignatureRequirement,
+    SignatureToken, UnitRef,
 };
 use datum_db::{Pool, Tx, WriteContext, WritePool};
 use datum_identity::{SYSTEM_ID, seed_builtins};
+use datum_jobs::{HandlerOutcome, JobHandler, Progress};
 use datum_ledger::GroupBuilder;
-use datum_statemachine::{EdgeBuilder, Engine, Machine, ManifestEdge};
+use datum_statemachine::{
+    DocRef, EdgeBuilder, Engine, HookPhase, HookView, Instance, Machine, ManifestEdge, Veto,
+};
+use serde_json::Value;
 
 use crate::config::persist_kernel_defaults;
-use crate::manifest::{ModuleManifest, compiled_in, compiled_in_graph, hex};
+use crate::manifest::{
+    ManifestMachine, ManifestSubscription, ModuleManifest, compiled_in, compiled_in_graph, hex,
+};
 use crate::order::{ModuleNode, topological_order};
 use crate::profile::{GateBinding, Profile, ProfileId, SignatureEdge};
 use crate::registry::{self, install, record_profile};
 use crate::{Error, Result};
+
+type HookFn =
+    Arc<dyn Fn(&HookView, &mut dyn PostingSink) -> core::result::Result<(), Veto> + Send + Sync>;
+
+struct PendingHook {
+    module_id: String,
+    doc_type: String,
+    edge: String,
+    phase: HookPhase,
+    budget_ms: u64,
+    handler: HookFn,
+}
+
+/// HTTP route contributed by a module manifest (`docs/03` §3.4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleRoute {
+    /// Owning module id.
+    pub module_id: String,
+    /// Path prefix.
+    pub path: String,
+    /// Permission that gates the route.
+    pub permission: String,
+}
+
+/// Job kind contributed by a module manifest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleJob {
+    /// Owning module id.
+    pub module_id: String,
+    /// Job kind.
+    pub kind: String,
+}
 
 /// Assembled kernel handle `datum-server` uses.
 pub struct Kernel {
@@ -28,15 +71,128 @@ pub struct Kernel {
     pub event_schemas: datum_events::SchemaRegistry,
     /// Job-kind registry.
     pub jobs: datum_jobs::Registry,
+    /// Routes populated from enabled module manifests (`docs/03` §3.4).
+    pub routes: Vec<ModuleRoute>,
+    /// Event subscriptions populated from enabled module manifests (`docs/03` §3.1).
+    pub subscriptions: Vec<ManifestSubscription>,
+    /// Job kinds populated from enabled module manifests.
+    pub job_kinds: Vec<ModuleJob>,
     /// Bound from the profile TOML `gate` field (SPEC-profiles key 4).
     gate: Box<dyn SignatureGate + Send + Sync>,
     catalog: Vec<ModuleManifest>,
+    pool: Pool,
+}
+
+/// Registration callback: machines and hooks are registered, then [`Kernel::build`] freezes.
+pub struct KernelBuilder {
+    pool: Pool,
+    profile: Profile,
+    extra_machines: Vec<Machine>,
+    extra_hooks: Vec<PendingHook>,
+    extra_routes: Vec<ModuleRoute>,
+    extra_subs: Vec<ManifestSubscription>,
+    extra_jobs: Vec<ModuleJob>,
+}
+
+impl KernelBuilder {
+    /// Start a builder against an already-migrated app pool.
+    pub fn new(pool: Pool, profile: Profile) -> Self {
+        Self {
+            pool,
+            profile,
+            extra_machines: Vec::new(),
+            extra_hooks: Vec::new(),
+            extra_routes: Vec::new(),
+            extra_subs: Vec::new(),
+            extra_jobs: Vec::new(),
+        }
+    }
+
+    /// Register a machine before freeze (signature-bearing edges included).
+    pub fn register_machine(&mut self, machine: Machine) -> Result<&mut Self> {
+        self.extra_machines.push(machine);
+        Ok(self)
+    }
+
+    /// Register a hook against `(module, doc_type, edge)` before freeze.
+    ///
+    /// Runs as [`HookPhase::After`] with a 50 ms budget. The module id must be
+    /// in the compiled-in dependency graph.
+    pub fn register_hook<F>(
+        &mut self,
+        module_id: impl Into<String>,
+        doc_type: impl Into<String>,
+        edge: impl Into<String>,
+        handler: F,
+    ) -> &mut Self
+    where
+        F: Fn(&HookView, &mut dyn PostingSink) -> core::result::Result<(), Veto>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.extra_hooks.push(PendingHook {
+            module_id: module_id.into(),
+            doc_type: doc_type.into(),
+            edge: edge.into(),
+            phase: HookPhase::After,
+            budget_ms: 50,
+            handler: Arc::new(handler),
+        });
+        self
+    }
+
+    /// Fold extension points out of a parsed manifest (test modules; Wave 2s crates).
+    pub fn apply_manifest(&mut self, manifest: &ModuleManifest) -> Result<&mut Self> {
+        for m in &manifest.machines {
+            self.extra_machines.push(machine_from_decl(m)?);
+        }
+        for r in &manifest.routes {
+            self.extra_routes.push(ModuleRoute {
+                module_id: manifest.id.clone(),
+                path: r.path.clone(),
+                permission: r.permission.clone(),
+            });
+        }
+        self.extra_subs
+            .extend(manifest.subscriptions.iter().cloned());
+        for j in &manifest.jobs {
+            self.extra_jobs.push(ModuleJob {
+                module_id: manifest.id.clone(),
+                kind: j.kind.clone(),
+            });
+        }
+        Ok(self)
+    }
+
+    /// Freeze after every enabled module has registered, persist, bind gate, wire events/jobs.
+    pub async fn build(self) -> Result<Kernel> {
+        Kernel::assemble(self).await
+    }
 }
 
 impl Kernel {
     /// Construct the composition root against an already-migrated app pool.
     pub async fn build(pool: &Pool, profile: Profile) -> Result<Self> {
+        KernelBuilder::new(pool.clone(), profile).build().await
+    }
+
+    /// Builder so modules can register machines/hooks before freeze.
+    pub fn builder(pool: Pool, profile: Profile) -> KernelBuilder {
+        KernelBuilder::new(pool, profile)
+    }
+
+    async fn assemble(parts: KernelBuilder) -> Result<Self> {
         hold_wave2b_edges();
+        let KernelBuilder {
+            pool,
+            profile,
+            extra_machines,
+            extra_hooks,
+            extra_routes,
+            extra_subs,
+            extra_jobs,
+        } = parts;
         let write = WritePool::new(pool.clone());
         let catalog = compiled_in()?;
         let mut ctx = system_ctx("module.boot");
@@ -50,24 +206,59 @@ impl Kernel {
         let graph: Vec<datum_statemachine::ModuleNode> =
             compiled_in_graph()?.into_iter().map(Into::into).collect();
         engine.set_module_graph(graph)?;
-        register_enabled_machines(&mut engine, &profile)?;
+        let (mut routes, mut subscriptions, mut job_kinds) =
+            register_enabled_from_manifests(&mut engine, &profile, &catalog)?;
+        for machine in extra_machines {
+            engine.register_machine(machine)?;
+        }
+        for hook in extra_hooks {
+            let handler = hook.handler.clone();
+            engine.register_hook(
+                hook.module_id,
+                hook.doc_type,
+                hook.edge,
+                hook.phase,
+                hook.budget_ms,
+                move |v, s| handler(v, s),
+            )?;
+        }
         engine.freeze()?;
 
         let gate = bind_signature_gate(profile.signature_gate_binding);
+        let events = datum_events::Registry::new();
+        let jobs = datum_jobs::Registry::new();
+        datum_jobs::register_maintenance(&jobs);
+        jobs.register(datum_jobs::events::bridge_job_kind(), GenealogyRefreshJob);
+        routes.extend(extra_routes);
+        subscriptions.extend(extra_subs);
+        job_kinds.extend(extra_jobs);
+
         let mut kernel = Self {
             profile,
             engine,
-            events: datum_events::Registry::new(),
+            events,
             event_schemas: datum_events::SchemaRegistry::standard(),
-            jobs: datum_jobs::Registry::new(),
+            jobs,
+            routes,
+            subscriptions,
+            job_kinds,
             gate,
             catalog,
+            pool,
         };
-        datum_jobs::register_maintenance(&kernel.jobs);
         kernel.refresh_signature_edges();
         kernel.startup_guard()?;
 
         let mut tx = Tx::begin(&write, &ctx).await?;
+        kernel.engine.persist(&mut tx).await?;
+        if kernel
+            .profile
+            .modules
+            .iter()
+            .any(|m| m.id == "mod-genealogy" && m.enabled)
+        {
+            datum_jobs::events::enable_genealogy_bridge(&mut tx, &kernel.events).await?;
+        }
         let body = serde_json::to_value(kernel.profile.effective_dump()?)?;
         let hash = hex(datum_audit::sha256::digest(&serde_json::to_vec(&body)?));
         record_profile(
@@ -82,6 +273,16 @@ impl Kernel {
         Ok(kernel)
     }
 
+    /// App pool this kernel was built against.
+    pub fn pool(&self) -> &Pool {
+        &self.pool
+    }
+
+    /// Write pool over [`Self::pool`].
+    pub fn write_pool(&self) -> WritePool {
+        WritePool::new(self.pool.clone())
+    }
+
     /// Ledger `GroupBuilder` factory (the `PostingSink` provider).
     pub fn posting_sink(&self, kind: GroupKind, header: PostingGroupHeader) -> GroupBuilder {
         GroupBuilder::new(kind, header)
@@ -90,6 +291,140 @@ impl Kernel {
     /// Bound signature gate, selected by the profile TOML `gate` field.
     pub fn signature_gate(&self) -> &dyn SignatureGate {
         &*self.gate
+    }
+
+    /// `WriteContext` whose bound action is `"<doc_type>.<edge>"` (executor obligation).
+    pub fn transition_context(actor: Actor, doc: &DocRef, edge: &str) -> WriteContext {
+        let ctx = WriteContext::new(actor, "pending", "ui");
+        datum_statemachine::with_action(ctx, doc, edge)
+    }
+
+    /// Persist-time spawn of `doc` in `initial` (refuses until freeze — already frozen here).
+    pub async fn spawn(&self, tx: &mut Tx<'_>, doc: &DocRef, initial: &str) -> Result<Instance> {
+        Ok(self.engine.spawn(tx, doc, initial).await?)
+    }
+
+    /// Gate-wrapped transition: one `GroupBuilder` bound to `tx`, hooks contribute,
+    /// executor `finalize`s, then [`datum_ledger::post`] writes the group in this `Tx`.
+    ///
+    /// A hook that contributes nothing leaves no ledger rows. An unfinalized
+    /// contributed sink poisons `tx` (CONTRACT §6.2 rule 1).
+    pub async fn transition(
+        &self,
+        tx: &mut Tx<'_>,
+        doc: &DocRef,
+        edge: &str,
+        token: Option<&SignatureToken>,
+        ctx: &WriteContext,
+    ) -> Result<Instance> {
+        let header = PostingGroupHeader {
+            source_kind: datum_statemachine::action_for(&doc.doc_type, edge),
+            source_id: Some(doc.doc_id),
+            work_order_id: None,
+            reason_code: None,
+            reverses_group_id: None,
+        };
+        self.transition_group(tx, GroupKind::Movement, header, doc, edge, token, ctx)
+            .await
+    }
+
+    /// [`Self::transition`] with an explicit group kind and header.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn transition_group(
+        &self,
+        tx: &mut Tx<'_>,
+        kind: GroupKind,
+        header: PostingGroupHeader,
+        doc: &DocRef,
+        edge: &str,
+        token: Option<&SignatureToken>,
+        ctx: &WriteContext,
+    ) -> Result<Instance> {
+        let mut builder = GroupBuilder::new(kind, header);
+        datum_ledger::bind_tx(&mut builder, tx).await?;
+        let watch = builder.clone();
+        let sink: Box<dyn PostingSink> = Box::new(BoundSink { inner: builder });
+        let outcome = self
+            .engine
+            .transition(tx, sink, doc, edge, token, self.signature_gate(), ctx)
+            .await;
+        match outcome {
+            Ok(instance) => {
+                if watch.unfinalized() {
+                    datum_ledger::post(tx, watch).await?;
+                }
+                Ok(instance)
+            }
+            Err(e) => {
+                drop(watch);
+                Err(e.into())
+            }
+        }
+    }
+
+    /// Bind `builder` to `tx` so Drop poisons an unfinalized contribution.
+    pub async fn bind_sink(&self, tx: &mut Tx<'_>, builder: &mut GroupBuilder) -> Result<()> {
+        Ok(datum_ledger::bind_tx(builder, tx).await?)
+    }
+
+    /// Convert `entered` to stock on `tx` (a lot factor pinned earlier in `tx` is honoured).
+    pub async fn to_stock<D: Dimension>(
+        &self,
+        tx: &mut Tx<'_>,
+        catalog: &datum_uom::UomCatalog,
+        item: ItemId,
+        entered: AnyQuantity,
+        ctx: &ConversionContext,
+    ) -> Result<datum_uom::StockConversion<D>> {
+        Ok(datum_uom::to_stock(tx, catalog, item, entered, ctx).await?)
+    }
+
+    /// Catalog convert (same units as [`datum_uom::convert`]).
+    pub fn convert<D: Dimension>(
+        &self,
+        catalog: &datum_uom::UomCatalog,
+        qty: Quantity<D>,
+        to: UnitRef<D>,
+        ctx: &ConversionContext,
+    ) -> core::result::Result<Converted<D>, datum_core::QuantityError> {
+        datum_uom::convert(catalog, qty, to, ctx)
+    }
+
+    /// Publish `event` inside `tx` (visible to subscribers after commit).
+    pub async fn publish_event(
+        &self,
+        tx: &mut Tx<'_>,
+        event: datum_events::Event,
+    ) -> Result<Identifier> {
+        Ok(datum_events::publish(tx, event).await?)
+    }
+
+    /// One dispatcher tick as `actor` (must be a service principal).
+    pub async fn dispatch_tick(&self, actor: Actor) -> Result<u32> {
+        let write = self.write_pool();
+        Ok(datum_events::Dispatcher::new(self.events.clone())
+            .idle(Duration::from_millis(1))
+            .backoff_base(Duration::ZERO)
+            .tick(&write, actor)
+            .await?)
+    }
+
+    /// One worker tick as `actor` (must be a service principal).
+    pub async fn worker_tick(&self, actor: Actor) -> Result<u32> {
+        let write = self.write_pool();
+        Ok(datum_jobs::Worker::new(self.jobs.clone())
+            .idle(Duration::from_millis(1))
+            .backoff_base(Duration::ZERO)
+            .tick(&write, actor)
+            .await?)
+    }
+
+    /// Named service principal used for dispatch and worker ticks.
+    pub fn service_actor() -> Actor {
+        Actor {
+            id: Identifier::from_uuid(SYSTEM_ID),
+            kind: ActorKind::ServicePrincipal,
+        }
     }
 
     /// SPEC deliverable 4: register an in-process events subscription.
@@ -143,6 +478,48 @@ impl Kernel {
         self.engine
             .check_gate_binding(self.gate_is_noop(), release)
             .map_err(|e| Error::Startup(e.to_string()))
+    }
+}
+
+/// `GroupBuilder` wrapper whose `finalize` is a no-op: the executor must call it,
+/// and [`datum_ledger::post`] is the insert (it finalizes the cloned builder).
+struct BoundSink {
+    inner: GroupBuilder,
+}
+
+impl PostingSink for BoundSink {
+    fn kind(&self) -> GroupKind {
+        PostingSink::kind(&self.inner)
+    }
+
+    fn header(&self) -> &PostingGroupHeader {
+        PostingSink::header(&self.inner)
+    }
+
+    fn contribute(
+        &mut self,
+        intent: PostingIntent,
+    ) -> core::result::Result<PostingHandle, PostingError> {
+        self.inner.contribute(intent)
+    }
+
+    fn finalize(self: Box<Self>) -> core::result::Result<(), PostingError> {
+        Ok(())
+    }
+}
+
+struct GenealogyRefreshJob;
+
+impl JobHandler for GenealogyRefreshJob {
+    fn run(
+        &self,
+        payload: &Value,
+        _progress: Progress,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = datum_jobs::Result<HandlerOutcome>> + Send + '_>,
+    > {
+        let payload = payload.clone();
+        Box::pin(async move { Ok(HandlerOutcome::Done(payload)) })
     }
 }
 
@@ -253,42 +630,70 @@ pub fn bind_signature_gate(binding: GateBinding) -> Box<dyn SignatureGate + Send
     }
 }
 
-fn register_enabled_machines(engine: &mut Engine, profile: &Profile) -> Result<()> {
-    for m in profile.modules.iter().filter(|m| m.enabled) {
-        match m.id.as_str() {
-            "mod-calibration" => engine.register_machine(calibration_machine()?)?,
-            "mod-production-min" => engine.register_machine(wo_machine()?)?,
-            _ => {}
+fn register_enabled_from_manifests(
+    engine: &mut Engine,
+    profile: &Profile,
+    catalog: &[ModuleManifest],
+) -> Result<(Vec<ModuleRoute>, Vec<ManifestSubscription>, Vec<ModuleJob>)> {
+    let mut routes = Vec::new();
+    let mut subscriptions = Vec::new();
+    let mut job_kinds = Vec::new();
+    for m in catalog {
+        let enabled = profile
+            .modules
+            .iter()
+            .find(|p| p.id == m.id)
+            .is_some_and(|p| p.enabled);
+        if !enabled {
+            continue;
+        }
+        for machine in &m.machines {
+            engine.register_machine(machine_from_decl(machine)?)?;
+        }
+        for r in &m.routes {
+            routes.push(ModuleRoute {
+                module_id: m.id.clone(),
+                path: r.path.clone(),
+                permission: r.permission.clone(),
+            });
+        }
+        subscriptions.extend(m.subscriptions.iter().cloned());
+        for j in &m.jobs {
+            job_kinds.push(ModuleJob {
+                module_id: m.id.clone(),
+                kind: j.kind.clone(),
+            });
         }
     }
-    Ok(())
+    Ok((routes, subscriptions, job_kinds))
 }
 
-fn calibration_machine() -> Result<Machine> {
-    let req = SignatureRequirement {
-        meaning: SignatureMeaning("Approved".into()),
-        permission: PermissionKey("calibration.approve".into()),
-    };
-    Ok(Machine::builder("calibration.certificate")
-        .regulated(true)
-        .state("Open")
-        .state("Approved")
-        .edge(EdgeBuilder::new("Open", "Approved", "approve", "calibration.approve").required(req))
-        .build()?)
-}
-
-fn wo_machine() -> Result<Machine> {
-    Ok(Machine::builder("wo")
-        .regulated(false)
-        .state("Draft")
-        .state("Released")
-        .edge(EdgeBuilder::new(
-            "Draft",
-            "Released",
-            "release",
-            "wo.release",
-        ))
-        .build()?)
+pub(crate) fn machine_from_decl(decl: &ManifestMachine) -> Result<Machine> {
+    let mut b = Machine::builder(&decl.doc_type).regulated(decl.regulated);
+    for s in &decl.states {
+        b = b.state(s.clone());
+    }
+    for e in &decl.edges {
+        let mut edge = EdgeBuilder::new(&e.from, &e.to, &e.name, &e.permission);
+        if e.required {
+            let meaning = e.meaning.clone().ok_or_else(|| {
+                Error::Manifest(format!(
+                    "machine {} edge {} is required without meaning",
+                    decl.doc_type, e.name
+                ))
+            })?;
+            let perm = e
+                .signature_permission
+                .clone()
+                .unwrap_or_else(|| e.permission.clone());
+            edge = edge.required(SignatureRequirement {
+                meaning: SignatureMeaning(meaning),
+                permission: PermissionKey(perm),
+            });
+        }
+        b = b.edge(edge);
+    }
+    Ok(b.build()?)
 }
 
 fn hold_wave2b_edges() {
@@ -296,7 +701,6 @@ fn hold_wave2b_edges() {
     let _ = core::any::type_name::<datum_customfields::Error>();
     let _ = core::any::type_name::<datum_documents::Error>();
     let _ = core::any::type_name::<datum_print::Error>();
-    let _ = core::any::type_name::<datum_uom::Error>();
 }
 
 /// Graph nodes for the compiled-in catalog (tests / hook-order).

@@ -39,11 +39,82 @@ pub struct ModuleManifest {
     pub requires_signature: Vec<String>,
     /// `regulated = true` in `[capabilities]` (must be present).
     pub regulated: bool,
+    /// State machines declared on this manifest (`docs/03` §3).
+    #[serde(default)]
+    pub machines: Vec<ManifestMachine>,
+    /// Event subscriptions declared on this manifest (`docs/03` §3.1).
+    #[serde(default)]
+    pub subscriptions: Vec<ManifestSubscription>,
+    /// HTTP routes declared on this manifest (`docs/03` §3.4).
+    #[serde(default)]
+    pub routes: Vec<ManifestRoute>,
+    /// Job kinds declared on this manifest (`docs/03` §3).
+    #[serde(default)]
+    pub jobs: Vec<ManifestJob>,
     /// SQL applied inside [`crate::install`]'s transaction (`docs/03` §6).
     ///
     /// Compiled-in Wave 2s modules have none; tests supply `'static` statements.
     #[serde(default, skip)]
     pub migrations: Vec<&'static str>,
+}
+
+/// One machine declared in `module.toml`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManifestMachine {
+    /// Document type the machine advances.
+    pub doc_type: String,
+    /// Owning module's regulated flag (total signature declaration when true).
+    pub regulated: bool,
+    /// Declared states (edges also introduce states).
+    pub states: Vec<String>,
+    /// Declared edges.
+    pub edges: Vec<ManifestMachineEdge>,
+}
+
+/// One edge declared in `module.toml`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManifestMachineEdge {
+    /// From state.
+    pub from: String,
+    /// To state.
+    pub to: String,
+    /// Edge name.
+    pub name: String,
+    /// RBAC permission key.
+    pub permission: String,
+    /// `Required` declaration when true.
+    pub required: bool,
+    /// Signature meaning when required.
+    pub meaning: Option<String>,
+    /// Signature permission when required (defaults to [`Self::permission`]).
+    pub signature_permission: Option<String>,
+    /// `NotRequired` reason when not required.
+    pub reason: Option<String>,
+}
+
+/// One event subscription declared in `module.toml`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManifestSubscription {
+    /// Event name (`inventory.lot_received`).
+    pub event: String,
+    /// Subscriber id.
+    pub subscriber: String,
+}
+
+/// One HTTP route declared in `module.toml`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManifestRoute {
+    /// Path prefix (`/api/v1/calibration`).
+    pub path: String,
+    /// Permission that gates the route.
+    pub permission: String,
+}
+
+/// One job kind declared in `module.toml`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManifestJob {
+    /// Job kind (`genealogy.refresh`).
+    pub kind: String,
 }
 
 impl ModuleManifest {
@@ -79,6 +150,10 @@ impl ModuleManifest {
             permissions,
             requires_signature,
             regulated,
+            machines: parse_machines(&root)?,
+            subscriptions: parse_subscriptions(&root)?,
+            routes: parse_routes(&root)?,
+            jobs: parse_jobs(&root)?,
             migrations: Vec::new(),
         };
         parsed.validate()?;
@@ -159,6 +234,104 @@ impl ModuleManifest {
     pub fn manifest_hash(&self, enabled: bool) -> Result<String> {
         Ok(hex(datum_audit::sha256::digest(&self.hash_input(enabled)?)))
     }
+}
+
+fn table_array<'a>(
+    root: &'a BTreeMap<String, Value>,
+    key: &str,
+) -> Result<Vec<&'a BTreeMap<String, Value>>> {
+    match root.get(key) {
+        None => Ok(Vec::new()),
+        Some(v) => {
+            let arr = v
+                .as_array()
+                .ok_or_else(|| Error::Toml(format!("expected [[{key}]]")))?;
+            arr.iter()
+                .map(|item| {
+                    item.as_table()
+                        .ok_or_else(|| Error::Toml(format!("{key} item is not a table")))
+                })
+                .collect()
+        }
+    }
+}
+
+fn parse_machines(root: &BTreeMap<String, Value>) -> Result<Vec<ManifestMachine>> {
+    let mut out = Vec::new();
+    for table in table_array(root, "machines")? {
+        let doc_type = toml::require_str(table, "doc_type")?;
+        let regulated = table
+            .get("regulated")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let states = match table.get("states") {
+            Some(v) => toml::string_array(v)?,
+            None => Vec::new(),
+        };
+        let mut edges = Vec::new();
+        if let Some(raw) = table.get("edges") {
+            let arr = raw
+                .as_array()
+                .ok_or_else(|| Error::Toml("expected [[machines.edges]]".into()))?;
+            for item in arr {
+                let e = item
+                    .as_table()
+                    .ok_or_else(|| Error::Toml("machine edge is not a table".into()))?;
+                edges.push(ManifestMachineEdge {
+                    from: toml::require_str(e, "from")?,
+                    to: toml::require_str(e, "to")?,
+                    name: toml::require_str(e, "name")?,
+                    permission: toml::require_str(e, "permission")?,
+                    required: e.get("required").and_then(Value::as_bool).unwrap_or(false),
+                    meaning: e.get("meaning").and_then(Value::as_str).map(str::to_string),
+                    signature_permission: e
+                        .get("signature_permission")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                    reason: e.get("reason").and_then(Value::as_str).map(str::to_string),
+                });
+            }
+        }
+        out.push(ManifestMachine {
+            doc_type,
+            regulated,
+            states,
+            edges,
+        });
+    }
+    Ok(out)
+}
+
+fn parse_subscriptions(root: &BTreeMap<String, Value>) -> Result<Vec<ManifestSubscription>> {
+    let mut out = Vec::new();
+    for table in table_array(root, "subscriptions")? {
+        out.push(ManifestSubscription {
+            event: toml::require_str(table, "event")?,
+            subscriber: toml::require_str(table, "subscriber")?,
+        });
+    }
+    Ok(out)
+}
+
+fn parse_routes(root: &BTreeMap<String, Value>) -> Result<Vec<ManifestRoute>> {
+    let mut out = Vec::new();
+    for table in table_array(root, "routes")? {
+        out.push(ManifestRoute {
+            path: toml::require_str(table, "path")?,
+            permission: toml::require_str(table, "permission")?,
+        });
+    }
+    Ok(out)
+}
+
+fn parse_jobs(root: &BTreeMap<String, Value>) -> Result<Vec<ManifestJob>> {
+    let mut out = Vec::new();
+    for table in table_array(root, "jobs")? {
+        out.push(ManifestJob {
+            kind: toml::require_str(table, "kind")?,
+        });
+    }
+    Ok(out)
 }
 
 fn string_map(value: Option<&Value>) -> Result<BTreeMap<String, String>> {
@@ -261,6 +434,10 @@ mod-lots = "^0.1"
 [capabilities]
 requires-signature = []
 regulated = false
+
+[[routes]]
+path = "/api/v1/inventory"
+permission = "inventory.view"
 "#;
     const PRODUCTION: &str = r#"
 [module]
@@ -280,6 +457,21 @@ mod-inventory = "^0.1"
 [capabilities]
 requires-signature = []
 regulated = false
+
+[[machines]]
+doc_type = "wo"
+regulated = false
+states = ["Draft", "Released"]
+
+[[machines.edges]]
+from = "Draft"
+to = "Released"
+name = "release"
+permission = "wo.release"
+
+[[routes]]
+path = "/api/v1/production"
+permission = "production.view"
 "#;
     const GENEALOGY: &str = r#"
 [module]
@@ -300,6 +492,17 @@ mod-production-min = "^0.1"
 [capabilities]
 requires-signature = []
 regulated = false
+
+[[subscriptions]]
+event = "inventory.lot_received"
+subscriber = "datum-jobs"
+
+[[jobs]]
+kind = "genealogy.refresh"
+
+[[routes]]
+path = "/api/v1/genealogy"
+permission = "genealogy.view"
 "#;
     const CALIBRATION: &str = r#"
 [module]
@@ -318,6 +521,24 @@ kernel = "^0.1"
 [capabilities]
 requires-signature = ["calibration.approve"]
 regulated = true
+
+[[machines]]
+doc_type = "calibration.certificate"
+regulated = true
+states = ["Open", "Approved"]
+
+[[machines.edges]]
+from = "Open"
+to = "Approved"
+name = "approve"
+permission = "calibration.approve"
+required = true
+meaning = "Approved"
+signature_permission = "calibration.approve"
+
+[[routes]]
+path = "/api/v1/calibration"
+permission = "calibration.view"
 "#;
     Ok(vec![
         ModuleManifest::parse(ITEMS)?,

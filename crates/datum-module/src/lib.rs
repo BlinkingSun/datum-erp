@@ -9,7 +9,8 @@ use datum_customfields as _;
 use datum_documents as _;
 use datum_esign as _;
 use datum_print as _;
-use datum_uom as _;
+#[cfg(test)]
+use rust_decimal as _;
 
 mod config;
 mod error;
@@ -27,10 +28,13 @@ pub use config::{
 };
 pub use error::{Error, Result};
 pub use kernel::{
-    Kernel, bind_signature_gate, edges_from_registry, module_nodes, posting_sink,
-    startup_fails_if_required_meets_no_signatures,
+    Kernel, KernelBuilder, ModuleJob, ModuleRoute, bind_signature_gate, edges_from_registry,
+    module_nodes, posting_sink, startup_fails_if_required_meets_no_signatures,
 };
-pub use manifest::{ModuleManifest, compiled_in, compiled_in_graph};
+pub use manifest::{
+    ManifestJob, ManifestMachine, ManifestMachineEdge, ManifestRoute, ManifestSubscription,
+    ModuleManifest, compiled_in, compiled_in_graph,
+};
 pub use order::{
     CONTRACT_KERNEL_EDGES, KERNEL_ORDER, MIGRATE_PREFIX, ModuleNode, attach_kernel_audit,
     is_topological_sort, kernel_crates, kernel_migrators, migrate_prefix, migrate_suffix,
