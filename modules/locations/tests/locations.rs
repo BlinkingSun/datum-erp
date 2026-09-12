@@ -22,7 +22,7 @@ use datum_mod_locations::{
 use datum_test::db_case;
 use rust_decimal::Decimal;
 
-use common::{has_audit, migrate_kernel, pg_code, write_ctx, write_pool};
+use common::{boot_kernel, has_audit, migrate_kernel, pg_code, write_ctx, write_pool};
 
 #[tokio::test]
 async fn install_seeds_seven_boundary_locations_once() {
@@ -318,8 +318,15 @@ async fn registry_row_matches_location() {
 #[tokio::test]
 async fn every_locations_table_is_audited_and_owned_by_datum_owner() {
     let db = db_case!("loc_audit");
-    migrate_kernel(&db).await;
+    let kernel = boot_kernel(&db).await;
     migrate(db.migrate_pool()).await.unwrap();
+    let ctx = common::edge_ctx(&kernel, write_ctx("locations.create").actor, "create");
+    let cfg = ctx.config_version.as_deref().unwrap_or("");
+    assert!(!cfg.is_empty(), "config_version must be non-empty");
+    assert_eq!(
+        cfg, kernel.profile.spec_version,
+        "config_version equals the profile spec"
+    );
     for table in ["site", "location"] {
         assert!(has_audit(db.migrate_pool(), "locations", table).await);
         let owner: (Option<String>,) = sqlx::query_as(

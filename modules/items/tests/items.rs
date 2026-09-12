@@ -106,7 +106,13 @@ async fn release_transitions_and_audits() {
     let item = create(&mut tx, &kernel, screw()).await.expect("create");
     tx.commit().await.expect("commit");
 
-    let ctx = edge_ctx(actor, item.id, "release");
+    let ctx = edge_ctx(&kernel, actor, item.id, "release");
+    let cfg = ctx.config_version.as_deref().unwrap_or("");
+    assert!(!cfg.is_empty(), "config_version must be non-empty");
+    assert_eq!(
+        cfg, kernel.profile.spec_version,
+        "config_version equals the profile spec"
+    );
     let mut tx = Tx::begin(&write, &ctx).await.expect("begin rel");
     let released = release(&mut tx, &kernel, &ctx, item.id)
         .await
@@ -132,14 +138,14 @@ async fn obsolete_item_cannot_be_released_again() {
     let item = create(&mut tx, &kernel, screw()).await.expect("create");
     tx.commit().await.expect("commit");
 
-    let ctx = edge_ctx(actor, item.id, "release");
+    let ctx = edge_ctx(&kernel, actor, item.id, "release");
     let mut tx = Tx::begin(&write, &ctx).await.expect("begin rel");
     release(&mut tx, &kernel, &ctx, item.id)
         .await
         .expect("release");
     tx.commit().await.expect("commit rel");
 
-    let ctx = edge_ctx(actor, item.id, "obsolete");
+    let ctx = edge_ctx(&kernel, actor, item.id, "obsolete");
     let mut tx = Tx::begin(&write, &ctx).await.expect("begin obs");
     let gone = obsolete(&mut tx, &kernel, &ctx, item.id)
         .await
@@ -147,7 +153,7 @@ async fn obsolete_item_cannot_be_released_again() {
     tx.commit().await.expect("commit obs");
     assert_eq!(gone.status, Status::Obsolete);
 
-    let ctx = edge_ctx(actor, item.id, "release");
+    let ctx = edge_ctx(&kernel, actor, item.id, "release");
     let mut tx = Tx::begin(&write, &ctx).await.expect("begin again");
     let err = release(&mut tx, &kernel, &ctx, item.id)
         .await

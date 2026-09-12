@@ -33,6 +33,7 @@ datum-test.workspace = true
 datum-identity.workspace = true
 datum-uom.workspace = true
 datum-ledger.workspace = true
+datum-statemachine.workspace = true
 tokio.workspace = true
 proptest.workspace = true
 rust_decimal.workspace = true

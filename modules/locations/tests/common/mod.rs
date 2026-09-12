@@ -4,7 +4,8 @@ use datum_core::{Actor, ActorKind, Identifier};
 use datum_db::WriteContext;
 use datum_identity::SYSTEM_ID;
 use datum_mod_locations::migrate as migrate_locations;
-use datum_module::{attach_kernel_audit, migrate_prefix, migrate_suffix};
+use datum_module::{Kernel, Profile, attach_kernel_audit, migrate_prefix, migrate_suffix};
+use datum_statemachine::DocRef;
 use sqlx::PgPool;
 
 pub async fn migrate_kernel(db: &datum_test::TestDb) {
@@ -21,6 +22,26 @@ pub async fn migrate_kernel(db: &datum_test::TestDb) {
     attach_kernel_audit(db.migrate_pool())
         .await
         .expect("attach");
+}
+
+pub async fn boot_kernel(db: &datum_test::TestDb) -> Kernel {
+    migrate_kernel(db).await;
+    let mut builder = Kernel::builder(db.app_pool().clone(), Profile::plain_shop().unwrap());
+    builder
+        .apply_manifest(&datum_mod_locations::manifest().expect("manifest"))
+        .expect("register locations");
+    builder.build().await.expect("kernel build")
+}
+
+pub fn edge_ctx(kernel: &Kernel, actor: Actor, edge: &str) -> WriteContext {
+    let doc = DocRef {
+        doc_type: "location".into(),
+        doc_id: Identifier::generate(),
+    };
+    let mut ctx = kernel.transition_context(actor, &doc, edge);
+    ctx.actor_display = Some("test".into());
+    ctx.reason = Some("locations test".into());
+    ctx
 }
 
 pub fn write_pool(db: &datum_test::TestDb) -> datum_db::WritePool {

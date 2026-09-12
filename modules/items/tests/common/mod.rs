@@ -69,12 +69,12 @@ pub fn update_ctx(actor: Actor) -> WriteContext {
     ctx
 }
 
-pub fn edge_ctx(actor: Actor, id: ItemId, edge: &str) -> WriteContext {
+pub fn edge_ctx(kernel: &Kernel, actor: Actor, id: ItemId, edge: &str) -> WriteContext {
     let doc = DocRef {
         doc_type: DOC_TYPE.into(),
         doc_id: Identifier::from_uuid(id.as_uuid()),
     };
-    let mut ctx = Kernel::transition_context(actor, &doc, edge);
+    let mut ctx = kernel.transition_context(actor, &doc, edge);
     ctx.actor_display = Some("M. Reyes".into());
     ctx.reason = Some("items-test".into());
     ctx
