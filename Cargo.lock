@@ -537,15 +537,18 @@ dependencies = [
 name = "datum-identity"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "datum-audit",
  "datum-core",
  "datum-db",
  "datum-test",
  "proptest",
  "serde",
+ "serde_json",
  "sqlx",
  "thiserror",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
