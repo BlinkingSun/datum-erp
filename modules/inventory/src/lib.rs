@@ -34,7 +34,7 @@ pub use store::{
 };
 
 use datum_db::Tx;
-use datum_module::{KernelBuilder, ModuleManifest};
+use datum_module::{KernelBuilder, ModuleManifest, Profile};
 
 /// Embedded migrator (`placeholder` + `0001_inventory`).
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
@@ -45,7 +45,7 @@ pub fn manifest() -> Result<ModuleManifest> {
 }
 
 /// Register event schemas, routes, and the document state machine on `builder`.
-pub fn register(builder: &mut KernelBuilder) -> Result<()> {
+pub fn register(builder: &mut KernelBuilder, _profile: &Profile) -> Result<()> {
     register_schemas()?;
     register_hooks(builder)?;
     let mut manifest = manifest()?;

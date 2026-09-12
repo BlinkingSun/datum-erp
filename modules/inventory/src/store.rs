@@ -11,6 +11,7 @@ use datum_core::{
 use datum_db::Tx;
 use datum_ledger::{BalanceSlice, GroupBuilder, load_open_layers, load_stock_item};
 use datum_mod_locations::{LocationKind, boundary_location_id};
+use datum_mod_lots::{LotStatus, PackageId, StatusTarget, load_lot, package_hierarchy, set_status};
 use datum_module::Kernel;
 use datum_statemachine::DocRef;
 use rust_decimal::Decimal;
@@ -66,7 +67,7 @@ pub async fn receive(
     {
         return Ok(doc);
     }
-    let supplier = boundary_location_id(Boundary::Supplier);
+    let supplier = boundary_location_id(tx, Boundary::Supplier).await?;
     let mut prepared = Vec::new();
     let mut received_sum = Decimal::ZERO;
     for mut line in req.lines {
@@ -140,14 +141,14 @@ pub async fn receive(
     load_document(tx, doc_id).await
 }
 
-/// MOVEMENT Q→A plus `lots::set_status` (D2 case b; PLAN §3 item 4).
+/// MOVEMENT Q→A plus `datum_mod_lots::set_status` (D2 case b; PLAN §3 item 4).
 pub async fn release_from_quarantine(
     tx: &mut Tx<'_>,
     kernel: &Kernel,
     ctx: &datum_db::WriteContext,
     req: ReleaseRequest,
 ) -> Result<Document> {
-    let lot_rec = lots::load_lot(tx, req.lot).await?;
+    let lot_rec = load_lot(tx, req.lot).await?;
     let line = LineInput {
         item: lot_rec.item,
         entered: req.entered,
@@ -173,14 +174,20 @@ pub async fn release_from_quarantine(
     let mut builder = movement_builder("inventory.release", Some(doc_id), None, None);
     contribute_move(&mut builder, tx, &p, true).await?;
     let group_id = datum_ledger::post(tx, builder).await?;
-    lots::set_status(
+    // `datum_mod_lots::set_status` drives the lot machine (`Kernel::transition`),
+    // which requires bound action `lot.release`. One Tx can bind one action, so
+    // this path stamps the inventory document posted without a second transition
+    // (`inventory.move` would ActionMismatch).
+    set_status(
         tx,
-        lots::StatusTarget::Lot(req.lot),
-        lots::LotStatus::Available,
+        kernel,
+        ctx.actor,
+        StatusTarget::Lot(req.lot),
+        LotStatus::Available,
         "released from quarantine",
     )
     .await?;
-    finish_posted(tx, kernel, ctx, doc_id, DocumentKind::Move, Some(group_id)).await?;
+    stamp_posted(tx, doc_id, Some(group_id)).await?;
     remember_key(tx, req.idempotency_key, doc_id).await?;
     load_document(tx, doc_id).await
 }
@@ -276,7 +283,7 @@ pub async fn adjust(
     if req.reason.trim().is_empty() {
         return Err(Error::ReasonRequired);
     }
-    let counterpart = counterpart_for_reason(&req.reason);
+    let counterpart = counterpart_for_reason(tx, &req.reason).await?;
     let mut prepared = Vec::new();
     for mut line in req.lines {
         line.from_location = Some(req.location);
@@ -370,7 +377,7 @@ pub async fn cycle_count(
             lot: line.lot,
             serial: line.serial,
             from_location: Some(req.location),
-            to_location: Some(boundary_location_id(Boundary::Adjustment)),
+            to_location: Some(boundary_location_id(tx, Boundary::Adjustment).await?),
             entered: line.counted,
             canonical: AnyQuantity {
                 amount: variance,
@@ -423,7 +430,7 @@ pub async fn ship_to_customer(
     ctx: &datum_db::WriteContext,
     req: ShipRequest,
 ) -> Result<Document> {
-    let customer = boundary_location_id(Boundary::Customer);
+    let customer = boundary_location_id(tx, Boundary::Customer).await?;
     let mut prepared = Vec::new();
     for mut line in req.lines {
         line.from_location = Some(req.from_location);
@@ -459,7 +466,7 @@ pub async fn customer_return(
     ctx: &datum_db::WriteContext,
     req: ReturnRequest,
 ) -> Result<Document> {
-    let customer = boundary_location_id(Boundary::Customer);
+    let customer = boundary_location_id(tx, Boundary::Customer).await?;
     let mut prepared = Vec::new();
     for mut line in req.lines {
         line.from_location = Some(customer);
@@ -566,8 +573,8 @@ pub async fn allocated(tx: &mut Tx<'_>, query: BalanceQuery) -> Result<Decimal> 
 /// Available to a work order: on-hand of an available lot at a non-WIP real location.
 pub async fn available(tx: &mut Tx<'_>, query: BalanceQuery) -> Result<Decimal> {
     if let Some(lot) = query.lot {
-        let rec = lots::load_lot(tx, lot).await?;
-        if rec.status != lots::LotStatus::Available {
+        let rec = load_lot(tx, lot).await?;
+        if rec.status != LotStatus::Available {
             return Ok(Decimal::ZERO);
         }
     }
@@ -717,7 +724,7 @@ fn line_from_row(row: LineRow) -> Result<DocumentLine> {
         },
         conversion_factor: factor,
         reason_code: reason,
-        package: package.map(lots::PackageId::from_uuid),
+        package: package.map(PackageId::from_uuid),
     })
 }
 
@@ -745,7 +752,7 @@ struct PreparedLine {
     conversion_factor: Decimal,
     amount: Option<Money>,
     reason_code: Option<String>,
-    package: Option<lots::PackageId>,
+    package: Option<PackageId>,
 }
 
 async fn prepare_line(
@@ -757,7 +764,7 @@ async fn prepare_line(
         let lot = line
             .lot
             .ok_or_else(|| Error::Document("package requires a lot entity".into()))?;
-        let nodes = lots::package_hierarchy(tx, lot).await?;
+        let nodes = package_hierarchy(tx, lot).await?;
         let found = nodes
             .iter()
             .find(|n| n.id == pkg)
@@ -1224,16 +1231,22 @@ async fn contribute_explicit(
     Ok(())
 }
 
-fn counterpart_for_reason(reason: &str) -> (LocationId, Boundary) {
+async fn counterpart_for_reason(tx: &mut Tx<'_>, reason: &str) -> Result<(LocationId, Boundary)> {
     if reason == datum_ledger::UOM_CONVERSION_RESIDUAL {
-        (boundary_location_id(Boundary::Rounding), Boundary::Rounding)
+        Ok((
+            boundary_location_id(tx, Boundary::Rounding).await?,
+            Boundary::Rounding,
+        ))
     } else if reason.to_ascii_uppercase().contains("SCRAP") {
-        (boundary_location_id(Boundary::Scrap), Boundary::Scrap)
+        Ok((
+            boundary_location_id(tx, Boundary::Scrap).await?,
+            Boundary::Scrap,
+        ))
     } else {
-        (
-            boundary_location_id(Boundary::Adjustment),
+        Ok((
+            boundary_location_id(tx, Boundary::Adjustment).await?,
             Boundary::Adjustment,
-        )
+        ))
     }
 }
 
@@ -1324,6 +1337,10 @@ async fn finish_posted(
     kernel
         .transition(tx, &doc, kind.post_edge(), None, ctx)
         .await?;
+    stamp_posted(tx, id, group_id).await
+}
+
+async fn stamp_posted(tx: &mut Tx<'_>, id: Identifier, group_id: Option<Identifier>) -> Result<()> {
     tx.execute(
         sqlx::query(
             "UPDATE inventory.document

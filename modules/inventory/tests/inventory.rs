@@ -49,7 +49,7 @@ async fn receive_bars(w: &World, pool: &datum_db::WritePool) -> datum_mod_invent
 }
 
 async fn release_lot(w: &World, pool: &datum_db::WritePool) -> datum_mod_inventory::Document {
-    let ctx = action_ctx(w.actor, "inventory.move");
+    let ctx = action_ctx(w.actor, "lot.release");
     let mut tx = Tx::begin(pool, &ctx).await.expect("begin release");
     let doc = release_from_quarantine(
         &mut tx,
@@ -124,8 +124,10 @@ async fn case_b_release_quarantine_posts_and_changes_status() {
     assert_eq!(group_kind(db.app_pool(), group.as_uuid()).await, "MOVEMENT");
     let ctx = action_ctx(w.actor, "inventory.view");
     let mut tx = Tx::begin(&pool, &ctx).await.expect("begin");
-    let lot = lots::load_lot(&mut tx, w.lot_bar).await.expect("lot");
-    assert_eq!(lot.status, lots::LotStatus::Available);
+    let lot = datum_mod_lots::load_lot(&mut tx, w.lot_bar)
+        .await
+        .expect("lot");
+    assert_eq!(lot.status, datum_mod_lots::LotStatus::Available);
     let avail = available(
         &mut tx,
         BalanceQuery {

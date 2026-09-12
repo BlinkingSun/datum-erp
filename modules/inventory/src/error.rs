@@ -36,7 +36,7 @@ pub enum Error {
     Locations(#[from] datum_mod_locations::Error),
     /// Lots published interface.
     #[error(transparent)]
-    Lots(#[from] lots::Error),
+    Lots(#[from] datum_mod_lots::Error),
     /// JSON / serde failure.
     #[error(transparent)]
     Json(#[from] serde_json::Error),

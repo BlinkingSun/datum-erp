@@ -10,12 +10,12 @@ use datum_db::{Tx, WriteContext, WritePool};
 use datum_identity::rbac::{RoleBundle, assign_role, seed_bundles};
 use datum_identity::{PrincipalKind, SYSTEM_ID, create_principal};
 use datum_ledger::CostMethod;
+use datum_mod_items::{Kind, NewItem};
 use datum_mod_locations::{CreateLocation, LocationKind, seed_install};
+use datum_mod_lots::{CreateLot, LotStatus};
 use datum_module::{
     Kernel, KernelBuilder, Profile, attach_kernel_audit, migrate_prefix, migrate_suffix,
 };
-use items::{Kind, NewItem};
-use lots::{CreateLot, LotStatus};
 use rust_decimal::Decimal;
 use sqlx::{PgPool, query_scalar as sql_query_scalar};
 
@@ -89,9 +89,9 @@ pub async fn migrate_all(db: &datum_test::TestDb) {
         .await
         .unwrap_or_else(|e| panic!("migrate suffix: {e:#}"));
     let crates: &[(&str, &sqlx::migrate::Migrator)] = &[
-        ("items", &items::MIGRATOR),
+        ("datum-mod-items", &datum_mod_items::MIGRATOR),
         ("datum-mod-locations", &datum_mod_locations::MIGRATOR),
-        ("lots", &lots::MIGRATOR),
+        ("datum-mod-lots", &datum_mod_lots::MIGRATOR),
         ("datum-mod-inventory", &datum_mod_inventory::MIGRATOR),
     ];
     for (name, migrator) in crates {
@@ -111,13 +111,14 @@ pub async fn migrate_all(db: &datum_test::TestDb) {
 
 pub async fn boot_kernel(db: &datum_test::TestDb) -> Kernel {
     migrate_all(db).await;
-    let mut builder = Kernel::builder(db.app_pool().clone(), Profile::plain_shop().unwrap());
-    items::register(&mut builder).expect("register items");
+    let profile = Profile::plain_shop().unwrap();
+    let mut builder = Kernel::builder(db.app_pool().clone(), profile.clone());
+    datum_mod_items::register(&mut builder, &profile).expect("register items");
     builder
         .apply_manifest(&datum_mod_locations::manifest().expect("locations manifest"))
         .expect("register locations");
-    lots::apply(&mut builder).expect("register lots");
-    datum_mod_inventory::register(&mut builder).expect("register inventory");
+    datum_mod_lots::register(&mut builder, &profile).expect("register lots");
+    datum_mod_inventory::register(&mut builder, &profile).expect("register inventory");
     builder.build().await.expect("kernel build")
 }
 
@@ -137,7 +138,9 @@ pub async fn seed_world(db: &datum_test::TestDb, kernel: Kernel) -> World {
     let pool = write_pool(db);
     let mut tx = Tx::begin(&pool, &boot_ctx()).await.expect("begin seed");
     seed_install(&mut tx).await.expect("seed locations");
-    let site = datum_mod_locations::store::default_site_id();
+    let site = datum_mod_locations::default_site_id(&mut tx)
+        .await
+        .expect("default site");
     let quarantine = datum_mod_locations::create(
         &mut tx,
         CreateLocation {
@@ -177,7 +180,7 @@ pub async fn seed_world(db: &datum_test::TestDb, kernel: Kernel) -> World {
     .await
     .expect("fg")
     .id;
-    let bar = items::create(
+    let bar = datum_mod_items::create(
         &mut tx,
         &kernel,
         NewItem {
@@ -195,7 +198,7 @@ pub async fn seed_world(db: &datum_test::TestDb, kernel: Kernel) -> World {
     .await
     .expect("bar")
     .id;
-    let screw = items::create(
+    let screw = datum_mod_items::create(
         &mut tx,
         &kernel,
         NewItem {
@@ -229,8 +232,11 @@ pub async fn seed_world(db: &datum_test::TestDb, kernel: Kernel) -> World {
     )
     .await
     .expect("uom.item_stock");
-    let lot_bar = lots::create_lot(
+    let lot_ctx = boot_ctx();
+    let lot_bar = datum_mod_lots::create_lot(
         &mut tx,
+        &kernel,
+        &lot_ctx,
         CreateLot {
             item: bar,
             number: Some("LOT-BAR-24-4412".into()),
@@ -290,8 +296,8 @@ pub async fn actor_with_inventory_perms(write: &WritePool) -> Actor {
                 "items.view".into(),
                 "items.edit".into(),
                 "lots.view".into(),
-                "lots.create".into(),
-                "lots.status".into(),
+                "lots.edit".into(),
+                "lots.release".into(),
                 "locations.view".into(),
                 "locations.edit".into(),
             ],
