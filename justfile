@@ -40,6 +40,21 @@ lint-sql:
       echo "lint-sql: GRANT or CREATE DATABASE outside crates/datum-db, crates/datum-audit, and crates/datum-test" >&2; \
       exit 1; \
     fi
+    # PLAN §6 invariant 6: no crate's src reads another crate's schema-qualified tables.
+    # Allow-list: owning crate, datum-module (composition root), datum-test (harness).
+    # Production src only — kernel tests may probe audit.event / seed uom.item_stock.
+    fail=0; \
+    for pair in identity:datum-identity uom:datum-uom ledger:datum-ledger sm:datum-statemachine jobs:datum-jobs events:datum-events numbering:datum-numbering audit:datum-audit; do \
+      schema="${pair%%:*}"; \
+      owner="${pair##*:}"; \
+      if rg -n -i --glob '**/src/**/*.rs' --glob "!**/${owner}/**" --glob '!**/datum-module/**' --glob '!**/datum-test/**' \
+          -e "(FROM|JOIN|INTO|UPDATE|TABLE)[[:space:]]+(ONLY[[:space:]]+)?${schema}\\." \
+          "{{root}}/crates" "{{root}}/modules"; then \
+        echo "lint-sql: cross-module table read of ${schema}.* outside ${owner}, datum-module, and datum-test" >&2; \
+        fail=1; \
+      fi; \
+    done; \
+    if [ "$fail" -ne 0 ]; then exit 1; fi
 
 # All tests, including integration.
 test:
