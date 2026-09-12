@@ -590,6 +590,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "datum-mod-genealogy"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "datum-audit",
+ "datum-core",
+ "datum-db",
+ "datum-events",
+ "datum-identity",
+ "datum-jobs",
+ "datum-ledger",
+ "datum-mod-inventory",
+ "datum-mod-items",
+ "datum-mod-locations",
+ "datum-mod-lots",
+ "datum-module",
+ "datum-test",
+ "proptest",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "datum-mod-inventory"
 version = "0.1.0"
 dependencies = [
@@ -680,6 +708,36 @@ dependencies = [
  "datum-numbering",
  "datum-statemachine",
  "datum-test",
+ "proptest",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "datum-mod-production-min"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "datum-audit",
+ "datum-core",
+ "datum-db",
+ "datum-events",
+ "datum-identity",
+ "datum-ledger",
+ "datum-mod-inventory",
+ "datum-mod-items",
+ "datum-mod-locations",
+ "datum-mod-lots",
+ "datum-module",
+ "datum-numbering",
+ "datum-statemachine",
+ "datum-test",
+ "datum-uom",
  "proptest",
  "rust_decimal",
  "serde",
