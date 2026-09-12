@@ -140,13 +140,27 @@ pub const KERNEL_AUDIT_RELS: &[&str] = &[
     "sm.state",
     "sm.edge",
     "sm.instance",
+    "items.item",
+    "items.item_revision_history",
+    "locations.site",
+    "locations.location",
+    "lots.lot",
+    "lots.serial",
+    "lots.package",
+    "lots.status_history",
 ];
 
 /// Attach `datum.schema_history` and every other app-class table that missed
 /// the event trigger (`datum` schema, or tables created before privileged).
 pub async fn attach_kernel_audit(pool: &datum_db::Pool) -> Result<()> {
     for rel in KERNEL_AUDIT_RELS {
-        datum_audit::attach(pool, rel).await?;
+        let exists: bool = sqlx::query_scalar("SELECT to_regclass($1::text) IS NOT NULL")
+            .bind(rel)
+            .fetch_one(pool)
+            .await?;
+        if exists {
+            datum_audit::attach(pool, rel).await?;
+        }
     }
     Ok(())
 }
@@ -176,6 +190,7 @@ pub async fn install_kernel(migrate: &datum_db::Pool, bootstrap: &datum_db::Pool
             .await
             .map_err(|e| Error::Manifest(format!("migrate {name}: {e}")))?;
     }
+    crate::install_graph::migrate_wave_2s1_modules(migrate).await?;
     attach_kernel_audit(migrate).await?;
     datum_audit::install_privileged(bootstrap).await?;
     Ok(())

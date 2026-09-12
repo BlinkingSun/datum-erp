@@ -19,6 +19,7 @@ use datum_statemachine::{
 use serde_json::Value;
 
 use crate::config::persist_kernel_defaults;
+use crate::install_graph::manifest_machines_owned_by_register;
 use crate::manifest::{
     ManifestMachine, ManifestSubscription, ModuleManifest, compiled_in, compiled_in_graph, hex,
 };
@@ -651,8 +652,10 @@ fn register_enabled_from_manifests(
         if !enabled {
             continue;
         }
-        for machine in &m.machines {
-            engine.register_machine(machine_from_decl(machine)?)?;
+        if !manifest_machines_owned_by_register(&m.id) {
+            for machine in &m.machines {
+                engine.register_machine(machine_from_decl(machine)?)?;
+            }
         }
         for r in &m.routes {
             routes.push(ModuleRoute {

@@ -25,6 +25,9 @@ pub enum Error {
     /// Module manifest / kernel registration.
     #[error(transparent)]
     Module(#[from] datum_module::Error),
+    /// State machine declaration error.
+    #[error(transparent)]
+    Statemachine(#[from] datum_statemachine::Error),
     /// Identifier failed `^[0-9A-Z-]{1,20}$`.
     #[error("invalid identifier: {0}")]
     InvalidIdentifier(String),

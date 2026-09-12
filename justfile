@@ -47,7 +47,7 @@ lint-sql:
     # Production src only - kernel tests may probe audit.event / seed uom.item_stock.
     # Scan per-crate src/ (no path-separator globs): negative **/owner/** fails on Windows paths.
     fail=0; \
-    for pair in identity:datum-identity uom:datum-uom ledger:datum-ledger sm:datum-statemachine jobs:datum-jobs events:datum-events numbering:datum-numbering audit:datum-audit; do \
+    for pair in identity:datum-identity uom:datum-uom ledger:datum-ledger sm:datum-statemachine jobs:datum-jobs events:datum-events numbering:datum-numbering audit:datum-audit items:datum-mod-items locations:datum-mod-locations lots:datum-mod-lots; do \
       schema="${pair%%:*}"; \
       owner="${pair##*:}"; \
       for tree in "{{root}}/crates" "{{root}}/modules"; do \
@@ -56,6 +56,7 @@ lint-sql:
           if [ ! -d "$crate_dir" ]; then continue; fi; \
           crate="$(basename "$crate_dir")"; \
           case "$crate" in "$owner"|datum-module|datum-test) continue ;; esac; \
+          if [ "$crate" = "$schema" ]; then continue; fi; \
           src_dir="$crate_dir/src"; \
           if [ ! -d "$src_dir" ]; then continue; fi; \
           if rg -n -i --glob '*.rs' \

@@ -40,14 +40,14 @@ pub async fn migrate(db: &datum_test::TestDb) {
         ("datum-identity", &datum_identity::MIGRATOR),
         ("datum-numbering", &datum_numbering::MIGRATOR),
         ("datum-events", &datum_events::MIGRATOR),
-        ("lots", &lots::MIGRATOR),
+        ("datum-mod-lots", &datum_mod_lots::MIGRATOR),
     ];
     for (name, migrator) in crates {
         datum_db::migrate::run(db.migrate_pool(), &[(*name, *migrator)])
             .await
             .unwrap_or_else(|e| panic!("migrate {name}: {e:#}"));
     }
-    lots::register_schemas().expect("event schemas");
+    datum_mod_lots::register_schemas().expect("event schemas");
 }
 
 pub async fn migrate_kernel(db: &datum_test::TestDb) {
@@ -62,13 +62,16 @@ pub async fn migrate_kernel(db: &datum_test::TestDb) {
         .await
         .expect("install_privileged");
     boot.close().await;
-    datum_db::migrate::run(db.migrate_pool(), &[("lots", &lots::MIGRATOR)])
-        .await
-        .unwrap_or_else(|e| panic!("migrate lots: {e:#}"));
+    datum_db::migrate::run(
+        db.migrate_pool(),
+        &[("datum-mod-lots", &datum_mod_lots::MIGRATOR)],
+    )
+    .await
+    .unwrap_or_else(|e| panic!("migrate lots: {e:#}"));
     datum_module::attach_kernel_audit(db.migrate_pool())
         .await
         .expect("attach_kernel_audit");
-    lots::register_schemas().expect("event schemas");
+    datum_mod_lots::register_schemas().expect("event schemas");
 }
 
 pub fn pg_code_db(err: &datum_db::Error) -> String {
@@ -87,9 +90,9 @@ pub fn pg_code(err: &sqlx::Error) -> String {
         .unwrap_or_else(|| format!("{err}"))
 }
 
-pub fn lots_pg_code(err: &lots::Error) -> String {
+pub fn lots_pg_code(err: &datum_mod_lots::Error) -> String {
     match err {
-        lots::Error::Db(e) => pg_code_db(e),
+        datum_mod_lots::Error::Db(e) => pg_code_db(e),
         other => other.to_string(),
     }
 }

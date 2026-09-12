@@ -27,14 +27,14 @@ pub use domain::{
 pub use error::{Error, Result};
 pub use events::{LOT_CREATED, SERIALS_CREATED, STATUS_CHANGED, register_schemas};
 pub use hooks::register as register_hooks;
-pub use states::{DOC_TYPE, STATES};
+pub use states::{DOC_TYPE, STATES, lot_machine};
 pub use store::{
     attach_udi, create_lot, create_package, create_serials, load_lot, load_serial,
     package_hierarchy, resolve, set_status, trace_keys,
 };
 
 use datum_db::Tx;
-use datum_module::{KernelBuilder, ModuleManifest};
+use datum_module::{KernelBuilder, ModuleManifest, Profile};
 
 /// Embedded migrator (`placeholder` + `0001_lots`).
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
@@ -44,10 +44,20 @@ pub fn manifest() -> Result<ModuleManifest> {
     Ok(ModuleManifest::parse(include_str!("../module.toml"))?)
 }
 
-/// Register event schemas, then fold this module's extension points into `builder`.
-pub fn apply(builder: &mut KernelBuilder) -> Result<()> {
+/// Run this crate's migrations on `pool` (after kernel and dependency modules).
+pub async fn migrate(pool: &datum_db::Pool) -> Result<()> {
+    datum_db::migrate::run(pool, &[("datum-mod-lots", &MIGRATOR)])
+        .await
+        .map_err(Error::from)
+}
+
+/// Register event schemas, routes, and the lot machine on `builder`.
+pub fn register(builder: &mut KernelBuilder, profile: &Profile) -> Result<()> {
     register_schemas()?;
-    builder.apply_manifest(&manifest()?)?;
+    let mut manifest = manifest()?;
+    manifest.machines.clear();
+    builder.apply_manifest(&manifest)?;
+    builder.register_machine(states::lot_machine(profile)?)?;
     register_hooks(builder)?;
     Ok(())
 }
@@ -85,7 +95,7 @@ mod tests {
     #[test]
     fn manifest_parses_lots_id_and_permissions() {
         let m = manifest().expect("module.toml");
-        assert_eq!(m.id, "lots");
+        assert_eq!(m.id, "mod-lots");
         assert!(!m.regulated);
         assert!(m.permissions.contains_key("lots.view"));
         assert!(m.permissions.contains_key("lots.create"));

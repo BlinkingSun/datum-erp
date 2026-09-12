@@ -4,8 +4,8 @@
 
 mod common;
 
+use datum_mod_lots::MIGRATOR;
 use datum_test::db_case;
-use lots::MIGRATOR;
 use sqlx::{migrate::Migrator, query_scalar};
 
 fn lots_migrator() -> Migrator {

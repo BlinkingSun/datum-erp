@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::order::ModuleNode;
+use crate::order::{ModuleNode, topological_order};
 use crate::semver::{Range, Version};
 use crate::toml::{self, Value};
 use crate::{Error, Result};
@@ -364,57 +364,6 @@ pub(crate) fn hex(bytes: [u8; 32]) -> String {
 
 /// Compiled-in Wave 2s module manifests (PLAN §3).
 pub fn compiled_in() -> Result<Vec<ModuleManifest>> {
-    const ITEMS: &str = r#"
-[module]
-id = "mod-items"
-version = "0.1.0"
-name = "Items"
-description = "Part master"
-
-[dependencies]
-kernel = "^0.1"
-
-[permissions]
-"items.view" = "View items"
-
-[capabilities]
-requires-signature = []
-regulated = false
-"#;
-    const LOCATIONS: &str = r#"
-[module]
-id = "mod-locations"
-version = "0.1.0"
-name = "Locations"
-description = "Warehouses, bins, virtual locations"
-
-[dependencies]
-kernel = "^0.1"
-
-[permissions]
-"items.view" = "View locations through items"
-
-[capabilities]
-requires-signature = []
-regulated = false
-"#;
-    const LOTS: &str = r#"
-[module]
-id = "mod-lots"
-version = "0.1.0"
-name = "Lots"
-description = "Lot and serial identity"
-
-[dependencies]
-kernel = "^0.1"
-
-[permissions]
-"items.view" = "View lots"
-
-[capabilities]
-requires-signature = []
-regulated = false
-"#;
     const INVENTORY: &str = r#"
 [module]
 id = "mod-inventory"
@@ -540,15 +489,29 @@ signature_permission = "calibration.approve"
 path = "/api/v1/calibration"
 permission = "calibration.view"
 "#;
-    Ok(vec![
-        ModuleManifest::parse(ITEMS)?,
-        ModuleManifest::parse(LOCATIONS)?,
-        ModuleManifest::parse(LOTS)?,
-        ModuleManifest::parse(INVENTORY)?,
-        ModuleManifest::parse(PRODUCTION)?,
-        ModuleManifest::parse(GENEALOGY)?,
-        ModuleManifest::parse(CALIBRATION)?,
-    ])
+    let wave = [
+        ModuleManifest::parse(crate::install_graph::ITEMS_MANIFEST)?,
+        ModuleManifest::parse(crate::install_graph::LOCATIONS_MANIFEST)?,
+        ModuleManifest::parse(crate::install_graph::LOTS_MANIFEST)?,
+    ];
+    let nodes: Vec<ModuleNode> = wave.iter().map(|m| m.node()).collect();
+    let order = topological_order(&nodes)?;
+    let by_id: std::collections::BTreeMap<&str, &ModuleManifest> =
+        wave.iter().map(|m| (m.id.as_str(), m)).collect();
+    let mut out: Vec<ModuleManifest> = order
+        .iter()
+        .map(|id| {
+            by_id
+                .get(id.as_str())
+                .map(|m| (*m).clone())
+                .ok_or_else(|| Error::UnknownModule(id.clone()))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    out.push(ModuleManifest::parse(INVENTORY)?);
+    out.push(ModuleManifest::parse(PRODUCTION)?);
+    out.push(ModuleManifest::parse(GENEALOGY)?);
+    out.push(ModuleManifest::parse(CALIBRATION)?);
+    Ok(out)
 }
 
 /// Graph of [`compiled_in`].

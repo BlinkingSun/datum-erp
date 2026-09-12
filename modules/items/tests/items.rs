@@ -7,9 +7,11 @@ mod common;
 use datum_core::ItemId;
 use datum_db::Tx;
 use datum_ledger::load_stock_item;
+use datum_mod_items::domain::number_is_valid;
+use datum_mod_items::{
+    Kind, ListFilter, Status, UpdateItem, create, get, list, obsolete, release, update,
+};
 use datum_test::db_case;
-use items::domain::number_is_valid;
-use items::{Kind, ListFilter, Status, UpdateItem, create, get, list, obsolete, release, update};
 use sqlx::query as sql_query;
 
 use common::{
@@ -54,7 +56,10 @@ async fn item_number_charset_enforced() {
     bad.number = "HAS SPACE".into();
     let mut tx = Tx::begin(&write, &create_ctx(actor)).await.expect("begin");
     let err = create(&mut tx, &kernel, bad).await.expect_err("charset");
-    assert!(matches!(err, items::Error::InvalidNumber), "got {err:?}");
+    assert!(
+        matches!(err, datum_mod_items::Error::InvalidNumber),
+        "got {err:?}"
+    );
     tx.rollback().await.expect("rollback");
     db.finish().await.expect("finish");
 }
@@ -89,7 +94,7 @@ async fn stock_unit_immutable_after_first_posting() {
     .await
     .expect_err("immutable");
     assert!(
-        matches!(err, items::Error::StockMeasureImmutable),
+        matches!(err, datum_mod_items::Error::StockMeasureImmutable),
         "got {err:?}"
     );
     tx.rollback().await.expect("rollback");
@@ -161,7 +166,7 @@ async fn obsolete_item_cannot_be_released_again() {
     assert!(
         matches!(
             err,
-            items::Error::InvalidTransition { ref edge, ref status }
+            datum_mod_items::Error::InvalidTransition { ref edge, ref status }
                 if edge == "release" && status == "obsolete"
         ),
         "got {err:?}"
@@ -198,7 +203,10 @@ async fn optimistic_version_conflict_is_typed() {
     )
     .await
     .expect_err("conflict");
-    assert!(matches!(err, items::Error::VersionConflict), "got {err:?}");
+    assert!(
+        matches!(err, datum_mod_items::Error::VersionConflict),
+        "got {err:?}"
+    );
     tx.rollback().await.expect("rollback");
     db.finish().await.expect("finish");
 }

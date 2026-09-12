@@ -6,13 +6,13 @@ mod common;
 
 use datum_core::{ItemId, LotId};
 use datum_db::Tx;
-use datum_module::{Kernel, Profile};
-use datum_test::db_case;
-use lots::{
+use datum_mod_lots::{
     CreateLot, CreateLotBody, Expiry, ExpiryPrecision, ExpiryWire, LotStatus, PackageLevel,
     StatusTarget, UdiTarget, attach_udi, create_lot, create_package, create_serials,
     package_hierarchy, resolve, set_status, trace_keys, validate_identifier,
 };
+use datum_module::{Kernel, Profile};
+use datum_test::db_case;
 
 #[tokio::test]
 async fn lot_number_charset_and_length_enforced() {
@@ -37,7 +37,7 @@ async fn lot_number_charset_and_length_enforced() {
     )
     .await
     .unwrap_err();
-    assert!(matches!(err, lots::Error::InvalidIdentifier(_)));
+    assert!(matches!(err, datum_mod_lots::Error::InvalidIdentifier(_)));
 
     let err = create_lot(
         &mut tx,
@@ -49,7 +49,7 @@ async fn lot_number_charset_and_length_enforced() {
     )
     .await
     .unwrap_err();
-    assert!(matches!(err, lots::Error::Numbering(_)));
+    assert!(matches!(err, datum_mod_lots::Error::Numbering(_)));
 
     let err = create_lot(
         &mut tx,
@@ -61,7 +61,7 @@ async fn lot_number_charset_and_length_enforced() {
     )
     .await
     .unwrap_err();
-    assert!(matches!(err, lots::Error::Numbering(_)));
+    assert!(matches!(err, datum_mod_lots::Error::Numbering(_)));
 
     let err = create_lot(
         &mut tx,
@@ -73,7 +73,7 @@ async fn lot_number_charset_and_length_enforced() {
     )
     .await
     .unwrap_err();
-    assert!(matches!(err, lots::Error::Numbering(_)));
+    assert!(matches!(err, datum_mod_lots::Error::Numbering(_)));
 
     tx.rollback().await.unwrap();
 
@@ -146,7 +146,7 @@ async fn supplier_lot_is_a_cross_reference_not_the_id() {
     let id = resolve(&mut tx, "LOT-BAR-24-4412").await.unwrap();
     assert_eq!(id, lot.id);
     let err = resolve(&mut tx, "ATI-HEAT-XYZ").await.unwrap_err();
-    assert!(matches!(err, lots::Error::UnknownNumber(_)));
+    assert!(matches!(err, datum_mod_lots::Error::UnknownNumber(_)));
     tx.commit().await.unwrap();
     db.finish().await.unwrap();
 }
@@ -234,7 +234,7 @@ async fn expiry_month_precision_survives_round_trip() {
     assert_eq!(lot.expiry.unwrap().date.to_string(), "2026-09-01");
     assert_eq!(lot.expiry.unwrap().precision, ExpiryPrecision::Month);
 
-    let body = lots::LotBody::from(lot.clone());
+    let body = datum_mod_lots::LotBody::from(lot.clone());
     assert_eq!(body.expiry.as_ref().unwrap().date, "2026-09");
     assert_eq!(
         body.expiry.as_ref().unwrap().precision,
@@ -405,9 +405,11 @@ async fn udi_attachment_columns_are_nullable_and_settable() {
     )
     .await
     .unwrap();
-    let lot = lots::load_lot(&mut tx, lot.id).await.unwrap();
+    let lot = datum_mod_lots::load_lot(&mut tx, lot.id).await.unwrap();
     assert_eq!(lot.udi_device_identifier.as_deref(), Some("00850027865010"));
-    let serial = lots::load_serial(&mut tx, serials[0].id).await.unwrap();
+    let serial = datum_mod_lots::load_serial(&mut tx, serials[0].id)
+        .await
+        .unwrap();
     assert_eq!(
         serial.udi_production_identifier.as_deref(),
         Some("LOT-BAR-24-4412")
@@ -508,7 +510,7 @@ async fn module_registers_through_kernel_extension_points() {
     let db = db_case!("lots_kernel");
     common::migrate_kernel(&db).await;
     let mut builder = Kernel::builder(db.app_pool().clone(), Profile::plain_shop().unwrap());
-    lots::apply(&mut builder).unwrap();
+    datum_mod_lots::register(&mut builder, &Profile::plain_shop().unwrap()).unwrap();
     let kernel = builder.build().await.expect("kernel build");
     assert!(
         kernel
@@ -528,7 +530,7 @@ async fn http_create_renders_month_expiry() {
     let write = common::write_pool(&db);
     let ctx = common::write_ctx("lots.create");
     let mut tx = Tx::begin(&write, &ctx).await.unwrap();
-    let body = lots::create_lot_http(
+    let body = datum_mod_lots::create_lot_http(
         &mut tx,
         CreateLotBody {
             item_id: ItemId::generate(),

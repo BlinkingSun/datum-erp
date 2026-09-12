@@ -11,11 +11,12 @@ use datum_db::{Tx, WriteContext, WritePool};
 use datum_identity::rbac::{RoleBundle, assign_role, seed_bundles};
 use datum_identity::{PrincipalKind, create_principal};
 use datum_ledger::{CostMethod, GroupBuilder, upsert_location};
+use datum_mod_items::{DOC_TYPE, Kind, NewItem};
 use datum_module::{
-    Kernel, KernelBuilder, Profile, attach_kernel_audit, migrate_prefix, migrate_suffix,
+    Kernel, KernelBuilder, Profile, attach_kernel_audit, install_kernel, migrate_prefix,
+    migrate_suffix,
 };
 use datum_statemachine::DocRef;
-use items::{DOC_TYPE, Kind, NewItem};
 use rust_decimal::Decimal;
 use sqlx::{PgPool, query_scalar as sql_query_scalar};
 
@@ -34,11 +35,12 @@ pub async fn migrate_all(db: &datum_test::TestDb) {
         .await
         .expect("install_privileged");
     boot.close().await;
-    // Items SQL must run before attach_kernel_audit so datum.schema_history
-    // (not yet triggered) can record the crate without an actor GUC.
-    datum_db::migrate::run(db.migrate_pool(), &[("items", &items::MIGRATOR)])
-        .await
-        .unwrap_or_else(|e| panic!("migrate items: {e:#}"));
+    datum_db::migrate::run(
+        db.migrate_pool(),
+        &[("datum-mod-items", &datum_mod_items::MIGRATOR)],
+    )
+    .await
+    .unwrap_or_else(|e| panic!("migrate items: {e:#}"));
     attach_kernel_audit(db.migrate_pool())
         .await
         .expect("attach_kernel_audit");
@@ -47,7 +49,8 @@ pub async fn migrate_all(db: &datum_test::TestDb) {
 pub async fn boot_kernel(db: &datum_test::TestDb) -> Kernel {
     migrate_all(db).await;
     let mut builder = Kernel::builder(db.app_pool().clone(), Profile::plain_shop().unwrap());
-    items::register(&mut builder).expect("register items");
+    datum_mod_items::register(&mut builder, &Profile::plain_shop().unwrap())
+        .expect("register items");
     builder.build().await.expect("kernel build")
 }
 

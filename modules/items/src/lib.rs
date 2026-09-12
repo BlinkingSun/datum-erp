@@ -27,7 +27,7 @@ pub use error::{Error, Result};
 pub use states::item_machine;
 pub use store::{create, get, list, obsolete, release, update};
 
-use datum_module::{KernelBuilder, ModuleManifest};
+use datum_module::{KernelBuilder, ModuleManifest, Profile};
 
 /// Embedded migrator (`placeholder` + `0001_items`).
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
@@ -37,13 +37,20 @@ pub fn manifest() -> Result<ModuleManifest> {
     Ok(ModuleManifest::parse(include_str!("../module.toml"))?)
 }
 
+/// Run this crate's migrations on `pool` (after kernel migrators).
+pub async fn migrate(pool: &datum_db::Pool) -> Result<()> {
+    datum_db::migrate::run(pool, &[("datum-mod-items", &MIGRATOR)])
+        .await
+        .map_err(Error::from)
+}
+
 /// Register routes, events, and the item state machine on `builder`.
 ///
 /// Machines are registered through [`KernelBuilder::register_machine`] with an
 /// explicit [`datum_statemachine::SignatureDeclaration::NotRequired`] reason
 /// (the composition-root TOML converter does not preserve `reason` on
 /// non-required edges).
-pub fn register(builder: &mut KernelBuilder) -> Result<()> {
+pub fn register(builder: &mut KernelBuilder, _profile: &Profile) -> Result<()> {
     events::register_event_schemas()?;
     hooks::register_hooks(builder);
     let mut manifest = manifest()?;
@@ -78,7 +85,7 @@ mod tests {
     #[test]
     fn manifest_id_is_items_and_not_regulated() {
         let m = manifest().expect("module.toml");
-        assert_eq!(m.id, "items");
+        assert_eq!(m.id, "mod-items");
         assert!(!m.regulated);
         assert_eq!(
             m.dependencies.get("kernel").map(String::as_str),

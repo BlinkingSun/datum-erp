@@ -14,6 +14,7 @@ use rust_decimal as _;
 
 mod config;
 mod error;
+mod install_graph;
 mod kernel;
 mod manifest;
 mod order;
@@ -27,6 +28,11 @@ pub use config::{
     export as export_manifest, load_kernel_defaults, verify,
 };
 pub use error::{Error, Result};
+pub use install_graph::{
+    ITEMS_MIGRATOR, LOCATIONS_MIGRATOR, LOTS_MIGRATOR, ModuleInstallSpec, WAVE_2S1_AUDIT_RELS,
+    lots_release_is_required, manifest_machines_owned_by_register, migrate_wave_2s1_modules,
+    spec_by_id, wave_2s1_migrators, wave_2s1_order, wave_2s1_specs,
+};
 pub use kernel::{
     Kernel, KernelBuilder, ModuleJob, ModuleRoute, bind_signature_gate, edges_from_registry,
     module_nodes, posting_sink, startup_fails_if_required_meets_no_signatures,
@@ -57,6 +63,13 @@ pub mod manifest_export {
 
 /// Embedded migrator (`placeholder` + `0001_module`).
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
+
+#[cfg(test)]
+mod _wave_2s1_dev_deps {
+    use datum_mod_items as _;
+    use datum_mod_locations as _;
+    use datum_mod_lots as _;
+}
 
 #[cfg(test)]
 mod tests {

@@ -24,7 +24,8 @@ pub use domain::{
 pub use error::{Error, Result};
 pub use events::{LOCATION_DEACTIVATED, register_schemas};
 pub use store::{
-    boundary_location_id, create, deactivate, ensure_wip, get, list_flat, seed_install, update,
+    boundary_location_id, create, deactivate, default_site_id, ensure_wip, get, list_flat,
+    seed_install, update,
 };
 
 use datum_module::ModuleManifest;

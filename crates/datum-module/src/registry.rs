@@ -53,7 +53,88 @@ pub async fn install(tx: &mut Tx<'_>, manifest: &ModuleManifest, enabled: bool) 
         };
         seed_bundles(tx, &[bundle]).await?;
     }
+    if manifest.id == "mod-locations" {
+        let (exists,): (bool,) = tx
+            .fetch_one(sqlx::query_as(
+                "SELECT to_regclass('locations.site') IS NOT NULL",
+            ))
+            .await?;
+        if exists {
+            seed_locations_install(tx).await?;
+        }
+    }
     Ok(())
+}
+
+async fn seed_locations_install(tx: &mut Tx<'_>) -> Result<()> {
+    use datum_core::Boundary;
+    use datum_ledger::upsert_location;
+
+    let site = datum_core::Identifier::from_uuid(uuid::Uuid::from_bytes([
+        0x6b, 0xa7, 0xb8, 0x10, 0x9d, 0xad, 0x11, 0xd1, 0x80, 0xb4, 0x00, 0xc0, 0x4f, 0xd4, 0x30,
+        0xc8,
+    ]));
+    tx.execute(
+        sqlx::query(
+            "INSERT INTO locations.site (id, code, name, version)
+             VALUES ($1, 'MAIN', 'Main site', 1)
+             ON CONFLICT (id) DO NOTHING",
+        )
+        .bind(site.as_uuid()),
+    )
+    .await?;
+    for boundary in [
+        Boundary::Supplier,
+        Boundary::Customer,
+        Boundary::Scrap,
+        Boundary::Adjustment,
+        Boundary::Rounding,
+        Boundary::Consumed,
+        Boundary::Produced,
+    ] {
+        let code = match boundary {
+            Boundary::Supplier => "SUPPLIER",
+            Boundary::Customer => "CUSTOMER",
+            Boundary::Scrap => "SCRAP",
+            Boundary::Adjustment => "ADJUSTMENT",
+            Boundary::Rounding => "ROUNDING",
+            Boundary::Consumed => "CONSUMED",
+            Boundary::Produced => "PRODUCED",
+            _ => continue,
+        };
+        let name = format!("Virtual {code}");
+        let id = boundary_location_id(boundary);
+        tx.execute(
+            sqlx::query(
+                "INSERT INTO locations.location
+                    (id, code, name, site_id, parent_id, kind, boundary_class, status, version)
+                 VALUES ($1, $2, $3, $4, NULL, 'virtual', $5::ledger.boundary, 'active', 1)
+                 ON CONFLICT (boundary_class) WHERE boundary_class IS NOT NULL DO NOTHING",
+            )
+            .bind(id.as_uuid())
+            .bind(code)
+            .bind(name)
+            .bind(site.as_uuid())
+            .bind(datum_ledger::boundary_sql(boundary)?),
+        )
+        .await?;
+        upsert_location(tx, id, Some(boundary)).await?;
+    }
+    Ok(())
+}
+
+fn boundary_location_id(boundary: datum_core::Boundary) -> datum_core::LocationId {
+    let bytes: [u8; 16] = match boundary {
+        datum_core::Boundary::Supplier => [0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01],
+        datum_core::Boundary::Customer => [0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x02],
+        datum_core::Boundary::Scrap => [0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x03],
+        datum_core::Boundary::Adjustment => [0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x04],
+        datum_core::Boundary::Rounding => [0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x05],
+        datum_core::Boundary::Consumed => [0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x06],
+        datum_core::Boundary::Produced => [0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x07],
+        _ => [0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x08],
+    };
+    datum_core::LocationId::from_uuid(uuid::Uuid::from_bytes(bytes))
 }
 
 /// Enable `id` and every dependency (closure rule).

@@ -34,8 +34,13 @@ serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
+datum-mod-items = { path = "../../modules/items" }
+datum-mod-locations = { path = "../../modules/locations" }
+datum-mod-lots = { path = "../../modules/lots" }
+datum-ledger.workspace = true
 datum-test.workspace = true
 tokio.workspace = true
 proptest.workspace = true

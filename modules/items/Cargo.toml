@@ -1,5 +1,5 @@
 [package]
-name = "items"
+name = "datum-mod-items"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -20,7 +20,7 @@ datum-core.workspace = true
 datum-db.workspace = true
 datum-events.workspace = true
 datum-ledger.workspace = true
-datum-module.workspace = true
+datum-module = { path = "../../crates/datum-module", default-features = false }
 datum-statemachine.workspace = true
 datum-uom.workspace = true
 rust_decimal.workspace = true

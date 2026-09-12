@@ -1,11 +1,13 @@
 [module]
-id = "lots"
+id = "mod-lots"
 version = "0.1.0"
 name = "Lots"
 description = "Lot and serial identity, package hierarchy, expiry precision, and UDI attachment"
 
 [dependencies]
 kernel = "^0.1"
+mod-items = "^0.1"
+mod-locations = "^0.1"
 
 [permissions]
 "lots.view" = "View lots, serials, and packages"

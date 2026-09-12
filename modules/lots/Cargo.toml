@@ -1,5 +1,5 @@
 [package]
-name = "lots"
+name = "datum-mod-lots"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -19,8 +19,9 @@ test-utils = []
 datum-core.workspace = true
 datum-db.workspace = true
 datum-events.workspace = true
-datum-module.workspace = true
+datum-module = { path = "../../crates/datum-module", default-features = false }
 datum-numbering.workspace = true
+datum-statemachine.workspace = true
 chrono.workspace = true
 rust_decimal.workspace = true
 serde.workspace = true
@@ -35,7 +36,7 @@ datum-core.workspace = true
 datum-db.workspace = true
 datum-events.workspace = true
 datum-identity.workspace = true
-datum-module.workspace = true
+datum-module = { path = "../../crates/datum-module", default-features = false }
 datum-numbering.workspace = true
 datum-test.workspace = true
 tokio.workspace = true

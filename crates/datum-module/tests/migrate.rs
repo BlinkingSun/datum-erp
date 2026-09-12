@@ -108,3 +108,63 @@ async fn migrate_down_then_up() {
     );
     db.finish().await.expect("finish");
 }
+
+#[tokio::test]
+async fn wave_2s1_migrate_down_then_up() {
+    let db = db_case!("w2s1_down_up");
+    datum_module::migrate_prefix(db.migrate_pool())
+        .await
+        .expect("prefix");
+    datum_module::migrate_suffix(db.migrate_pool())
+        .await
+        .expect("suffix");
+
+    let order = datum_module::wave_2s1_order().expect("order");
+    assert_eq!(
+        order,
+        vec![
+            "mod-items".to_string(),
+            "mod-locations".to_string(),
+            "mod-lots".to_string(),
+        ],
+        "lots runs after items and locations"
+    );
+
+    for (name, migrator) in datum_module::wave_2s1_migrators().expect("migrators") {
+        let rel = match name {
+            "datum-mod-items" => "items.item",
+            "datum-mod-locations" => "locations.site",
+            "datum-mod-lots" => "lots.lot",
+            other => panic!("unexpected crate {other}"),
+        };
+        let mut m = Migrator::with_migrations(migrator.iter().cloned().collect());
+        m.dangerous_set_table_name(format!(
+            "transient._sqlx_migrations_{}",
+            name.replace('-', "_")
+        ));
+        m.run(db.migrate_pool()).await.expect("up");
+        let present: bool = sqlx::query_scalar("SELECT to_regclass($1) IS NOT NULL")
+            .bind(rel)
+            .fetch_one(db.migrate_pool())
+            .await
+            .expect("present");
+        assert!(present, "{name} must exist after up");
+
+        m.undo(db.migrate_pool(), 0).await.expect("down");
+        let gone: bool = sqlx::query_scalar("SELECT to_regclass($1) IS NULL")
+            .bind(rel)
+            .fetch_one(db.migrate_pool())
+            .await
+            .expect("gone");
+        assert!(gone, "{name} down must drop {rel}");
+
+        m.run(db.migrate_pool()).await.expect("up again");
+        let again: bool = sqlx::query_scalar("SELECT to_regclass($1) IS NOT NULL")
+            .bind(rel)
+            .fetch_one(db.migrate_pool())
+            .await
+            .expect("again");
+        assert!(again, "{name} second up must recreate {rel}");
+    }
+    db.finish().await.expect("finish");
+}

@@ -21,7 +21,7 @@ datum-db.workspace = true
 datum-audit.workspace = true
 datum-events.workspace = true
 datum-ledger.workspace = true
-datum-module.workspace = true
+datum-module = { path = "../../crates/datum-module", default-features = false }
 sqlx.workspace = true
 thiserror.workspace = true
 serde.workspace = true

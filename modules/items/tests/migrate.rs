@@ -2,9 +2,9 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, unused_crate_dependencies)]
 
+use datum_mod_items::MIGRATOR;
 use datum_module::{migrate_prefix, migrate_suffix};
 use datum_test::db_case;
-use items::MIGRATOR;
 use sqlx::{migrate::Migrator, query_scalar};
 
 fn items_migrator() -> Migrator {
