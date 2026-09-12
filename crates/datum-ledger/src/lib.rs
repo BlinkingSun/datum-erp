@@ -27,6 +27,8 @@ pub use allocate::{
     AllocationEdge, Layer, SQL_OPEN_LAYERS, allocate_withdrawal, load_open_layers,
     sql_reads_consuming_value_rows, take_query_log,
 };
+#[cfg(feature = "test-utils")]
+pub use builder::test_inject_quantity_without_contributed_mark;
 pub use builder::{GroupBuilder, UOM_CONVERSION_RESIDUAL};
 pub use enums::{
     CostMethod, Measure, boundary_from_sql, boundary_permitted, boundary_sql, boundary_variants,
@@ -37,6 +39,8 @@ pub use enums::{
 };
 pub use error::{Error, Result, map_sqlstate};
 pub use genealogy::{Node, TraceStart, trace_backward, trace_forward};
+#[cfg(feature = "test-utils")]
+pub use poison::test_is_marked as test_poison_is_marked;
 pub use post::{bind_tx, commit, post};
 pub use projections::{BalanceSlice, apply_group, balance_at, rebuild, verify_projection};
 pub use registry::{StockItem, load_stock_item, upsert_location, upsert_stock_item};

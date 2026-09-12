@@ -51,6 +51,7 @@ pub async fn commit(mut tx: Tx<'_>, sinks: &[&GroupBuilder]) -> Result<()> {
     let txid = tx.pg_txid().await.map_err(Error::from)?;
     if poison::is_marked(&txid) || sinks.iter().any(|s| s.unfinalized()) {
         let _ = tx.rollback().await;
+        poison::clear(&txid);
         return Err(Error::Unfinalized);
     }
     tx.commit().await.map_err(Error::from)

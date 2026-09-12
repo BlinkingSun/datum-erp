@@ -11,7 +11,8 @@ use datum_core::{
 use datum_db::Tx;
 use datum_ledger::{
     BalanceSlice, CostMethod, GroupBuilder, apply_group, balance_at, bind_tx, commit, post,
-    rebuild, reverse, upsert_stock_item, verify_projection,
+    rebuild, reverse, test_inject_quantity_without_contributed_mark, test_poison_is_marked,
+    upsert_stock_item, verify_projection,
 };
 use rust_decimal::Decimal;
 
@@ -137,6 +138,32 @@ async fn unfinalized_mut_dyn_posting_sink_poisons() {
     drop(builder);
     let err = commit(tx, &[]).await.expect_err("mut dyn poison");
     assert!(matches!(err, datum_ledger::Error::Unfinalized));
+    db.finish().await.unwrap();
+}
+
+#[tokio::test]
+async fn group_builder_drop_does_not_poison_without_contributed_mark() {
+    let db = datum_test::db_case!("drop_no_contrib");
+    common::migrate(&db).await;
+    let pool = write_pool(&db);
+    let ctx = write_ctx(actor(), "drop_no_contrib");
+    let mut tx = Tx::begin(&pool, &ctx).await.unwrap();
+    let w = seed_world(&mut tx).await;
+    let mut b = GroupBuilder::new(GroupKind::Movement, movement_header("drop_nc"));
+    bind_tx(&mut b, &mut tx).await.unwrap();
+    test_inject_quantity_without_contributed_mark(
+        &mut b,
+        q_post(w.bar, qty_ft("1.0000"), w.quarantine, None, None),
+    );
+    drop(b);
+    let txid = tx.pg_txid().await.unwrap();
+    assert!(
+        !test_poison_is_marked(&txid),
+        "Drop must not poison when contributed is false"
+    );
+    commit(tx, &[])
+        .await
+        .expect("commit after non-contributed Drop");
     db.finish().await.unwrap();
 }
 

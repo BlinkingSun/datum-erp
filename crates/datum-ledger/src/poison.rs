@@ -26,3 +26,9 @@ pub fn clear(txid: &str) {
 pub fn is_marked(txid: &str) -> bool {
     lock(poisoned()).contains(txid)
 }
+
+/// Whether `txid` is poisoned (`test-utils` only).
+#[cfg(feature = "test-utils")]
+pub fn test_is_marked(txid: &str) -> bool {
+    is_marked(txid)
+}

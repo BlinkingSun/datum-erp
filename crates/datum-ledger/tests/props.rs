@@ -59,30 +59,7 @@ async fn p1_quantity() {
     let db = datum_test::db_case!("p1");
     common::migrate(&db).await;
     let pool = write_pool(&db);
-    generator_shard_run(&pool, 1, 0, "ledger.p1gen").await;
-    let ctx = write_ctx(actor(), "ledger.p1");
-    let mut tx = Tx::begin(&pool, &ctx).await.unwrap();
-    let w = seed_world(&mut tx).await;
-    let mut b = GroupBuilder::new(GroupKind::Movement, movement_header("p1"));
-    b.contribute(PostingIntent::Quantity(q_post(
-        w.bar,
-        qty_ft("10.0000"),
-        w.quarantine,
-        None,
-        None,
-    )))
-    .unwrap();
-    b.contribute(PostingIntent::Quantity(q_post(
-        w.bar,
-        qty_ft("-1.0000"),
-        w.supplier,
-        Some(Boundary::Supplier),
-        None,
-    )))
-    .unwrap();
-    post(&mut tx, b).await.expect("insert");
-    let err = tx.commit().await.expect_err("P1");
-    assert_eq!(pg_code_db(&err), "ZL002");
+    generator_shard_run(&pool, 1, "ledger.p1gen").await;
     db.finish().await.unwrap();
 }
 
@@ -91,38 +68,7 @@ async fn p2_value() {
     let db = datum_test::db_case!("p2");
     common::migrate(&db).await;
     let pool = write_pool(&db);
-    generator_shard_run(&pool, 2, 1, "ledger.p2gen").await;
-    let ctx = write_ctx(actor(), "ledger.p2");
-    let mut tx = Tx::begin(&pool, &ctx).await.unwrap();
-    let w = seed_world(&mut tx).await;
-    let mut b = GroupBuilder::new(GroupKind::Movement, movement_header("p2"));
-    let recv = b
-        .contribute(PostingIntent::Quantity(q_post(
-            w.bar,
-            qty_ft("10.0000"),
-            w.quarantine,
-            None,
-            None,
-        )))
-        .unwrap();
-    b.contribute(PostingIntent::Quantity(q_post(
-        w.bar,
-        qty_ft("-10.0000"),
-        w.supplier,
-        Some(Boundary::Supplier),
-        None,
-    )))
-    .unwrap();
-    b.contribute(PostingIntent::Value(v_post(
-        ValueAccount::Inventory,
-        usd("23.60"),
-        Some(recv),
-        None,
-    )))
-    .unwrap();
-    post(&mut tx, b).await.expect("insert");
-    let err = tx.commit().await.expect_err("P2-A");
-    assert_eq!(pg_code_db(&err), "ZL003");
+    generator_shard_run(&pool, 2, "ledger.p2gen").await;
     db.finish().await.unwrap();
 }
 
@@ -178,48 +124,7 @@ async fn p3_coupling() {
     let db = datum_test::db_case!("p3");
     common::migrate(&db).await;
     let pool = write_pool(&db);
-    let ctx = write_ctx(actor(), "ledger.p3");
-    let mut tx = Tx::begin(&pool, &ctx).await.unwrap();
-    let w = seed_world(&mut tx).await;
-    post_case_a(&mut tx, &w).await;
-    post_case_b(&mut tx, &w).await;
-    let mut header = movement_header("wo");
-    header.work_order_id = Some(w.wo);
-    let mut b = GroupBuilder::new(GroupKind::Movement, header);
-    let out = b
-        .contribute(PostingIntent::Quantity(q_post(
-            w.bar,
-            qty_ft("-20.0000"),
-            w.available,
-            None,
-            Some(w.lot_bar),
-        )))
-        .unwrap();
-    let into = b
-        .contribute(PostingIntent::Quantity(q_post(
-            w.bar,
-            qty_ft("20.0000"),
-            w.wip,
-            None,
-            Some(w.lot_bar),
-        )))
-        .unwrap();
-    b.contribute(PostingIntent::Value(v_post(
-        ValueAccount::Inventory,
-        usd("-47.20"),
-        Some(out),
-        None,
-    )))
-    .unwrap();
-    b.contribute(PostingIntent::Value(v_post(
-        ValueAccount::Wip,
-        usd("47.20"),
-        Some(into),
-        Some(w.wo),
-    )))
-    .unwrap();
-    post(&mut tx, b).await.expect("allocate");
-    commit_ok(tx).await;
+    generator_shard_run(&pool, 3, "ledger.p3gen").await;
     db.finish().await.unwrap();
 }
 
@@ -228,7 +133,6 @@ async fn p3_independent_sources() {
     let db = datum_test::db_case!("p3ind");
     common::migrate(&db).await;
     let pool = write_pool(&db);
-    generator_shard_run(&pool, 3, 4, "ledger.p3gen").await;
     let ctx = write_ctx(actor(), "ledger.p3ind");
     let mut tx = Tx::begin(&pool, &ctx).await.unwrap();
     let w = seed_world(&mut tx).await;
@@ -327,15 +231,7 @@ async fn p4_reversal() {
     let db = datum_test::db_case!("p4");
     common::migrate(&db).await;
     let pool = write_pool(&db);
-    generator_shard_run(&pool, 3, 5, "ledger.p4gen").await;
-    let ctx = write_ctx(actor(), "ledger.p4");
-    let mut tx = Tx::begin(&pool, &ctx).await.unwrap();
-    let w = seed_world(&mut tx).await;
-    post_case_a(&mut tx, &w).await;
-    post_case_b(&mut tx, &w).await;
-    let c = post_case_c(&mut tx, &w).await;
-    datum_ledger::reverse(&mut tx, c, "undo").await.unwrap();
-    commit_ok(tx).await;
+    generator_shard_run(&pool, 4, "ledger.p4gen").await;
     db.finish().await.unwrap();
 }
 
@@ -444,25 +340,45 @@ const GENERATOR_CORRUPTIONS: &[(&str, &str)] = &[
     ("identity_crossing", "23514"),
     ("allocation_qty", "ZL005"),
     ("allocation_money", "ZL005"),
+    ("wrong_location_consumption", "IneligibleLayer"),
 ];
 
+const GENERATOR_SEQ_PER_SHARD: u8 = 8;
+const GENERATOR_CORRUPT_PER_SHARD: u8 = 5;
+const GENERATOR_SHARD_SEED: u64 = 0x4C32_C200_0000_0001;
+
 async fn generate_legitimate_sequence(seed: u8, tx: &mut Tx<'_>, w: &World) {
-    let a = post_case_a(tx, w).await;
-    let mut last = a;
-    if seed % 4 >= 1 {
-        last = post_case_b(tx, w).await;
-    }
-    if seed % 4 >= 2 {
-        last = post_case_c(tx, w).await;
-    }
-    if seed % 4 == 3 {
-        datum_ledger::reverse(tx, last, "generator")
+    let feet = match seed % 4 {
+        0 => "5.0000",
+        1 => "10.0000",
+        2 => "15.0000",
+        _ => "20.0000",
+    };
+    // receipt (MOVEMENT into quarantine), release, issue — FIFO bar / lot_bar / quarantine→available→wip
+    post_case_a(tx, w).await;
+    post_case_b(tx, w).await;
+    let issue = post_case_c(tx, w).await;
+    // internal MOVEMENT across two real locations (available ↔ fg)
+    post_gen_internal_move(tx, w, feet).await;
+    // ADJUSTMENT on FIFO bar at `available`
+    post_gen_adjustment(tx, w).await;
+    // TRANSFORMATION + explicit consumption; STANDARD screw / lot_fg
+    let xform = post_gen_transformation(tx, w).await;
+    // release/issue STANDARD screws to customer
+    let release = post_gen_screw_release(tx, w).await;
+    let reverse_target = match seed % 3 {
+        0 => issue,
+        1 => xform,
+        _ => release,
+    };
+    if seed % 2 == 1 {
+        datum_ledger::reverse(tx, reverse_target, "generator")
             .await
             .expect("reverse in generator");
     }
 }
 
-async fn run_generator_corruption(index: usize, mut tx: Tx<'_>, w: &World) {
+async fn run_generator_corruption(seed: u64, index: usize, mut tx: Tx<'_>, w: &World) {
     let (name, sqlstate) = GENERATOR_CORRUPTIONS[index];
     let immediate = generate_corruption(name, &mut tx, w).await;
     let got = if immediate.is_empty() {
@@ -474,20 +390,32 @@ async fn run_generator_corruption(index: usize, mut tx: Tx<'_>, w: &World) {
     };
     assert_eq!(
         got, sqlstate,
-        "corruption {name} wanted {sqlstate} got {got}"
+        "seed={seed} corruption {name} wanted {sqlstate} got {got}"
     );
 }
 
-async fn generator_shard_run(pool: &WritePool, seed: u8, corrupt_index: usize, tag: &str) {
-    let ctx = write_ctx(actor(), tag);
-    let mut tx = Tx::begin(pool, &ctx).await.unwrap();
-    let w = seed_world(&mut tx).await;
-    generate_legitimate_sequence(seed, &mut tx, &w).await;
-    commit_ok(tx).await;
-    let ctx2 = write_ctx(actor(), &format!("{tag}c"));
-    let mut tx2 = Tx::begin(pool, &ctx2).await.unwrap();
-    let w2 = seed_world(&mut tx2).await;
-    run_generator_corruption(corrupt_index, tx2, &w2).await;
+async fn generator_shard_run(pool: &WritePool, shard: u8, tag: &str) {
+    let base = GENERATOR_SHARD_SEED ^ (shard as u64);
+    for i in 0..GENERATOR_SEQ_PER_SHARD {
+        let seed = base + i as u64;
+        let ctx = write_ctx(actor(), &format!("{tag}s{i}"));
+        let mut tx = Tx::begin(pool, &ctx).await.unwrap_or_else(|e| {
+            panic!("shard {shard} sequence {i} seed={seed} begin: {e}");
+        });
+        let w = seed_world(&mut tx).await;
+        generate_legitimate_sequence(i, &mut tx, &w).await;
+        commit_ok(tx).await;
+    }
+    for j in 0..GENERATOR_CORRUPT_PER_SHARD {
+        let seed = base + 100 + j as u64;
+        let idx = (seed as usize) % GENERATOR_CORRUPTIONS.len();
+        let ctx2 = write_ctx(actor(), &format!("{tag}c{j}"));
+        let mut tx2 = Tx::begin(pool, &ctx2).await.unwrap_or_else(|e| {
+            panic!("shard {shard} corruption {j} seed={seed} begin: {e}");
+        });
+        let w2 = seed_world(&mut tx2).await;
+        run_generator_corruption(seed, idx, tx2, &w2).await;
+    }
 }
 
 async fn generate_corruption(kind: &str, tx: &mut Tx<'_>, w: &World) -> String {
@@ -733,8 +661,6 @@ async fn generate_corruption(kind: &str, tx: &mut Tx<'_>, w: &World) -> String {
             let layer = layer_at(tx, w.bar, w.available).await.expect("layer");
             let gid = raw_uncovered_issue(tx, w, "gen_am").await;
             let consuming = {
-                let ids = posting_ids_for_group(tx, datum_core::Identifier::from_uuid(gid)).await;
-                // withdrawal is the negative quantity row
                 let row: (i64,) = tx
                     .fetch_one(
                         sqlx::query_as(
@@ -745,11 +671,60 @@ async fn generate_corruption(kind: &str, tx: &mut Tx<'_>, w: &World) -> String {
                     )
                     .await
                     .expect("withdrawal");
-                let _ = ids;
                 row.0
             };
             raw_cons(tx, gid, consuming, layer, dec("20.0000"), dec("4.72")).await;
             String::new()
+        }
+        "wrong_location_consumption" => {
+            post_case_a(tx, w).await;
+            post_case_b(tx, w).await;
+            post_gen_internal_move(tx, w, "10.0000").await;
+            let fg_layer = layer_at(tx, w.bar, w.fg).await.expect("fg layer");
+            let mut header = movement_header("gen_wloc");
+            header.work_order_id = Some(w.wo);
+            let mut b = GroupBuilder::new(GroupKind::Movement, header);
+            let out = b
+                .contribute(PostingIntent::Quantity(q_post(
+                    w.bar,
+                    qty_ft("-20.0000"),
+                    w.available,
+                    None,
+                    Some(w.lot_bar),
+                )))
+                .unwrap();
+            let into = b
+                .contribute(PostingIntent::Quantity(q_post(
+                    w.bar,
+                    qty_ft("20.0000"),
+                    w.wip,
+                    None,
+                    Some(w.lot_bar),
+                )))
+                .unwrap();
+            b.contribute(PostingIntent::Value(v_post(
+                ValueAccount::Inventory,
+                usd("-47.20"),
+                Some(out),
+                None,
+            )))
+            .unwrap();
+            b.contribute(PostingIntent::Value(v_post(
+                ValueAccount::Wip,
+                usd("47.20"),
+                Some(into),
+                Some(w.wo),
+            )))
+            .unwrap();
+            b.contribute(PostingIntent::Consumption(datum_core::ConsumptionPosting {
+                consuming: out,
+                consumed_posting_id: datum_core::PostingId(fg_layer),
+                quantity: qty_ft("20.0000"),
+                amount: usd("47.20"),
+            }))
+            .unwrap();
+            let err = post(tx, b).await.expect_err("wrong location layer");
+            corruption_code_ledger(&err)
         }
         other => panic!("unknown corruption {other}"),
     }
@@ -757,7 +732,7 @@ async fn generate_corruption(kind: &str, tx: &mut Tx<'_>, w: &World) -> String {
 
 #[tokio::test]
 async fn generator_names_are_stable() {
-    assert_eq!(GENERATOR_CORRUPTIONS.len(), 9);
+    assert_eq!(GENERATOR_CORRUPTIONS.len(), 10);
     for (i, (name, sqlstate)) in GENERATOR_CORRUPTIONS.iter().enumerate() {
         let db = datum_test::db_case!(&format!("gen{i}"));
         common::migrate(&db).await;
@@ -779,7 +754,7 @@ async fn generator_names_are_stable() {
         db.finish().await.unwrap();
     }
 
-    for seed in 0u8..4 {
+    for seed in 0u8..GENERATOR_SEQ_PER_SHARD {
         let db = datum_test::db_case!(&format!("genseq{seed}"));
         common::migrate(&db).await;
         let pool = write_pool(&db);
@@ -795,7 +770,7 @@ async fn generator_names_are_stable() {
 proptest! {
     #![proptest_config(ProptestConfig { cases: 8, ..ProptestConfig::default() })]
     #[test]
-    fn generator_corruption_index_is_stable(x in 0usize..9) {
+    fn generator_corruption_index_is_stable(x in 0usize..10) {
         let (name, sqlstate) = GENERATOR_CORRUPTIONS[x];
         prop_assert!(!name.is_empty());
         prop_assert!(sqlstate == "ZL002"
@@ -803,6 +778,7 @@ proptest! {
             || sqlstate == "ZL005"
             || sqlstate == "23514"
             || sqlstate == "23503"
-            || sqlstate == "428C9");
+            || sqlstate == "428C9"
+            || sqlstate == "IneligibleLayer");
     }
 }

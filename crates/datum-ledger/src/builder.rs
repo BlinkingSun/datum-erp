@@ -76,6 +76,20 @@ impl GroupBuilder {
     }
 }
 
+/// Test hook: pending quantity rows without setting `contributed` (Drop-path proof; `test-utils` only).
+#[cfg(feature = "test-utils")]
+pub fn test_inject_quantity_without_contributed_mark(
+    builder: &mut GroupBuilder,
+    q: QuantityPosting,
+) -> PostingHandle {
+    let mut inner = builder.lock_inner().expect("lock");
+    let handle = PostingHandle(inner.next);
+    inner.next += 1;
+    inner.quantity_handles.insert(handle.0);
+    inner.quantities.push((handle, q));
+    handle
+}
+
 impl Drop for GroupBuilder {
     fn drop(&mut self) {
         if let Ok(inner) = self.inner.lock()
