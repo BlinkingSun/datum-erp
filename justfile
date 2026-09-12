@@ -1,3 +1,4 @@
+set ignore-comments := true
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
 root := justfile_directory()
@@ -41,9 +42,9 @@ lint-sql:
       echo "lint-sql: GRANT or CREATE DATABASE outside crates/datum-db, crates/datum-audit, and crates/datum-test" >&2; \
       exit 1; \
     fi
-    # PLAN §6 invariant 6: no crate's src reads another crate's schema-qualified tables.
+    # PLAN section 6 invariant 6: no crate's src reads another crate's schema-qualified tables.
     # Allow-list: owning crate, datum-module (composition root), datum-test (harness).
-    # Production src only — kernel tests may probe audit.event / seed uom.item_stock.
+    # Production src only - kernel tests may probe audit.event / seed uom.item_stock.
     # Scan per-crate src/ (no path-separator globs): negative **/owner/** fails on Windows paths.
     fail=0; \
     for pair in identity:datum-identity uom:datum-uom ledger:datum-ledger sm:datum-statemachine jobs:datum-jobs events:datum-events numbering:datum-numbering audit:datum-audit; do \
