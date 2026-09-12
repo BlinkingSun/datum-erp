@@ -9,8 +9,8 @@ kernel = "^0.1"
 
 [permissions]
 "lots.view" = "View lots, serials, and packages"
-"lots.create" = "Create lots, serials, and packages"
-"lots.status" = "Change lot or serial status"
+"lots.edit" = "Create lots, serials, packages, and change status (except release)"
+"lots.release" = "Release a lot or serial from quarantine"
 
 [capabilities]
 requires-signature = []
@@ -25,60 +25,76 @@ states = ["quarantine", "available", "hold", "rejected"]
 from = "quarantine"
 to = "available"
 name = "release"
-permission = "lots.status"
-reason = "lot status is a business record; inventory posts the movement"
+permission = "lots.release"
+required = false
+reason = "lot release is not a regulated signature point in Wave 2s.1"
 
 [[machines.edges]]
 from = "available"
 to = "hold"
 name = "hold"
-permission = "lots.status"
+permission = "lots.edit"
 reason = "lot status is a business record; inventory posts the movement"
 
 [[machines.edges]]
 from = "hold"
 to = "available"
 name = "unhold"
-permission = "lots.status"
+permission = "lots.edit"
 reason = "lot status is a business record; inventory posts the movement"
 
 [[machines.edges]]
 from = "quarantine"
 to = "rejected"
 name = "reject_from_quarantine"
-permission = "lots.status"
+permission = "lots.edit"
 reason = "lot status is a business record; inventory posts the movement"
 
 [[machines.edges]]
 from = "available"
 to = "rejected"
 name = "reject"
-permission = "lots.status"
+permission = "lots.edit"
 reason = "lot status is a business record; inventory posts the movement"
 
 [[machines.edges]]
 from = "hold"
 to = "rejected"
 name = "reject_from_hold"
-permission = "lots.status"
+permission = "lots.edit"
 reason = "lot status is a business record; inventory posts the movement"
 
 [[routes]]
 path = "/api/v1/lots"
+method = "GET"
 permission = "lots.view"
 
 [[routes]]
+path = "/api/v1/lots"
+method = "POST"
+permission = "lots.edit"
+
+[[routes]]
 path = "/api/v1/lots/{id}"
+method = "GET"
 permission = "lots.view"
 
 [[routes]]
 path = "/api/v1/lots/{id}/serials"
+method = "GET"
 permission = "lots.view"
 
 [[routes]]
+path = "/api/v1/lots/{id}/serials"
+method = "POST"
+permission = "lots.edit"
+
+[[routes]]
 path = "/api/v1/lots/{id}/status"
-permission = "lots.status"
+method = "POST"
+permission = "lots.edit"
 
 [[routes]]
 path = "/api/v1/lots/{id}/packages"
+method = "GET"
 permission = "lots.view"

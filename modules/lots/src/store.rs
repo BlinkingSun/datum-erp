@@ -1,8 +1,9 @@
 //! Persistence. Every mutation runs inside [`datum_db::Tx`].
 
 use chrono::{DateTime, NaiveDate, Utc};
-use datum_core::{AnyQuantity, DimensionKind, Identifier, ItemId, LotId, SerialId, UnitId};
-use datum_db::Tx;
+use datum_core::{Actor, AnyQuantity, DimensionKind, Identifier, ItemId, LotId, SerialId, UnitId};
+use datum_db::{Tx, WriteContext};
+use datum_module::Kernel;
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
@@ -12,13 +13,19 @@ use crate::domain::{
     validate_identifier,
 };
 use crate::error::{Error, Result};
+use crate::states::{doc_ref_lot, doc_ref_serial, edge_for_transition};
 use crate::{events, stamps};
 
 /// Create a lot. Generates a number from a template or validates a supplied one.
 ///
 /// Expiry precision is mandatory with a date. Month precision stores the first of
 /// the month. This module never posts inventory.
-pub async fn create_lot(tx: &mut Tx<'_>, spec: CreateLot) -> Result<Lot> {
+pub async fn create_lot(
+    tx: &mut Tx<'_>,
+    kernel: &Kernel,
+    ctx: &WriteContext,
+    spec: CreateLot,
+) -> Result<Lot> {
     let number = match spec.number {
         Some(n) => {
             validate_identifier(&n)?;
@@ -53,19 +60,30 @@ pub async fn create_lot(tx: &mut Tx<'_>, spec: CreateLot) -> Result<Lot> {
         .bind(expiry_date)
         .bind(expiry_precision)
         .bind(spec.cert_ref.as_deref())
-        .bind(spec.status.as_str())
+        .bind(LotStatus::Quarantine.as_str())
         .bind(&app_version)
         .bind(&config_version),
     )
     .await?;
+    kernel
+        .spawn(tx, &doc_ref_lot(id), LotStatus::Quarantine.as_str())
+        .await?;
     let event = events::lot_created(id, spec.item, &number)?;
     datum_events::publish(tx, event).await?;
+    if spec.status != LotStatus::Quarantine {
+        let _ = (kernel, ctx);
+        return Err(Error::InvalidTransition {
+            edge: "create".into(),
+            status: spec.status.as_str().into(),
+        });
+    }
     load_lot_in(tx, id).await
 }
 
 /// Allocate `n` serials as units within `lot` (invariant 10).
 pub async fn create_serials(
     tx: &mut Tx<'_>,
+    kernel: &Kernel,
     lot: LotId,
     n: u32,
     template: Option<&str>,
@@ -92,6 +110,9 @@ pub async fn create_serials(
             .bind(&config_version),
         )
         .await?;
+        kernel
+            .spawn(tx, &doc_ref_serial(id), LotStatus::Quarantine.as_str())
+            .await?;
         out.push(Serial {
             id,
             lot,
@@ -109,20 +130,46 @@ pub async fn create_serials(
     Ok(out)
 }
 
-/// Record a status change. The caller posts the inventory movement; this module
-/// never posts. The change is a history row (and therefore audited).
+/// Record a status change through the registered lot state machine. The caller
+/// posts the inventory movement; this module never posts.
 pub async fn set_status(
     tx: &mut Tx<'_>,
+    kernel: &Kernel,
+    actor: Actor,
     target: StatusTarget,
     status: LotStatus,
     reason: &str,
 ) -> Result<StatusHistory> {
+    let (from, doc) = match target {
+        StatusTarget::Lot(id) => {
+            let lot = load_lot_in(tx, id).await?;
+            (lot.status, doc_ref_lot(id))
+        }
+        StatusTarget::Serial(id) => {
+            let serial = load_serial_in(tx, id).await?;
+            (serial.status, doc_ref_serial(id))
+        }
+    };
+    if from == status {
+        return Err(Error::InvalidTransition {
+            edge: "noop".into(),
+            status: from.as_str().into(),
+        });
+    }
+    let edge = edge_for_transition(from, status).ok_or_else(|| Error::InvalidTransition {
+        edge: format!("{}_to_{}", from.as_str(), status.as_str()),
+        status: from.as_str().into(),
+    })?;
+    let mut ctx = kernel.transition_context(actor, &doc, edge);
+    if ctx.config_version.is_none() {
+        ctx.config_version = Some(kernel.profile.spec_version.clone());
+    }
+    kernel.transition(tx, &doc, edge, None, &ctx).await?;
+
     let (app_version, config_version) = stamps(tx).await?;
     let hid = Identifier::generate();
     match target {
         StatusTarget::Lot(id) => {
-            let lot = load_lot_in(tx, id).await?;
-            let from = lot.status;
             tx.execute(
                 sqlx::query(
                     r#"UPDATE lots.lot
@@ -161,8 +208,6 @@ pub async fn set_status(
             })
         }
         StatusTarget::Serial(id) => {
-            let serial = load_serial_in(tx, id).await?;
-            let from = serial.status;
             tx.execute(
                 sqlx::query(
                     r#"UPDATE lots.serial
@@ -362,21 +407,120 @@ pub async fn load_serial(tx: &mut Tx<'_>, id: SerialId) -> Result<Serial> {
     load_serial_in(tx, id).await
 }
 
-/// Serials of a lot, ordered by number.
-pub async fn list_serials(tx: &mut Tx<'_>, lot: LotId) -> Result<Vec<Serial>> {
+/// Cursor-paginated serials for `lot` (id ascending).
+pub async fn list_serials(
+    tx: &mut Tx<'_>,
+    lot: LotId,
+    limit: i64,
+    cursor: Option<SerialId>,
+) -> Result<(Vec<Serial>, Option<SerialId>, bool)> {
     let _ = load_lot_in(tx, lot).await?;
-    let rows: Vec<SerialRow> = tx
-        .fetch_all(
-            sqlx::query_as(
-                r#"SELECT id, lot_id, number, status, udi_production_identifier, version
-                     FROM lots.serial
-                    WHERE lot_id = $1
-                    ORDER BY number"#,
+    if !(1..=200).contains(&limit) {
+        return Err(Error::InvalidLimit);
+    }
+    let fetch = limit + 1;
+    let rows: Vec<SerialRow> = match cursor {
+        Some(c) => {
+            tx.fetch_all(
+                sqlx::query_as(
+                    r#"SELECT id, lot_id, number, status, udi_production_identifier, version
+                         FROM lots.serial
+                        WHERE lot_id = $1 AND id > $2
+                        ORDER BY id
+                        LIMIT $3"#,
+                )
+                .bind(lot.as_uuid())
+                .bind(c.as_uuid())
+                .bind(fetch),
             )
-            .bind(lot.as_uuid()),
-        )
-        .await?;
-    rows.into_iter().map(serial_from_row).collect()
+            .await?
+        }
+        None => {
+            tx.fetch_all(
+                sqlx::query_as(
+                    r#"SELECT id, lot_id, number, status, udi_production_identifier, version
+                         FROM lots.serial
+                        WHERE lot_id = $1
+                        ORDER BY id
+                        LIMIT $2"#,
+                )
+                .bind(lot.as_uuid())
+                .bind(fetch),
+            )
+            .await?
+        }
+    };
+    let has_more = rows.len() as i64 > limit;
+    let serials: Vec<Serial> = rows
+        .into_iter()
+        .take(limit as usize)
+        .map(serial_from_row)
+        .collect::<Result<Vec<_>>>()?;
+    let next = if has_more {
+        serials.last().map(|s| s.id)
+    } else {
+        None
+    };
+    Ok((serials, next, has_more))
+}
+
+/// Cursor-paginated packages for `lot` (id ascending).
+pub async fn list_packages(
+    tx: &mut Tx<'_>,
+    lot: LotId,
+    limit: i64,
+    cursor: Option<PackageId>,
+) -> Result<(Vec<Package>, Option<PackageId>, bool)> {
+    let _ = load_lot_in(tx, lot).await?;
+    if !(1..=200).contains(&limit) {
+        return Err(Error::InvalidLimit);
+    }
+    let fetch = limit + 1;
+    let rows: Vec<PackageRow> = match cursor {
+        Some(c) => {
+            tx.fetch_all(
+                sqlx::query_as(
+                    r#"SELECT id, lot_id, parent_id, level,
+                              contained_amount, contained_unit, contained_dimension, label_ref
+                         FROM lots.package
+                        WHERE lot_id = $1 AND id > $2
+                        ORDER BY id
+                        LIMIT $3"#,
+                )
+                .bind(lot.as_uuid())
+                .bind(c.as_uuid())
+                .bind(fetch),
+            )
+            .await?
+        }
+        None => {
+            tx.fetch_all(
+                sqlx::query_as(
+                    r#"SELECT id, lot_id, parent_id, level,
+                              contained_amount, contained_unit, contained_dimension, label_ref
+                         FROM lots.package
+                        WHERE lot_id = $1
+                        ORDER BY id
+                        LIMIT $2"#,
+                )
+                .bind(lot.as_uuid())
+                .bind(fetch),
+            )
+            .await?
+        }
+    };
+    let has_more = rows.len() as i64 > limit;
+    let packages: Vec<Package> = rows
+        .into_iter()
+        .take(limit as usize)
+        .map(package_from_row)
+        .collect::<Result<Vec<_>>>()?;
+    let next = if has_more {
+        packages.last().map(|p| p.id)
+    } else {
+        None
+    };
+    Ok((packages, next, has_more))
 }
 
 /// Cursor-paginated lot list (id ascending). `cursor` is the last seen id.

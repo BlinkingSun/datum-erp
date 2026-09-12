@@ -11,7 +11,8 @@ use datum_test::db_case;
 use lots::{
     CreateLot, CreateLotBody, Expiry, ExpiryPrecision, ExpiryWire, LotStatus, PackageLevel,
     StatusTarget, UdiTarget, attach_udi, create_lot, create_package, create_serials,
-    package_hierarchy, resolve, set_status, trace_keys, validate_identifier,
+    list_serials as list_serials_http, package_hierarchy, resolve, set_status, trace_keys,
+    validate_identifier,
 };
 
 #[tokio::test]
@@ -22,13 +23,15 @@ async fn lot_number_charset_and_length_enforced() {
     assert!(validate_identifier("ABCDEFGHIJKLMNOPQRSTU").is_err());
 
     let db = db_case!("lot_charset");
-    common::migrate(&db).await;
+    let kernel = common::boot_kernel(&db).await;
     let write = common::write_pool(&db);
-    let ctx = common::write_ctx("lots.create");
+    let ctx = common::write_ctx("lots.edit");
     let mut tx = Tx::begin(&write, &ctx).await.unwrap();
 
     let err = create_lot(
         &mut tx,
+        &kernel,
+        &ctx,
         CreateLot {
             item: ItemId::generate(),
             number: Some("lot-bar-24-4412".into()),
@@ -41,6 +44,8 @@ async fn lot_number_charset_and_length_enforced() {
 
     let err = create_lot(
         &mut tx,
+        &kernel,
+        &ctx,
         CreateLot {
             item: ItemId::generate(),
             template: Some("lot-bar-{0000}".into()),
@@ -53,6 +58,8 @@ async fn lot_number_charset_and_length_enforced() {
 
     let err = create_lot(
         &mut tx,
+        &kernel,
+        &ctx,
         CreateLot {
             item: ItemId::generate(),
             template: Some("LOT BAR-{0000}".into()),
@@ -65,6 +72,8 @@ async fn lot_number_charset_and_length_enforced() {
 
     let err = create_lot(
         &mut tx,
+        &kernel,
+        &ctx,
         CreateLot {
             item: ItemId::generate(),
             template: Some("ABCDEFGHIJKLMNOPQRSTU".into()),
@@ -124,12 +133,14 @@ async fn lot_number_charset_and_length_enforced() {
 #[tokio::test]
 async fn supplier_lot_is_a_cross_reference_not_the_id() {
     let db = db_case!("supplier_xref");
-    common::migrate(&db).await;
+    let kernel = common::boot_kernel(&db).await;
     let write = common::write_pool(&db);
-    let ctx = common::write_ctx("lots.create");
+    let ctx = common::write_ctx("lots.edit");
     let mut tx = Tx::begin(&write, &ctx).await.unwrap();
     let lot = create_lot(
         &mut tx,
+        &kernel,
+        &ctx,
         CreateLot {
             item: ItemId::generate(),
             number: Some("LOT-BAR-24-4412".into()),
@@ -154,16 +165,18 @@ async fn supplier_lot_is_a_cross_reference_not_the_id() {
 #[tokio::test]
 async fn serial_is_a_unit_within_a_lot() {
     let db = db_case!("serial_unit");
-    common::migrate(&db).await;
+    let kernel = common::boot_kernel(&db).await;
     let write = common::write_pool(&db);
-    let ctx = common::write_ctx("lots.create");
+    let ctx = common::write_ctx("lots.edit");
     let mut tx = Tx::begin(&write, &ctx).await.unwrap();
     let heat = create_lot(
         &mut tx,
+        &kernel,
+        &ctx,
         CreateLot {
             item: ItemId::generate(),
             number: Some("HT-ATI-24-8831".into()),
-            status: LotStatus::Available,
+            status: LotStatus::Quarantine,
             ..CreateLot::default()
         },
     )
@@ -171,17 +184,19 @@ async fn serial_is_a_unit_within_a_lot() {
     .unwrap();
     let lot = create_lot(
         &mut tx,
+        &kernel,
+        &ctx,
         CreateLot {
             item: heat.item,
             number: Some("LOT-WO-1847".into()),
             heat_or_source_ref: Some("HT-ATI-24-8831".into()),
-            status: LotStatus::Available,
+            status: LotStatus::Quarantine,
             ..CreateLot::default()
         },
     )
     .await
     .unwrap();
-    let serials = create_serials(&mut tx, lot.id, 2, Some("SN-450-{000000}"))
+    let serials = create_serials(&mut tx, &kernel, lot.id, 2, Some("SN-450-{000000}"))
         .await
         .unwrap();
     assert_eq!(serials.len(), 2);
@@ -214,13 +229,15 @@ async fn serial_is_a_unit_within_a_lot() {
 #[tokio::test]
 async fn expiry_month_precision_survives_round_trip() {
     let db = db_case!("expiry_month");
-    common::migrate(&db).await;
+    let kernel = common::boot_kernel(&db).await;
     let write = common::write_pool(&db);
-    let ctx = common::write_ctx("lots.create");
+    let ctx = common::write_ctx("lots.edit");
     let mut tx = Tx::begin(&write, &ctx).await.unwrap();
     let expiry = Expiry::from_year_month(2026, 9).unwrap();
     let lot = create_lot(
         &mut tx,
+        &kernel,
+        &ctx,
         CreateLot {
             item: ItemId::generate(),
             number: Some("LOT-BAR-24-4412".into()),
@@ -235,18 +252,18 @@ async fn expiry_month_precision_survives_round_trip() {
     assert_eq!(lot.expiry.unwrap().precision, ExpiryPrecision::Month);
 
     let body = lots::LotBody::from(lot.clone());
-    assert_eq!(body.expiry.as_ref().unwrap().date, "2026-09");
+    assert_eq!(body.expiry.as_ref().unwrap().value, "2026-09");
     assert_eq!(
         body.expiry.as_ref().unwrap().precision,
         ExpiryPrecision::Month
     );
     let json = serde_json::to_value(&body).unwrap();
-    assert_eq!(json["expiry"]["date"], "2026-09");
+    assert_eq!(json["expiry"]["value"], "2026-09");
     assert_eq!(json["expiry"]["precision"], "month");
-    assert!(!json["expiry"]["date"].as_str().unwrap().contains("01"));
+    assert!(!json["expiry"]["value"].as_str().unwrap().contains("01"));
 
     let wire = ExpiryWire {
-        date: "2026-09".into(),
+        value: "2026-09".into(),
         precision: ExpiryPrecision::Month,
     };
     let parsed = wire.into_expiry().unwrap();
@@ -260,12 +277,14 @@ async fn expiry_month_precision_survives_round_trip() {
 #[tokio::test]
 async fn two_cases_of_24_record_48_pieces_with_parent_links() {
     let db = db_case!("two_cases");
-    common::migrate(&db).await;
+    let kernel = common::boot_kernel(&db).await;
     let write = common::write_pool(&db);
-    let ctx = common::write_ctx("lots.create");
+    let ctx = common::write_ctx("lots.edit");
     let mut tx = Tx::begin(&write, &ctx).await.unwrap();
     let lot = create_lot(
         &mut tx,
+        &kernel,
+        &ctx,
         CreateLot {
             item: ItemId::generate(),
             number: Some("LOT-WO-1847".into()),
@@ -326,12 +345,15 @@ async fn two_cases_of_24_record_48_pieces_with_parent_links() {
 #[tokio::test]
 async fn status_change_is_a_history_row_and_audited() {
     let db = db_case!("status_hist");
-    common::migrate(&db).await;
+    let kernel = common::boot_kernel(&db).await;
     let write = common::write_pool(&db);
-    let ctx = common::write_ctx("lots.status");
+    let actor = common::actor_with_lots_perms(&write).await;
+    let ctx = common::write_ctx("lots.edit");
     let mut tx = Tx::begin(&write, &ctx).await.unwrap();
     let lot = create_lot(
         &mut tx,
+        &kernel,
+        &ctx,
         CreateLot {
             item: ItemId::generate(),
             number: Some("LOT-BAR-24-4412".into()),
@@ -343,11 +365,13 @@ async fn status_change_is_a_history_row_and_audited() {
     .unwrap();
     tx.commit().await.unwrap();
 
-    let mut tx = Tx::begin(&write, &common::write_ctx("lots.status"))
-        .await
-        .unwrap();
+    let audit_before = common::count_audit(db.app_pool(), "status_history").await;
+    let rel_ctx = common::edge_ctx(&kernel, actor, lot.id, "release");
+    let mut tx = Tx::begin(&write, &rel_ctx).await.unwrap();
     set_status(
         &mut tx,
+        &kernel,
+        actor,
         StatusTarget::Lot(lot.id),
         LotStatus::Available,
         "released from quarantine",
@@ -362,20 +386,30 @@ async fn status_change_is_a_history_row_and_audited() {
         .await
         .unwrap();
     assert_eq!(n.0, 1);
-    assert!(common::count_audit(db.app_pool(), "status_history").await >= 1);
-    assert!(common::count_audit(db.app_pool(), "lot").await >= 1);
+    let (app_v, cfg_v) = common::history_stamps(db.app_pool(), lot.id).await;
+    assert!(!app_v.is_empty());
+    assert_eq!(cfg_v, kernel.profile.spec_version);
+    let audit_after = common::count_audit(db.app_pool(), "status_history").await;
+    assert_eq!(
+        audit_after - audit_before,
+        1,
+        "one audit row per transition"
+    );
+    assert!(common::count_audit_action(db.app_pool(), "lot.release", "lot").await >= 1);
     db.finish().await.unwrap();
 }
 
 #[tokio::test]
 async fn udi_attachment_columns_are_nullable_and_settable() {
     let db = db_case!("udi_attach");
-    common::migrate(&db).await;
+    let kernel = common::boot_kernel(&db).await;
     let write = common::write_pool(&db);
-    let ctx = common::write_ctx("lots.create");
+    let ctx = common::write_ctx("lots.edit");
     let mut tx = Tx::begin(&write, &ctx).await.unwrap();
     let lot = create_lot(
         &mut tx,
+        &kernel,
+        &ctx,
         CreateLot {
             item: ItemId::generate(),
             number: Some("LOT-BAR-24-4412".into()),
@@ -385,7 +419,7 @@ async fn udi_attachment_columns_are_nullable_and_settable() {
     .await
     .unwrap();
     assert!(lot.udi_device_identifier.is_none());
-    let serials = create_serials(&mut tx, lot.id, 1, Some("SN-450-{000000}"))
+    let serials = create_serials(&mut tx, &kernel, lot.id, 1, Some("SN-450-{000000}"))
         .await
         .unwrap();
     assert!(serials[0].udi_production_identifier.is_none());
@@ -437,12 +471,14 @@ async fn every_lots_table_is_audited_and_owned_by_datum_owner() {
 #[tokio::test]
 async fn no_delete_path_on_lot_or_serial() {
     let db = db_case!("no_delete");
-    common::migrate(&db).await;
+    let kernel = common::boot_kernel(&db).await;
     let write = common::write_pool(&db);
-    let ctx = common::write_ctx("lots.create");
+    let ctx = common::write_ctx("lots.edit");
     let mut tx = Tx::begin(&write, &ctx).await.unwrap();
     let lot = create_lot(
         &mut tx,
+        &kernel,
+        &ctx,
         CreateLot {
             item: ItemId::generate(),
             number: Some("LOT-BAR-24-4412".into()),
@@ -451,7 +487,7 @@ async fn no_delete_path_on_lot_or_serial() {
     )
     .await
     .unwrap();
-    let serials = create_serials(&mut tx, lot.id, 1, Some("SN-450-{000000}"))
+    let serials = create_serials(&mut tx, &kernel, lot.id, 1, Some("SN-450-{000000}"))
         .await
         .unwrap();
     tx.commit().await.unwrap();
@@ -524,12 +560,14 @@ async fn module_registers_through_kernel_extension_points() {
 #[tokio::test]
 async fn http_create_renders_month_expiry() {
     let db = db_case!("http_expiry");
-    common::migrate(&db).await;
+    let kernel = common::boot_kernel(&db).await;
     let write = common::write_pool(&db);
-    let ctx = common::write_ctx("lots.create");
+    let ctx = common::write_ctx("lots.edit");
     let mut tx = Tx::begin(&write, &ctx).await.unwrap();
     let body = lots::create_lot_http(
         &mut tx,
+        &kernel,
+        &ctx,
         CreateLotBody {
             item_id: ItemId::generate(),
             identifier: Some("LOT-BAR-24-4412".into()),
@@ -537,7 +575,7 @@ async fn http_create_renders_month_expiry() {
             supplier_lot: None,
             heat: Some("HT-ATI-24-8831".into()),
             expiry: Some(ExpiryWire {
-                date: "2026-09".into(),
+                value: "2026-09".into(),
                 precision: ExpiryPrecision::Month,
             }),
             cert_ref: None,
@@ -547,7 +585,84 @@ async fn http_create_renders_month_expiry() {
     .await
     .unwrap();
     assert_eq!(body.identifier, "LOT-BAR-24-4412");
-    assert_eq!(body.expiry.as_ref().unwrap().date, "2026-09");
+    assert_eq!(body.expiry.as_ref().unwrap().value, "2026-09");
     tx.commit().await.unwrap();
+    db.finish().await.unwrap();
+}
+
+#[tokio::test]
+async fn expiry_day_precision_survives_round_trip() {
+    let db = db_case!("expiry_day");
+    let kernel = common::boot_kernel(&db).await;
+    let write = common::write_pool(&db);
+    let ctx = common::write_ctx("lots.edit");
+    let mut tx = Tx::begin(&write, &ctx).await.unwrap();
+    let wire = ExpiryWire {
+        value: "2029-03-18".into(),
+        precision: ExpiryPrecision::Day,
+    };
+    let lot = create_lot(
+        &mut tx,
+        &kernel,
+        &ctx,
+        CreateLot {
+            item: ItemId::generate(),
+            number: Some("LOT-BAR-24-4412".into()),
+            expiry: Some(wire.into_expiry().unwrap()),
+            ..CreateLot::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(lot.expiry.unwrap().date.to_string(), "2029-03-18");
+    let body = lots::LotBody::from(lot);
+    assert_eq!(body.expiry.as_ref().unwrap().value, "2029-03-18");
+    assert_eq!(
+        body.expiry.as_ref().unwrap().precision,
+        ExpiryPrecision::Day
+    );
+    tx.commit().await.unwrap();
+    db.finish().await.unwrap();
+}
+
+#[tokio::test]
+async fn serial_list_paginates_at_page_boundary() {
+    let db = db_case!("serial_page");
+    let kernel = common::boot_kernel(&db).await;
+    let write = common::write_pool(&db);
+    let ctx = common::write_ctx("lots.edit");
+    let mut tx = Tx::begin(&write, &ctx).await.unwrap();
+    let lot = create_lot(
+        &mut tx,
+        &kernel,
+        &ctx,
+        CreateLot {
+            item: ItemId::generate(),
+            number: Some("LOT-WO-1847".into()),
+            ..CreateLot::default()
+        },
+    )
+    .await
+    .unwrap();
+    create_serials(&mut tx, &kernel, lot.id, 3, Some("SN-450-{000000}"))
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+
+    let mut tx = Tx::begin(&write, &common::write_ctx("lots.view"))
+        .await
+        .unwrap();
+    let page1 = list_serials_http(&mut tx, lot.id, Some(2), None)
+        .await
+        .unwrap();
+    assert_eq!(page1.data.len(), 2);
+    assert!(page1.has_more);
+    assert!(page1.next_cursor.is_some());
+    let page2 = list_serials_http(&mut tx, lot.id, Some(2), page1.next_cursor.as_deref())
+        .await
+        .unwrap();
+    assert_eq!(page2.data.len(), 1);
+    assert!(!page2.has_more);
+    tx.rollback().await.unwrap();
     db.finish().await.unwrap();
 }
