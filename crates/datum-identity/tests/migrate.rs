@@ -9,7 +9,7 @@ use datum_test::db_case;
 use sqlx::migrate::Migrator;
 use sqlx::{query_as as sql_query_as, query_scalar as sql_query_scalar};
 
-use common::{grant_create_on_database, migrate_identity, migrate_identity_sql};
+use common::{migrate_identity, migrate_identity_sql};
 
 fn reversible_migrator() -> Migrator {
     let mut migrator = Migrator::with_migrations(MIGRATOR.iter().cloned().collect());
@@ -80,7 +80,6 @@ async fn catalog_identity(pool: &sqlx::PgPool) -> String {
 #[tokio::test]
 async fn migrate_down_then_up() {
     let db = db_case!("id_down_up");
-    grant_create_on_database(db.database()).await;
     datum_db::migrate::run(
         db.migrate_pool(),
         &[
@@ -90,7 +89,7 @@ async fn migrate_down_then_up() {
     )
     .await
     .expect("db+audit");
-    let boot = common::bootstrap_pool(db.database()).await;
+    let boot = db.bootstrap_pool().await.expect("bootstrap pool");
     datum_audit::install_privileged(&boot)
         .await
         .expect("privileged");

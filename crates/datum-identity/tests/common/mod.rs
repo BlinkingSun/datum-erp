@@ -1,11 +1,8 @@
 #![allow(dead_code, unused_imports)]
 
-use std::time::Duration;
-
 use datum_core::{Actor, ActorKind, Identifier};
 use datum_db::{WriteContext, WritePool};
-use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
-use sqlx::{AssertSqlSafe, Connection, PgConnection, PgPool};
+use sqlx::PgPool;
 use sqlx::{query as sql_query, query_as as sql_query_as, query_scalar as sql_query_scalar};
 use uuid::Uuid;
 
@@ -56,7 +53,6 @@ pub fn rewrite_database(url: &str, database: &str) -> String {
 
 /// Apply db + audit + identity migrations. Does **not** call `seed_builtins`.
 pub async fn migrate_identity_sql(db: &datum_test::TestDb) {
-    grant_create_on_database(db.database()).await;
     datum_db::migrate::run(
         db.migrate_pool(),
         &[
@@ -66,7 +62,7 @@ pub async fn migrate_identity_sql(db: &datum_test::TestDb) {
     )
     .await
     .expect("migrate db+audit");
-    let boot = bootstrap_pool(db.database()).await;
+    let boot = db.bootstrap_pool().await.expect("bootstrap pool");
     datum_audit::install_privileged(&boot)
         .await
         .expect("install_privileged");
@@ -94,53 +90,6 @@ pub async fn migrate_identity(db: &datum_test::TestDb) {
 
 pub async fn write_pool(db: &datum_test::TestDb) -> WritePool {
     WritePool::new(db.app_pool().clone())
-}
-
-pub async fn bootstrap_pool(database: &str) -> PgPool {
-    let url = std::env::var("DATUM_BOOTSTRAP_URL").expect("DATUM_BOOTSTRAP_URL");
-    let rewritten = rewrite_database(&url, database);
-    let mut opts: PgConnectOptions = rewritten.parse().expect("bootstrap url");
-    if !url_has_userinfo(&url)
-        && let Ok(user) = std::env::var("USER").or_else(|_| std::env::var("LOGNAME"))
-    {
-        opts = opts.username(&user);
-    }
-    PgPoolOptions::new()
-        .max_connections(2)
-        .acquire_timeout(Duration::from_secs(5))
-        .connect_with(opts)
-        .await
-        .expect("bootstrap pool")
-}
-
-pub async fn grant_create_on_database(database: &str) {
-    assert!(
-        database
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
-    );
-    let url = std::env::var("DATUM_BOOTSTRAP_URL").expect("DATUM_BOOTSTRAP_URL");
-    let mut opts: PgConnectOptions = url.parse().expect("bootstrap url");
-    if !url_has_userinfo(&url)
-        && let Ok(user) = std::env::var("USER").or_else(|_| std::env::var("LOGNAME"))
-    {
-        opts = opts.username(&user);
-    }
-    let mut conn = PgConnection::connect_with(&opts)
-        .await
-        .expect("bootstrap connect");
-    let sql = format!("GRANT CREATE ON DATABASE {database} TO datum_migrate, datum_owner");
-    sql_query(AssertSqlSafe(sql))
-        .execute(&mut conn)
-        .await
-        .expect("GRANT CREATE");
-}
-
-fn url_has_userinfo(url: &str) -> bool {
-    let Some((_, rest)) = url.split_once("://") else {
-        return false;
-    };
-    rest.split(['/', '?']).next().unwrap_or("").contains('@')
 }
 
 pub async fn count_audit(pool: &PgPool, table: &str) -> i64 {
