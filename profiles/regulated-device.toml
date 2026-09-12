@@ -1,0 +1,148 @@
+# Installation profile: regulated-device (D-W1-5 / SPEC-profiles).
+# Root-level arrays must precede tables so the subset parser keeps them on the
+# document (signature_edges are generated from the registry; this key is the schema).
+
+signature_edges = []
+kernel_always_on = [
+  "audit_trigger",
+  "hash_chain_and_seals",
+  "server_time",
+  "actor_required_on_write",
+  "no_hard_deletes_outside_transient",
+  "version_stamping",
+  "constrained_lot_serial_identifier",
+  "audit_export",
+]
+
+[profile]
+id = "regulated-device"
+display_name = "Regulated device"
+spec_version = "1.0.0"
+
+[[modules]]
+id = "mod-items"
+version = "0.1.0"
+regulated = false
+installed = true
+enabled = true
+
+[[modules]]
+id = "mod-locations"
+version = "0.1.0"
+regulated = false
+installed = true
+enabled = true
+
+[[modules]]
+id = "mod-lots"
+version = "0.1.0"
+regulated = false
+installed = true
+enabled = true
+
+[[modules]]
+id = "mod-inventory"
+version = "0.1.0"
+regulated = false
+installed = true
+enabled = true
+
+[[modules]]
+id = "mod-production-min"
+version = "0.1.0"
+regulated = false
+installed = true
+enabled = true
+
+[[modules]]
+id = "mod-genealogy"
+version = "0.1.0"
+regulated = false
+installed = true
+enabled = true
+
+[signature_gate_binding]
+gate = "NoSignatures"
+
+[validation_manifest]
+generated = true
+route = "/api/v1/iq/manifest"
+cli = "datum iq"
+permission = "validation.manifest.read"
+audit_export_route = "/api/v1/audit"
+audit_export_cli = "datum audit export"
+hidden_by_profile = false
+
+[navigation]
+visible = [
+  "items",
+  "locations",
+  "lots",
+  "inventory",
+  "production",
+  "genealogy",
+  "validation",
+  "iq",
+]
+hidden = []
+
+[numbering.wo]
+format = "WO-{yyyy}-{0000}"
+prefix = "WO"
+scope = "document"
+gap_free = true
+reset = "yearly"
+
+[numbering.ncr]
+format = "NCR-{yyyy}-{0000}"
+prefix = "NCR"
+scope = "document"
+gap_free = true
+reset = "yearly"
+
+[anchor_sink]
+per_instance = true
+iq_suite = "per-instance"
+
+[seeded_permissions]
+base_currency = "USD"
+stock_uom_system = "SI"
+display_timezone = "America/New_York"
+
+[[seeded_permissions.bundles]]
+name = "operator"
+permissions = [
+  "identity.session",
+  "items.view",
+  "inventory.view",
+  "production.view",
+  "genealogy.view",
+  "wo.release",
+]
+
+[[seeded_permissions.bundles]]
+name = "quality"
+permissions = [
+  "identity.session",
+  "wo.release",
+  "calibration.approve",
+  "validation.manifest.read",
+]
+
+[[seeded_permissions.bundles]]
+name = "admin"
+permissions = [
+  "identity.manage",
+  "identity.session",
+  "validation.manifest.read",
+  "audit.export",
+  "items.view",
+  "inventory.view",
+  "production.view",
+  "genealogy.view",
+  "wo.release",
+  "calibration.approve",
+]
+
+[acceptance]
+wave2s_items_that_differ = [7, 11]

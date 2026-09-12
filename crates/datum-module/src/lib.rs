@@ -1,79 +1,52 @@
-//! Composition root: wires PostingSink and SignatureGate.
+//! Composition root: module registry, profiles, and kernel wiring.
+//!
+//! Wires [`datum_core::PostingSink`] ([`datum_ledger::GroupBuilder`]) and
+//! [`datum_core::SignatureGate`] (`NoSignatures` until `datum-esign`).
 
-/// Crate error.
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum Error {
-    /// Not implemented.
-    #[error("unimplemented")]
-    Unimplemented,
-    /// Core error.
-    #[error(transparent)]
-    Core(#[from] datum_core::Error),
-    /// Database error.
-    #[error(transparent)]
-    Db(#[from] datum_db::Error),
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
+use datum_customfields as _;
+use datum_documents as _;
+use datum_esign as _;
+use datum_print as _;
+use datum_uom as _;
+
+mod config;
+mod error;
+mod kernel;
+mod manifest;
+mod order;
+mod profile;
+mod registry;
+mod semver;
+mod toml;
+
+pub use config::{ConfigurationManifest, ManifestModule, export as export_manifest, verify};
+pub use error::{Error, Result};
+pub use kernel::{
+    Kernel, edges_from_registry, module_nodes, posting_sink,
+    startup_fails_if_required_meets_no_signatures,
+};
+pub use manifest::{ModuleManifest, compiled_in, compiled_in_graph};
+pub use order::{
+    CONTRACT_KERNEL_EDGES, KERNEL_ORDER, MIGRATE_PREFIX, ModuleNode, attach_kernel_audit,
+    is_topological_sort, kernel_crates, kernel_migrators, migrate_prefix, migrate_suffix,
+    run_migrations, topological_order,
+};
+pub use profile::{
+    DELTA_ALLOWED, GateBinding, Profile, ProfileId, ProfileModule, SignatureEdge, delta_keys,
+    profile_does_not_rewrite_edges,
+};
+pub use registry::{InstalledRow, disable, enable, install, list_installed, uninstall, upgrade};
+pub use semver::{Range, Version};
+
+/// Configuration-manifest functions (`docs/03` §8).
+pub mod manifest_export {
+    pub use crate::config::{ConfigurationManifest, export, verify};
 }
 
-/// Crate result alias.
-pub type Result<T> = core::result::Result<T, Error>;
-
-/// Module identifier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct ModuleId(pub datum_core::Identifier);
-
-/// Enablement manifest.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct Manifest {
-    /// Module id.
-    pub id: ModuleId,
-    /// Enabled flag.
-    pub enabled: bool,
-}
-
-/// Embedded placeholder migrator.
+/// Embedded migrator (`placeholder` + `0001_module`).
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
-
-/// Migrators in dependency order.
-pub fn migrators() -> Vec<&'static sqlx::migrate::Migrator> {
-    vec![
-        &datum_db::MIGRATOR,
-        &datum_audit::MIGRATOR,
-        &datum_identity::MIGRATOR,
-        &datum_numbering::MIGRATOR,
-        &datum_uom::MIGRATOR,
-        &datum_events::MIGRATOR,
-        &datum_jobs::MIGRATOR,
-        &datum_ledger::MIGRATOR,
-        &datum_statemachine::MIGRATOR,
-        &datum_esign::MIGRATOR,
-        &datum_customfields::MIGRATOR,
-        &datum_documents::MIGRATOR,
-        &datum_print::MIGRATOR,
-        &MIGRATOR,
-    ]
-}
-
-/// Wire the kernel. Unimplemented as a composition of live engines.
-pub fn compose() -> Result<Manifest> {
-    let _ = core::any::type_name::<datum_core::Error>();
-    let _ = core::any::type_name::<datum_db::Error>();
-    let _ = core::any::type_name::<datum_audit::Error>();
-    let _ = core::any::type_name::<datum_identity::Error>();
-    let _ = core::any::type_name::<datum_numbering::Error>();
-    let _ = core::any::type_name::<datum_uom::Error>();
-    let _ = core::any::type_name::<datum_events::Error>();
-    let _ = core::any::type_name::<datum_jobs::Error>();
-    let _ = core::any::type_name::<datum_ledger::Error>();
-    let _ = core::any::type_name::<datum_statemachine::Error>();
-    let _ = core::any::type_name::<datum_esign::Error>();
-    let _ = core::any::type_name::<datum_customfields::Error>();
-    let _ = core::any::type_name::<datum_documents::Error>();
-    let _ = core::any::type_name::<datum_print::Error>();
-    let _ = core::any::type_name::<dyn datum_core::PostingSink>();
-    let _ = core::any::type_name::<dyn datum_core::SignatureGate>();
-    Err(Error::Unimplemented)
-}
 
 #[cfg(test)]
 mod tests {
@@ -88,13 +61,22 @@ mod tests {
 
     #[test]
     fn migrator_has_placeholder() {
-        assert!(!MIGRATOR.migrations.is_empty());
-        assert!(!migrators().is_empty());
+        assert!(MIGRATOR.migrations.len() >= 2);
+        assert!(!kernel_migrators().is_empty());
     }
 
     #[test]
     fn postgres_helper_is_callable() {
         let _ = datum_test::postgres_available();
+    }
+
+    #[test]
+    fn kernel_order_names_match_crates() {
+        let crates = kernel_crates();
+        assert_eq!(crates.len(), KERNEL_ORDER.len());
+        for (name, listed) in crates.iter().zip(KERNEL_ORDER) {
+            assert_eq!(name.0, *listed);
+        }
     }
 
     proptest! {

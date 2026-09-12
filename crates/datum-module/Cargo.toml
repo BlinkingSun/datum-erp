@@ -16,23 +16,24 @@ default = []
 test-utils = []
 
 [dependencies]
-datum-core.workspace = true
-datum-db.workspace = true
 datum-audit.workspace = true
-datum-identity.workspace = true
-datum-numbering.workspace = true
-datum-uom.workspace = true
+datum-core.workspace = true
+datum-customfields.workspace = true
+datum-db.workspace = true
+datum-documents.workspace = true
+datum-esign.workspace = true
 datum-events.workspace = true
+datum-identity.workspace = true
 datum-jobs.workspace = true
 datum-ledger.workspace = true
-datum-statemachine.workspace = true
-datum-esign.workspace = true
-datum-customfields.workspace = true
-datum-documents.workspace = true
+datum-numbering.workspace = true
 datum-print.workspace = true
+datum-statemachine.workspace = true
+datum-uom.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
-serde.workspace = true
 
 [dev-dependencies]
 datum-test.workspace = true
