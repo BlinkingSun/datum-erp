@@ -20,8 +20,9 @@ profile = "minimal"
 
 Edition `2024`. Resolver `"3"`. MSRV = the pin. The named toolchain `1.98.1` with `rustfmt`
 and `clippy` is installed on the build node once by the orchestrator (a worktree must never
-trigger a rustup download). PostgreSQL **17** everywhere (`dev/compose.yml` image
-`postgres:17`; the MacBook runs Homebrew `postgresql@17` 17.11, keg-only but linked; the
+trigger a rustup download). PostgreSQL **17 minimum, 18 tested** (`dev/compose.yml` image
+`postgres:17`; the MacBook runs Homebrew `postgresql@17` 17.11, keg-only but linked; the NUC CI node runs
+Ubuntu 26.04's PostgreSQL 18 — customers get whatever their OS ships, so the CI round covers both majors; the
 canonical client path is `$(brew --prefix postgresql@17)/bin`, and `/opt/homebrew/bin/psql`
 also resolves today). Server on `127.0.0.1:5432` — **never `localhost`** — with `trust`
 authentication on loopback for the login user, which is why the bootstrap URL carries no
@@ -54,6 +55,7 @@ members = [
   "crates/datum-print",
   "crates/datum-module",
   "crates/datum-server",
+  "modules/*",           # Wave 2s slice modules register by existing under modules/<name>/ (no member edit)
 ]
 
 [workspace.package]
@@ -198,7 +200,14 @@ crate name below, hyphenated.
 
 ### 5a. The raw-SQL fence (D3 §11; owned by `ws-skeleton`)
 
-`clippy.toml` at the root carries a `disallowed-macros` / `disallowed-methods` list for `sqlx::query`, `sqlx::query_as`, `sqlx::query_scalar`, `sqlx::query!`-family macros, `sqlx::QueryBuilder`, `sqlx::raw_sql`, `copy_in_raw`, `set_config`, `current_setting`; `datum-db`, `datum-audit` and **`datum-test`** opt out of that list with a crate-level `#![allow(clippy::disallowed_methods, clippy::disallowed_macros)]` and a one-line justification (`datum-test` is the test harness: it creates and drops databases and probes sessions with raw SQL, and it never ships in the binary — exemption ruled 2026-09-12 at Wave 1 integration, where the fence and the harness met for the first time). The `justfile` recipe `lint-sql` runs `rg` for the same tokens outside `crates/datum-db`, `crates/datum-audit` and `crates/datum-test` and fails on any hit; CI runs it.
+`clippy.toml` at the root carries a `disallowed-macros` / `disallowed-methods` list for the **session-protocol
+surface**: `sqlx::QueryBuilder`, `sqlx::raw_sql`, `copy_in_raw`, `set_config`, `current_setting`, and the
+`sqlx::query!`-family compile-time macros (no offline cache outside the two crates). **`sqlx::query`, `query_as`
+and `query_scalar` are allowed everywhere** (amended 2026-09-12 at batch 2.3): the sealed `Tx` helpers take sqlx
+query objects by design, so every kernel crate constructs them; the bypass the fence exists to stop — executing a
+write on a raw pool instead of through `Tx::begin` — is caught mechanically by `audit.require_context` (fail
+closed, `42501`), and every crate from batch 2.3 on carries a named test `writes_go_through_tx` proving that a
+write on a raw pool connection to one of its audited tables aborts. Reads through `ReadPool` are legitimate. `datum-db`, `datum-audit` and **`datum-test`** opt out of that list with a crate-level `#![allow(clippy::disallowed_methods, clippy::disallowed_macros)]` and a one-line justification (`datum-test` is the test harness: it creates and drops databases and probes sessions with raw SQL, and it never ships in the binary — exemption ruled 2026-09-12 at Wave 1 integration, where the fence and the harness met for the first time). The `justfile` recipe `lint-sql` runs `rg` for the same session-protocol tokens (not `sqlx::query`) outside `crates/datum-db`, `crates/datum-audit` and `crates/datum-test` and fails on any hit; CI runs it.
 
 ## 6. `datum-core` public surface (frozen)
 
@@ -413,7 +422,7 @@ startup**, and CI asserts no release profile binds `NoSignatures`. The configura
 ## 7. `justfile` recipe names (fixed; bodies belong to `ws-skeleton`)
 
 `fmt`, `fmt-check`, `clippy`, `lint-sql` (§5a), `test`, `test-lib`, `test-db` (runs with
-`DATUM_REQUIRE_PG=1`), `db-up`, `db-down`, `db-reset` (applies `dev/sql/*.sql` in order
+`DATUM_REQUIRE_PG=1`), `db-up`, `db-down`, `db-reset` (applies `dev/sql/*.sql` in order, skipping `*-gc.sql`), `db-gc` (opt-in: drops stale `datum_t_*` case databases via `dev/sql/90-gc.sql`; see the harness creation stamp
 against `DATUM_BOOTSTRAP_URL`), `migrate` and `sqlx-prepare` (per crate, never
 `--workspace`; both export `DATABASE_URL=$DATUM_MIGRATE_DATABASE_URL` for sqlx-cli),
 `ci` (= `fmt-check && clippy && lint-sql && test-lib`), `ci-db` (= `ci && test-db`).
@@ -425,6 +434,16 @@ no-op. `db-down` mirrors it. Neither installs anything. Every recipe quotes path
 lives under a directory with a space). `ci.yml`'s `postgres:17` service is the GitHub-shaped
 run; **local acceptance is the Homebrew server**, and a lane is never failed for docker being
 absent.
+
+
+**§5a.1 — the fence is a law, not a grep (2026-09-12 05:36).** The fence exists to keep the session
+protocol inside `datum-db`, `datum-audit`, and `datum-test`. Circumventing the lint is a Fail-class
+finding regardless of any other merit: assembling a confined `sqlx` path from string pieces at build
+or run time; generating query code into `OUT_DIR` and `include!`-ing it; `allow(clippy::disallowed_*)`
+at any scope outside the three crates; any `sqlx` token in a `build.rs`; and running DDL, `GRANT`, or
+`CREATE EXTENSION` from Rust in a module crate (all DDL lives in migrations run by the migrator as
+`datum_migrate`). `just lint-sql` will grow greps for the mechanical subset (crate-level allows,
+`sqlx` in `build.rs`); the rest is audited. First measured on `datum-uom` attempt 1 (2026-09-12).
 
 ## 8. Environment
 
@@ -491,3 +510,11 @@ The placeholder scheme is only safe with these rules, which the specs restate:
    and `crates/datum-test/src/lib.rs` contain no `PLACEHOLDER`; `just ci` green; `just db-reset`
    then `just ci-db` green with `DATUM_REQUIRE_PG=1`; `cargo tree -e normal` matches §4.
 6. Nothing in Wave 2 starts until step 5 passes.
+
+### 10a. Wave 2 and later — lockfile and lane commits
+
+A kernel or module lane may add a dev-dependency from the allow-list to its own crate manifest; that dirties
+the root `Cargo.lock`. **Lanes never commit `Cargo.lock`.** The orchestrator regenerates it once per
+integration (`cargo generate-lockfile`) after path-checking out the winning lanes, exactly as Wave 1 §10 step 4.
+An auditor treats an uncommitted lockfile diff in a lane worktree as expected, and a committed one as a minor
+deviation to note, not a fail.

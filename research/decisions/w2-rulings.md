@@ -61,3 +61,19 @@ contract is promoted to `docs/09-workspace-contract.md` at the Wave 2 close.
   (`<crate>-c1`, `-c2`) are not rework-class lanes.
 - Every landing gets one reproduction audit before the gate assertion counts it; a killed audit with a
   complete report is re-run rather than overridden.
+
+## Wave 2 close — carry list (FINDINGS-1, 2026-09-12 11:50, PHASE: ready)
+
+FINDINGS-0 findings 1–4 re-scored CLOSED on main 88da4d2 (module-c1 + module-c2-r2 glue, kernel READMEs, `migrate_down_then_up` + cross-module lint, kernel end-to-end path `kernel_e2e.rs` after kernel-e2e-c1). Carried into Wave 2s as the `w2-carry` lane, not blocking the close:
+
+| # | Residual (FINDINGS-1) | Disposition |
+|---|---|---|
+| 5 | `docs/09` behind the live CONTRACT | closed by this close (promotion) |
+| 6 | `uom.posting_stub` leftover (`uom.up.sql:38–44`, `order.rs:126`) | remove; ledger owns `ledger.posting` |
+| 7 | identity 0001 seed INSERTs run before `zz_audit_row` attaches | attach kernel audit before builtin seeds; named both-profile test |
+| 8 | audit-trigger coverage is list-based (`KERNEL_AUDIT_RELS`) | named both-profile matrix test over discovered app-class tables |
+| 9 | `Tx::commit` has no poison check | ruling: by design (ledger `Unfinalized` on Drop; modules commit through the kernel path); document in datum-db README, no code |
+| s1 | `transition_context` does not stamp `config_version` (glue receipt empty) | kernel stamps `app_version` + `config_version` on every transition context |
+| s2 | glue item-1 test never spawns `extra.doc` | test spawns and transitions the registered machine |
+
+Seams held for the slices (SPEC-mod-common addendum): hook ABI has no `Tx`; Before-hooks not on the builder; Required edges need a bound gate (Wave 2b esign); lot-less receipts publish `inventory.receipt_posted` v1.
