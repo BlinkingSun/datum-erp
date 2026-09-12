@@ -34,6 +34,12 @@ lint-sql:
       echo "lint-sql: sqlx token in build.rs outside crates/datum-db, crates/datum-audit, and crates/datum-test" >&2; \
       exit 1; \
     fi
+    if rg -n --glob '*.rs' --glob '!**/datum-db/**' --glob '!**/datum-audit/**' --glob '!**/datum-test/**' \
+        -e 'GRANT ' -e 'CREATE DATABASE' \
+        "{{root}}/crates"; then \
+      echo "lint-sql: GRANT or CREATE DATABASE outside crates/datum-db, crates/datum-audit, and crates/datum-test" >&2; \
+      exit 1; \
+    fi
 
 # All tests, including integration.
 test:
