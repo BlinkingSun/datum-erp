@@ -24,6 +24,18 @@ use rust_decimal::Decimal;
 
 use common::{boot_kernel, has_audit, migrate_kernel, pg_code, write_ctx, write_pool};
 
+/// Canonical example set (`PLAN.md` §3, `docs/10` §9).
+const WC_LATHE_03: &str = "WC-LATHE-03";
+const QUARANTINE: &str = "QUARANTINE";
+
+fn canonical_item_mds_450() -> ItemId {
+    ItemId::from_uuid(uuid::Uuid::parse_str("01932c5a-8b10-7001-8000-000000000001").unwrap())
+}
+
+fn canonical_wo_2026_1847() -> Identifier {
+    Identifier::from_uuid(uuid::Uuid::parse_str("01932c5a-8b10-7001-8000-000000000006").unwrap())
+}
+
 #[tokio::test]
 async fn install_seeds_seven_boundary_locations_once() {
     let db = db_case!("loc_seed");
@@ -73,7 +85,7 @@ async fn boundary_class_is_immutable() {
     let bin = store::create(
         &mut tx,
         CreateLocation {
-            code: "BIN-A".into(),
+            code: WC_LATHE_03.into(),
             name: "Bin A".into(),
             site_id: site,
             parent_id: None,
@@ -133,7 +145,7 @@ async fn tree_has_no_cycles() {
     let a = store::create(
         &mut tx,
         CreateLocation {
-            code: "WH-A".into(),
+            code: WC_LATHE_03.into(),
             name: "A".into(),
             site_id: site,
             parent_id: None,
@@ -145,7 +157,7 @@ async fn tree_has_no_cycles() {
     let b = store::create(
         &mut tx,
         CreateLocation {
-            code: "WH-B".into(),
+            code: QUARANTINE.into(),
             name: "B".into(),
             site_id: site,
             parent_id: Some(a.id),
@@ -197,7 +209,7 @@ async fn deactivate_refused_while_on_hand() {
     let loc = store::create(
         &mut tx,
         CreateLocation {
-            code: "STOCK-1".into(),
+            code: WC_LATHE_03.into(),
             name: "Stock".into(),
             site_id: site,
             parent_id: None,
@@ -206,7 +218,7 @@ async fn deactivate_refused_while_on_hand() {
     )
     .await
     .unwrap();
-    let item = ItemId::generate();
+    let item = canonical_item_mds_450();
     upsert_stock_item(
         &mut tx,
         item,
@@ -280,7 +292,7 @@ async fn ensure_wip_is_idempotent_per_work_order() {
     let db = db_case!("loc_wip");
     migrate_kernel(&db).await;
     let pool = write_pool(&db);
-    let wo = Identifier::generate();
+    let wo = canonical_wo_2026_1847();
     let mut tx = Tx::begin(&pool, &write_ctx("locations.wip1"))
         .await
         .unwrap();
@@ -359,7 +371,7 @@ async fn registry_row_matches_location() {
     let warehouse = store::create(
         &mut tx,
         CreateLocation {
-            code: "REG-1".into(),
+            code: WC_LATHE_03.into(),
             name: "Reg".into(),
             site_id: site,
             parent_id: None,
@@ -377,7 +389,7 @@ async fn registry_row_matches_location() {
     let area = store::create(
         &mut tx,
         CreateLocation {
-            code: "REG-1-A".into(),
+            code: QUARANTINE.into(),
             name: "Reg area".into(),
             site_id: site,
             parent_id: Some(warehouse.id),
@@ -389,7 +401,7 @@ async fn registry_row_matches_location() {
     assert_eq!(area.parent_id, Some(warehouse.id));
     assert_registry_row_matches(&mut tx, &area).await;
 
-    let wo = Identifier::generate();
+    let wo = canonical_wo_2026_1847();
     let wip_id = ensure_wip(&mut tx, wo).await.unwrap();
     let wip = store::get(&mut tx, wip_id).await.unwrap();
     assert_eq!(wip.kind, LocationKind::Wip);
@@ -510,7 +522,7 @@ async fn list_tree_filters_inactive_by_default() {
     let bin = store::create(
         &mut tx,
         CreateLocation {
-            code: "BIN-A".into(),
+            code: WC_LATHE_03.into(),
             name: "Bin A".into(),
             site_id: site,
             parent_id: None,
@@ -531,8 +543,8 @@ async fn list_tree_filters_inactive_by_default() {
     let active_only = store::list_tree(&mut tx, false).await.unwrap();
     let active_codes = tree_codes(&active_only);
     assert!(
-        !active_codes.iter().any(|c| c == "BIN-A"),
-        "inactive bin must be omitted by default: {active_codes:?}"
+        !active_codes.iter().any(|c| c == WC_LATHE_03),
+        "inactive {WC_LATHE_03} must be omitted by default: {active_codes:?}"
     );
     assert!(
         active_only
@@ -543,12 +555,12 @@ async fn list_tree_filters_inactive_by_default() {
     let with_inactive = store::list_tree(&mut tx, true).await.unwrap();
     let all_codes = tree_codes(&with_inactive);
     assert!(
-        all_codes.iter().any(|c| c == "BIN-A"),
-        "include_inactive must keep BIN-A: {all_codes:?}"
+        all_codes.iter().any(|c| c == WC_LATHE_03),
+        "include_inactive must keep {WC_LATHE_03}: {all_codes:?}"
     );
     fn has_inactive_bin(nodes: &[LocationTreeNode]) -> bool {
         nodes.iter().any(|n| {
-            (n.location.code == "BIN-A" && n.location.status == LocationStatus::Inactive)
+            (n.location.code == WC_LATHE_03 && n.location.status == LocationStatus::Inactive)
                 || has_inactive_bin(&n.children)
         })
     }
@@ -569,7 +581,7 @@ async fn deactivate_after_plain_install() {
     let bin = store::create(
         &mut tx,
         CreateLocation {
-            code: "BIN-PLAIN".into(),
+            code: WC_LATHE_03.into(),
             name: "Plain bin".into(),
             site_id: site,
             parent_id: None,
@@ -617,7 +629,7 @@ async fn generated_and_seeded_ids_are_uuid_v7() {
     let created = store::create(
         &mut tx,
         CreateLocation {
-            code: "WH-V7".into(),
+            code: WC_LATHE_03.into(),
             name: "v7 warehouse".into(),
             site_id: site,
             parent_id: None,
@@ -627,7 +639,7 @@ async fn generated_and_seeded_ids_are_uuid_v7() {
     .await
     .unwrap();
     assert_uuid_v7(created.id.as_uuid(), "created warehouse");
-    let wip = ensure_wip(&mut tx, Identifier::generate()).await.unwrap();
+    let wip = ensure_wip(&mut tx, canonical_wo_2026_1847()).await.unwrap();
     assert_uuid_v7(wip.as_uuid(), "ensure_wip");
     tx.commit().await.unwrap();
     db.finish().await.unwrap();

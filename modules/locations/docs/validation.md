@@ -16,4 +16,6 @@ Executable tests (commit mode, `DATUM_REQUIRE_PG=1`):
 - `deactivate_after_plain_install`
 - `generated_and_seeded_ids_are_uuid_v7`
 
+Fixtures: `WC-LATHE-03`, `QUARANTINE`, `WO-2026-1847`, `MDS-450-M4x12` (`PLAN.md` §3).
+
 Run: `cargo test -p datum-mod-locations`
