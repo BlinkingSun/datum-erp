@@ -4,7 +4,8 @@
 
 use chrono::Datelike;
 use datum_core::{AnyQuantity, ItemId, LotId, SerialId};
-use datum_db::Tx;
+use datum_db::{Tx, WriteContext};
+use datum_module::Kernel;
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{
@@ -13,24 +14,24 @@ use crate::domain::{
 use crate::error::{Error, Result};
 use crate::store;
 
-/// Wire expiry `{date, precision}`. Month/year omit an invented day.
+/// Wire expiry `{value, precision}` (`docs/10` §3.4). Month/year omit an invented day.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExpiryWire {
-    /// Date formatted to the claimed precision (`YYYY-MM-DD` / `YYYY-MM` / `YYYY`).
-    pub date: String,
+    /// Value formatted to the claimed precision (`YYYY-MM-DD` / `YYYY-MM` / `YYYY`).
+    pub value: String,
     /// `day` / `month` / `year`.
     pub precision: ExpiryPrecision,
 }
 
 impl From<Expiry> for ExpiryWire {
     fn from(e: Expiry) -> Self {
-        let date = match e.precision {
+        let value = match e.precision {
             ExpiryPrecision::Day => e.date.format("%Y-%m-%d").to_string(),
             ExpiryPrecision::Month => e.date.format("%Y-%m").to_string(),
             ExpiryPrecision::Year => e.date.format("%Y").to_string(),
         };
         Self {
-            date,
+            value,
             precision: e.precision,
         }
     }
@@ -42,19 +43,19 @@ impl ExpiryWire {
         match self.precision {
             ExpiryPrecision::Day => {
                 let date =
-                    chrono::NaiveDate::parse_from_str(&self.date, "%Y-%m-%d").map_err(|e| {
-                        Error::Core(datum_core::Error::Invariant(format!("expiry.date: {e}")))
+                    chrono::NaiveDate::parse_from_str(&self.value, "%Y-%m-%d").map_err(|e| {
+                        Error::Core(datum_core::Error::Invariant(format!("expiry.value: {e}")))
                     })?;
                 Ok(Expiry::new(date, ExpiryPrecision::Day))
             }
             ExpiryPrecision::Month => {
                 let date =
-                    chrono::NaiveDate::parse_from_str(&format!("{}-01", self.date), "%Y-%m-%d")
-                        .or_else(|_| chrono::NaiveDate::parse_from_str(&self.date, "%Y-%m-%d"))
+                    chrono::NaiveDate::parse_from_str(&format!("{}-01", self.value), "%Y-%m-%d")
+                        .or_else(|_| chrono::NaiveDate::parse_from_str(&self.value, "%Y-%m-%d"))
                         .map_err(|e| {
-                            Error::Core(datum_core::Error::Invariant(format!("expiry.date: {e}")))
+                            Error::Core(datum_core::Error::Invariant(format!("expiry.value: {e}")))
                         })?;
-                if date.day() != 1 && self.date.len() > 7 {
+                if date.day() != 1 && self.value.len() > 7 {
                     return Err(Error::Core(datum_core::Error::Invariant(
                         "expiry.value carries a day for month precision".into(),
                     )));
@@ -62,12 +63,12 @@ impl ExpiryWire {
                 Ok(Expiry::from_year_month(date.year(), date.month())?)
             }
             ExpiryPrecision::Year => {
-                let year: i32 = self.date.parse().map_err(|_| {
-                    Error::Core(datum_core::Error::Invariant("expiry.date year".into()))
+                let year: i32 = self.value.parse().map_err(|_| {
+                    Error::Core(datum_core::Error::Invariant("expiry.value year".into()))
                 })?;
                 Ok(Expiry::new(
                     chrono::NaiveDate::from_ymd_opt(year, 1, 1).ok_or_else(|| {
-                        Error::Core(datum_core::Error::Invariant("expiry.date year".into()))
+                        Error::Core(datum_core::Error::Invariant("expiry.value year".into()))
                     })?,
                     ExpiryPrecision::Year,
                 ))
@@ -254,13 +255,20 @@ pub async fn list_lots(
 }
 
 /// POST `/api/v1/lots`.
-pub async fn create_lot(tx: &mut Tx<'_>, body: CreateLotBody) -> Result<LotBody> {
+pub async fn create_lot(
+    tx: &mut Tx<'_>,
+    kernel: &Kernel,
+    ctx: &WriteContext,
+    body: CreateLotBody,
+) -> Result<LotBody> {
     let expiry = match body.expiry {
         Some(w) => Some(w.into_expiry()?),
         None => None,
     };
     let lot = store::create_lot(
         tx,
+        kernel,
+        ctx,
         CreateLot {
             item: body.item_id,
             number: body.identifier,
@@ -282,22 +290,33 @@ pub async fn get_lot(tx: &mut Tx<'_>, id: LotId) -> Result<LotBody> {
 }
 
 /// GET `/api/v1/lots/{id}/serials`.
-pub async fn list_serials(tx: &mut Tx<'_>, id: LotId) -> Result<ListBody<SerialBody>> {
-    let rows = store::list_serials(tx, id).await?;
+pub async fn list_serials(
+    tx: &mut Tx<'_>,
+    id: LotId,
+    limit: Option<i64>,
+    cursor: Option<&str>,
+) -> Result<ListBody<SerialBody>> {
+    let limit = limit.unwrap_or(50);
+    let cursor = match cursor {
+        Some(c) if !c.is_empty() => Some(parse_serial_id(c)?),
+        _ => None,
+    };
+    let (rows, next, has_more) = store::list_serials(tx, id, limit, cursor).await?;
     Ok(ListBody {
         data: rows.into_iter().map(SerialBody::from).collect(),
-        next_cursor: None,
-        has_more: false,
+        next_cursor: next.map(|id| id.to_string()),
+        has_more,
     })
 }
 
 /// POST `/api/v1/lots/{id}/serials`.
 pub async fn create_serials(
     tx: &mut Tx<'_>,
+    kernel: &Kernel,
     id: LotId,
     body: CreateSerialsBody,
 ) -> Result<ListBody<SerialBody>> {
-    let rows = store::create_serials(tx, id, body.count, body.template.as_deref()).await?;
+    let rows = store::create_serials(tx, kernel, id, body.count, body.template.as_deref()).await?;
     Ok(ListBody {
         data: rows.into_iter().map(SerialBody::from).collect(),
         next_cursor: None,
@@ -306,18 +325,42 @@ pub async fn create_serials(
 }
 
 /// POST `/api/v1/lots/{id}/status`.
-pub async fn set_status(tx: &mut Tx<'_>, id: LotId, body: SetStatusBody) -> Result<LotBody> {
-    store::set_status(tx, StatusTarget::Lot(id), body.status, &body.reason).await?;
+pub async fn set_status(
+    tx: &mut Tx<'_>,
+    kernel: &Kernel,
+    ctx: &WriteContext,
+    id: LotId,
+    body: SetStatusBody,
+) -> Result<LotBody> {
+    store::set_status(
+        tx,
+        kernel,
+        ctx.actor,
+        StatusTarget::Lot(id),
+        body.status,
+        &body.reason,
+    )
+    .await?;
     get_lot(tx, id).await
 }
 
 /// GET `/api/v1/lots/{id}/packages`.
-pub async fn list_packages(tx: &mut Tx<'_>, id: LotId) -> Result<ListBody<PackageBody>> {
-    let rows = store::package_hierarchy(tx, id).await?;
+pub async fn list_packages(
+    tx: &mut Tx<'_>,
+    id: LotId,
+    limit: Option<i64>,
+    cursor: Option<&str>,
+) -> Result<ListBody<PackageBody>> {
+    let limit = limit.unwrap_or(50);
+    let cursor = match cursor {
+        Some(c) if !c.is_empty() => Some(parse_package_id(c)?),
+        _ => None,
+    };
+    let (rows, next, has_more) = store::list_packages(tx, id, limit, cursor).await?;
     Ok(ListBody {
         data: rows.into_iter().map(PackageBody::from).collect(),
-        next_cursor: None,
-        has_more: false,
+        next_cursor: next.map(|id| id.as_uuid().to_string()),
+        has_more,
     })
 }
 
@@ -325,4 +368,16 @@ fn parse_lot_id(s: &str) -> Result<LotId> {
     let u = uuid::Uuid::parse_str(s)
         .map_err(|e| Error::Core(datum_core::Error::Invariant(e.to_string())))?;
     Ok(LotId::from_uuid(u))
+}
+
+fn parse_serial_id(s: &str) -> Result<SerialId> {
+    let u = uuid::Uuid::parse_str(s)
+        .map_err(|e| Error::Core(datum_core::Error::Invariant(e.to_string())))?;
+    Ok(SerialId::from_uuid(u))
+}
+
+fn parse_package_id(s: &str) -> Result<crate::domain::PackageId> {
+    let u = uuid::Uuid::parse_str(s)
+        .map_err(|e| Error::Core(datum_core::Error::Invariant(e.to_string())))?;
+    Ok(crate::domain::PackageId::from_uuid(u))
 }
