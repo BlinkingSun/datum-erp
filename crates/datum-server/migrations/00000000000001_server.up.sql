@@ -72,6 +72,7 @@ CREATE TABLE server_transient.http_session (
   principal_id  uuid NOT NULL,
   display_name  text NOT NULL,
   csrf          text NOT NULL,
+  permissions   text[] NOT NULL DEFAULT '{}',
   expires_at    timestamptz NOT NULL,
   created_at    timestamptz NOT NULL DEFAULT now()
 );
