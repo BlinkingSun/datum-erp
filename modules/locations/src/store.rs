@@ -212,9 +212,16 @@ pub async fn list(
     Ok((data, next_cursor, has_more))
 }
 
-/// Build a forest of active locations.
-pub async fn list_tree(tx: &mut Tx<'_>) -> Result<Vec<LocationTreeNode>> {
+/// Build a forest of locations. Inactive rows are omitted unless `include_inactive`.
+pub async fn list_tree(tx: &mut Tx<'_>, include_inactive: bool) -> Result<Vec<LocationTreeNode>> {
     let all = list_flat(tx).await?;
+    let all: Vec<Location> = if include_inactive {
+        all
+    } else {
+        all.into_iter()
+            .filter(|loc| loc.status == LocationStatus::Active)
+            .collect()
+    };
     let mut by_parent: std::collections::BTreeMap<Option<LocationId>, Vec<Location>> =
         std::collections::BTreeMap::new();
     for loc in all {

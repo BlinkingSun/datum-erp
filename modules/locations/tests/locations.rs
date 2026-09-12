@@ -16,9 +16,9 @@ use datum_db::Tx;
 use datum_events::SchemaRegistry;
 use datum_ledger::{CostMethod, GroupBuilder, boundary_sql, upsert_location, upsert_stock_item};
 use datum_mod_locations::{
-    CreateLocation, Error, ListFilter, Location, LocationKind, LocationStatus, UpdateLocation,
-    boundary_code, ensure_wip, install, list, list_locations, migrate, register_schemas,
-    seed_install, store,
+    CreateLocation, Error, ListFilter, Location, LocationKind, LocationStatus, LocationTreeNode,
+    UpdateLocation, boundary_code, ensure_wip, install, list, list_locations, migrate,
+    register_schemas, seed_install, store,
 };
 use datum_test::db_case;
 use rust_decimal::Decimal;
@@ -478,5 +478,78 @@ async fn list_paginates_by_cursor() {
     .await
     .unwrap_err();
     assert!(matches!(err, Error::Validation(ref m) if m == "limit"));
+    db.finish().await.unwrap();
+}
+
+fn tree_codes(nodes: &[LocationTreeNode]) -> Vec<String> {
+    let mut out = Vec::new();
+    fn walk(nodes: &[LocationTreeNode], out: &mut Vec<String>) {
+        for node in nodes {
+            out.push(node.location.code.clone());
+            walk(&node.children, out);
+        }
+    }
+    walk(nodes, &mut out);
+    out
+}
+
+#[tokio::test]
+async fn list_tree_filters_inactive_by_default() {
+    let db = db_case!("loc_tree_status");
+    migrate_kernel(&db).await;
+    let pool = write_pool(&db);
+    let mut tx = Tx::begin(&pool, &write_ctx("locations.tree_status"))
+        .await
+        .unwrap();
+    seed_install(&mut tx).await.unwrap();
+    let bin = store::create(
+        &mut tx,
+        CreateLocation {
+            code: "BIN-A".into(),
+            name: "Bin A".into(),
+            site_id: store::default_site_id(),
+            parent_id: None,
+            kind: LocationKind::Bin,
+        },
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+
+    let mut registry = SchemaRegistry::new();
+    register_schemas(&mut registry).unwrap();
+    register_schemas(&mut datum_events::schema::global_mut().unwrap()).unwrap();
+    let mut tx = Tx::begin(&pool, &write_ctx("locations.tree_deact"))
+        .await
+        .unwrap();
+    store::deactivate(&mut tx, bin.id, bin.version, &registry)
+        .await
+        .unwrap();
+
+    let active_only = store::list_tree(&mut tx, false).await.unwrap();
+    let active_codes = tree_codes(&active_only);
+    assert!(
+        !active_codes.iter().any(|c| c == "BIN-A"),
+        "inactive bin must be omitted by default: {active_codes:?}"
+    );
+    assert!(
+        active_only
+            .iter()
+            .all(|n| n.location.status == LocationStatus::Active)
+    );
+
+    let with_inactive = store::list_tree(&mut tx, true).await.unwrap();
+    let all_codes = tree_codes(&with_inactive);
+    assert!(
+        all_codes.iter().any(|c| c == "BIN-A"),
+        "include_inactive must keep BIN-A: {all_codes:?}"
+    );
+    fn has_inactive_bin(nodes: &[LocationTreeNode]) -> bool {
+        nodes.iter().any(|n| {
+            (n.location.code == "BIN-A" && n.location.status == LocationStatus::Inactive)
+                || has_inactive_bin(&n.children)
+        })
+    }
+    assert!(has_inactive_bin(&with_inactive));
     db.finish().await.unwrap();
 }

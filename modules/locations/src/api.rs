@@ -127,9 +127,14 @@ fn parse_location_id(s: &str) -> Result<LocationId> {
         .map_err(|_| Error::Validation("cursor".into()))
 }
 
-/// `GET /api/v1/locations/tree`.
-pub async fn list_tree(tx: &mut Tx<'_>) -> Result<ListResponse<LocationTreeNode>> {
-    Ok(ListResponse::all(store::list_tree(tx).await?))
+/// `GET /api/v1/locations/tree`. Inactive nodes omitted unless `include_inactive`.
+pub async fn list_tree(
+    tx: &mut Tx<'_>,
+    include_inactive: bool,
+) -> Result<ListResponse<LocationTreeNode>> {
+    Ok(ListResponse::all(
+        store::list_tree(tx, include_inactive).await?,
+    ))
 }
 
 /// `GET /api/v1/locations/{id}`.
