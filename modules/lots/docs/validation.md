@@ -31,3 +31,16 @@ fields populated later by the Phase 6 UDI module; they are never custom fields.
 | `no_delete_path_on_lot_or_serial` | 16 — DELETE → 42501 |
 | `writes_go_through_tx` | CONTRACT §5a — raw-pool write → 42501 |
 | `reverse_migration_tested` | PLAN §6 item 8 |
+| `lot_spawn_on_create_registers_sm_instance` | R-2s-5 — `Kernel::spawn` on lot create |
+| `lot_edge_release_quarantine_to_available` | registered machine edge `release` |
+| `lot_edge_hold_available_to_hold` | edge `hold` |
+| `lot_edge_unhold_hold_to_available` | edge `unhold` |
+| `lot_edge_reject_from_quarantine` | edge `reject_from_quarantine` |
+| `lot_edge_reject_from_available` | edge `reject` |
+| `lot_edge_reject_from_hold` | edge `reject_from_hold` |
+| `lot_illegal_jump_quarantine_to_hold_is_refused` | illegal transition refused |
+| `lot_release_plain_profile_not_required_under_no_signatures` | plain profile: release NotRequired |
+| `lot_release_regulated_profile_refuses_under_no_signatures` | regulated Required + NoSignatures |
+| `expiry_day_precision_survives_round_trip` | docs/10 `{value, precision}` day round-trip |
+| `serial_list_paginates_at_page_boundary` | serial list `has_more` + cursor |
+| `http_routes_declare_method_level_permissions` | GET `lots.view`, POST `lots.edit`, release `lots.release` |

@@ -2,9 +2,9 @@
 //! [`datum_module::KernelBuilder`]. This module never posts; the inventory module
 //! posts the quarantine/available movement.
 
-use datum_core::{PermissionKey, SignatureMeaning, SignatureRequirement};
+use datum_core::{Identifier, LotId, PermissionKey, SerialId, SignatureMeaning, SignatureRequirement};
 use datum_module::Profile;
-use datum_statemachine::{EdgeBuilder, Machine};
+use datum_statemachine::{DocRef, EdgeBuilder, Machine};
 
 use crate::domain::LotStatus;
 use crate::error::Result;
@@ -51,4 +51,33 @@ pub fn lot_machine(profile: &Profile) -> Result<Machine> {
         );
     }
     Ok(b.build()?)
+}
+
+/// Kernel document reference for a lot instance.
+pub fn doc_ref_lot(id: LotId) -> DocRef {
+    DocRef {
+        doc_type: DOC_TYPE.into(),
+        doc_id: Identifier::from_uuid(id.as_uuid()),
+    }
+}
+
+/// Kernel document reference for a serial instance (same machine, serial id).
+pub fn doc_ref_serial(id: SerialId) -> DocRef {
+    DocRef {
+        doc_type: DOC_TYPE.into(),
+        doc_id: Identifier::from_uuid(id.as_uuid()),
+    }
+}
+
+/// Manifest edge name for `from → to`, if the transition is legal.
+pub fn edge_for_transition(from: LotStatus, to: LotStatus) -> Option<&'static str> {
+    match (from, to) {
+        (LotStatus::Quarantine, LotStatus::Available) => Some("release"),
+        (LotStatus::Available, LotStatus::Hold) => Some("hold"),
+        (LotStatus::Hold, LotStatus::Available) => Some("unhold"),
+        (LotStatus::Quarantine, LotStatus::Rejected) => Some("reject_from_quarantine"),
+        (LotStatus::Available, LotStatus::Rejected) => Some("reject"),
+        (LotStatus::Hold, LotStatus::Rejected) => Some("reject_from_hold"),
+        _ => None,
+    }
 }

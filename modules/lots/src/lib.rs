@@ -11,7 +11,7 @@ mod domain;
 mod error;
 mod events;
 mod hooks;
-mod states;
+pub mod states;
 mod store;
 
 pub use api::{
@@ -98,8 +98,8 @@ mod tests {
         assert_eq!(m.id, "mod-lots");
         assert!(!m.regulated);
         assert!(m.permissions.contains_key("lots.view"));
-        assert!(m.permissions.contains_key("lots.create"));
-        assert!(m.permissions.contains_key("lots.status"));
+        assert!(m.permissions.contains_key("lots.edit"));
+        assert!(m.permissions.contains_key("lots.release"));
         assert!(m.routes.iter().any(|r| r.path == "/api/v1/lots"));
         assert_eq!(m.machines.len(), 1);
         assert_eq!(m.machines[0].doc_type, "lot");
@@ -130,7 +130,7 @@ mod tests {
         assert_eq!(e.date.to_string(), "2026-09-01");
         assert_eq!(e.precision, ExpiryPrecision::Month);
         let wire = crate::ExpiryWire::from(e);
-        assert_eq!(wire.date, "2026-09");
+        assert_eq!(wire.value, "2026-09");
         assert_eq!(wire.precision, ExpiryPrecision::Month);
     }
 

@@ -2,8 +2,6 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, unused_crate_dependencies)]
 
-mod common;
-
 use datum_mod_lots::MIGRATOR;
 use datum_test::db_case;
 use sqlx::{migrate::Migrator, query_scalar};

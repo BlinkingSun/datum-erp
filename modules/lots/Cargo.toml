@@ -38,6 +38,7 @@ datum-events.workspace = true
 datum-identity.workspace = true
 datum-module = { path = "../../crates/datum-module", default-features = false }
 datum-numbering.workspace = true
+datum-statemachine.workspace = true
 datum-test.workspace = true
 tokio.workspace = true
 proptest.workspace = true
