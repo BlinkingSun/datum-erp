@@ -16,8 +16,14 @@ use crate::{Error, Result};
 
 impl Engine {
     /// Mirror registered machines into `sm.machine` / `sm.state` / `sm.edge`.
-    /// Idempotent on machine id. The composition root calls this at startup.
-    /// Refuses until [`Engine::freeze`] (SPEC: hook order computed once at startup).
+    ///
+    /// Idempotent on the declaration (`doc_type`, states, edges, signature
+    /// requirements, `regulated`): a second persist of an identical catalog is a
+    /// no-op that returns the existing machine id. A different declaration for a
+    /// `doc_type` that already has a row is [`Error::MachineChanged`]. Rows are
+    /// never silently updated (CONTRACT §6.3: declarations are frozen after first
+    /// persist); the audit trigger fires only when a row is written.
+    /// The composition root calls this at startup. Refuses until [`Engine::freeze`].
     pub async fn persist(&self, tx: &mut Tx<'_>) -> Result<()> {
         self.ensure_frozen()?;
         for m in &self.machines {
@@ -38,6 +44,12 @@ impl Engine {
                 actual: String::new(),
             });
         }
+        // Prefer the catalog id: Kernel::build mints a new MachineId each boot, but
+        // persist is a no-op when the declaration already exists.
+        let machine_id = match load_machine_id(tx, &doc.doc_type).await? {
+            Some(id) => id,
+            None => machine.id,
+        };
         tx.execute(
             sql_query(
                 r#"INSERT INTO sm.instance
@@ -46,7 +58,7 @@ impl Engine {
             )
             .bind(&doc.doc_type)
             .bind(doc.doc_id.as_uuid())
-            .bind(machine.id.as_uuid())
+            .bind(machine_id.as_uuid())
             .bind(initial),
         )
         .await?;
@@ -184,14 +196,174 @@ fn verify_signature(
     Ok(())
 }
 
-async fn persist_machine(tx: &mut Tx<'_>, m: &Machine) -> Result<()> {
+/// One persisted edge, comparable independently of `machine_id`.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct CatalogEdge {
+    name: String,
+    from: String,
+    to: String,
+    permission: String,
+    signature_kind: String,
+    meaning: Option<String>,
+    sig_permission: Option<String>,
+    not_required_reason: Option<String>,
+    hooks_allowed: bool,
+}
+
+impl CatalogEdge {
+    fn from_decl(e: &Edge) -> Self {
+        match &e.signature {
+            SignatureDeclaration::Required(req) => Self {
+                name: e.name.clone(),
+                from: e.from.0.clone(),
+                to: e.to.0.clone(),
+                permission: e.permission.0.clone(),
+                signature_kind: "required".into(),
+                meaning: Some(req.meaning.0.clone()),
+                sig_permission: Some(req.permission.0.clone()),
+                not_required_reason: None,
+                hooks_allowed: e.hooks_allowed,
+            },
+            SignatureDeclaration::NotRequired { reason } => Self {
+                name: e.name.clone(),
+                from: e.from.0.clone(),
+                to: e.to.0.clone(),
+                permission: e.permission.0.clone(),
+                signature_kind: "not_required".into(),
+                meaning: None,
+                sig_permission: None,
+                not_required_reason: Some((*reason).to_owned()),
+                hooks_allowed: e.hooks_allowed,
+            },
+        }
+    }
+}
+
+fn declaration_states(m: &Machine) -> Vec<String> {
+    let mut states: Vec<String> = m.states.iter().map(|s| s.0.clone()).collect();
+    states.sort();
+    states
+}
+
+fn declaration_edges(m: &Machine) -> Vec<CatalogEdge> {
+    let mut edges: Vec<CatalogEdge> = m.edges.iter().map(CatalogEdge::from_decl).collect();
+    edges.sort();
+    edges
+}
+
+fn declarations_match(
+    regulated: bool,
+    states: &[String],
+    edges: &[CatalogEdge],
+    m: &Machine,
+) -> bool {
+    regulated == m.regulated
+        && states == declaration_states(m).as_slice()
+        && edges == declaration_edges(m).as_slice()
+}
+
+async fn load_machine_id(tx: &mut Tx<'_>, doc_type: &str) -> Result<Option<MachineId>> {
+    let row: Option<(Uuid,)> = tx
+        .fetch_optional(
+            sql_query_as("SELECT id FROM sm.machine WHERE doc_type = $1").bind(doc_type),
+        )
+        .await?;
+    Ok(row.map(|(id,)| MachineId(datum_core::Identifier::from_uuid(id))))
+}
+
+async fn load_catalog(
+    tx: &mut Tx<'_>,
+    doc_type: &str,
+) -> Result<Option<(MachineId, bool, Vec<String>, Vec<CatalogEdge>)>> {
+    let row: Option<(Uuid, bool)> = tx
+        .fetch_optional(
+            sql_query_as("SELECT id, regulated FROM sm.machine WHERE doc_type = $1").bind(doc_type),
+        )
+        .await?;
+    let Some((id, regulated)) = row else {
+        return Ok(None);
+    };
+    let machine_id = MachineId(datum_core::Identifier::from_uuid(id));
+    let state_rows: Vec<(String,)> = tx
+        .fetch_all(
+            sql_query_as("SELECT name FROM sm.state WHERE machine_id = $1 ORDER BY name").bind(id),
+        )
+        .await?;
+    type EdgeRow = (
+        String,
+        String,
+        String,
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        bool,
+    );
+    let edge_rows: Vec<EdgeRow> = tx
+        .fetch_all(
+            sql_query_as(
+                r#"SELECT name, from_state, to_state, permission, signature_kind,
+                          meaning, sig_permission, not_required_reason, hooks_allowed
+                     FROM sm.edge
+                    WHERE machine_id = $1
+                    ORDER BY name"#,
+            )
+            .bind(id),
+        )
+        .await?;
+    let mut states: Vec<String> = state_rows.into_iter().map(|(n,)| n).collect();
+    states.sort();
+    let mut edges: Vec<CatalogEdge> = edge_rows
+        .into_iter()
+        .map(
+            |(
+                name,
+                from,
+                to,
+                permission,
+                signature_kind,
+                meaning,
+                sig_permission,
+                not_required_reason,
+                hooks_allowed,
+            )| CatalogEdge {
+                name,
+                from,
+                to,
+                permission,
+                signature_kind,
+                meaning,
+                sig_permission,
+                not_required_reason,
+                hooks_allowed,
+            },
+        )
+        .collect();
+    edges.sort();
+    Ok(Some((machine_id, regulated, states, edges)))
+}
+
+/// Insert the catalog, or return the existing id when the declaration is identical.
+/// Never UPDATEs: a changed declaration is [`Error::MachineChanged`].
+async fn persist_machine(tx: &mut Tx<'_>, m: &Machine) -> Result<MachineId> {
+    if let Some((id, regulated, states, edges)) = load_catalog(tx, &m.doc_type).await? {
+        if declarations_match(regulated, &states, &edges, m) {
+            return Ok(id);
+        }
+        return Err(Error::MachineChanged {
+            doc_type: m.doc_type.clone(),
+        });
+    }
+    insert_catalog(tx, m).await?;
+    Ok(m.id)
+}
+
+async fn insert_catalog(tx: &mut Tx<'_>, m: &Machine) -> Result<()> {
     tx.execute(
         sql_query(
             r#"INSERT INTO sm.machine (id, doc_type, regulated)
-               VALUES ($1, $2, $3)
-               ON CONFLICT (id) DO UPDATE
-                 SET doc_type = EXCLUDED.doc_type,
-                     regulated = EXCLUDED.regulated"#,
+               VALUES ($1, $2, $3)"#,
         )
         .bind(m.id.as_uuid())
         .bind(&m.doc_type)
@@ -202,8 +374,7 @@ async fn persist_machine(tx: &mut Tx<'_>, m: &Machine) -> Result<()> {
         tx.execute(
             sql_query(
                 r#"INSERT INTO sm.state (machine_id, name)
-                   VALUES ($1, $2)
-                   ON CONFLICT (machine_id, name) DO NOTHING"#,
+                   VALUES ($1, $2)"#,
             )
             .bind(m.id.as_uuid())
             .bind(&s.0),
@@ -228,16 +399,7 @@ async fn persist_machine(tx: &mut Tx<'_>, m: &Machine) -> Result<()> {
                        machine_id, name, from_state, to_state, permission,
                        signature_kind, meaning, sig_permission, not_required_reason,
                        hooks_allowed
-                   ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-                   ON CONFLICT (machine_id, name) DO UPDATE SET
-                       from_state = EXCLUDED.from_state,
-                       to_state = EXCLUDED.to_state,
-                       permission = EXCLUDED.permission,
-                       signature_kind = EXCLUDED.signature_kind,
-                       meaning = EXCLUDED.meaning,
-                       sig_permission = EXCLUDED.sig_permission,
-                       not_required_reason = EXCLUDED.not_required_reason,
-                       hooks_allowed = EXCLUDED.hooks_allowed"#,
+                   ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)"#,
             )
             .bind(m.id.as_uuid())
             .bind(&e.name)

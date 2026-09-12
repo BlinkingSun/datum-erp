@@ -17,7 +17,9 @@
 //!   never commits; the caller's [`datum_db::Tx`] does.
 //! - **Freeze.** Hook order is computed once at startup ([`Engine::freeze`]). Registration
 //!   after freeze is [`Error::Frozen`]. `persist` / `spawn` / `transition` refuse until
-//!   frozen ([`Error::NotFrozen`]).
+//!   frozen ([`Error::NotFrozen`]). Catalog declarations are frozen after first persist:
+//!   an identical re-persist is a no-op (existing machine id); a different declaration
+//!   for the same `doc_type` is [`Error::MachineChanged`].
 //! - **Signatures.** [`SignatureDeclaration`] lives here (no `Default`). The executor
 //!   calls `gate.verify` on every `Required` edge before mutate and fails closed.
 
@@ -52,6 +54,19 @@ mod tests {
     #[test]
     fn unimplemented_formats() {
         assert!(!Error::Unimplemented.to_string().is_empty());
+    }
+
+    #[test]
+    fn machine_changed_names_doc_type() {
+        let err = Error::MachineChanged {
+            doc_type: "wo".into(),
+        };
+        let text = err.to_string();
+        assert!(text.contains("wo"), "got {text}");
+        assert!(
+            matches!(err, Error::MachineChanged { ref doc_type } if doc_type == "wo"),
+            "got {err:?}"
+        );
     }
 
     #[test]

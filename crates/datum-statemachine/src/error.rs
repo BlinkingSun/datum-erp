@@ -116,6 +116,13 @@ pub enum Error {
     /// Duplicate machine, edge, or instance.
     #[error("duplicate: {0}")]
     Duplicate(String),
+    /// A persist of a different declaration for a `doc_type` that already has a catalog row.
+    /// Declarations are frozen after first persist (CONTRACT §6.3); they are never silently updated.
+    #[error("machine declaration changed for doc_type {doc_type}")]
+    MachineChanged {
+        /// Document type whose catalog row would have been overwritten.
+        doc_type: String,
+    },
     /// Hook named a module that is not in the dependency graph.
     #[error("unknown module {0}")]
     UnknownModule(String),

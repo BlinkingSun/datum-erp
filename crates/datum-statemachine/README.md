@@ -17,7 +17,7 @@ Declarative state machines, uniformly audited, with a frozen hook ABI. Uses
 - `HookPhase` / `HookView` / `Veto` — hook ABI
 - `ModuleNode` — module id + `depends_on` (topological order; ties by id)
 - `check_gate_binding` — release build fails if a Required edge meets `NoSignatures`
-- `Error` / `Result` — `Frozen` / `NotFrozen` / `Veto` / `HookBudgetExceeded` / `AfterHookCannotVeto` / `StartupGate` / …
+- `Error` / `Result` — `Frozen` / `NotFrozen` / `MachineChanged` / `Veto` / `HookBudgetExceeded` / `AfterHookCannotVeto` / `StartupGate` / …
 - `MIGRATOR` — `placeholder` + `0001_statemachine`
 
 `Engine` methods other crates call: `new`, `set_module_graph`, `register_machine`,
@@ -42,6 +42,7 @@ Declarative state machines, uniformly audited, with a frozen hook ABI. Uses
 - `no_postings_finalize_reports_no_sink` / `transition_requires_frozen_registry`
 - `concurrent_transition_is_rejected` / `writes_go_through_tx`
 - `startup_fails_when_required_edge_meets_no_signatures_in_release`
+- `build_twice_same_declaration_is_idempotent` / `changed_declaration_is_refused`
 - `migration_is_reversible` / `catalogue_accepts_sm_schema`
 - trybuild: `signature_declaration_has_no_default`
 
@@ -51,7 +52,11 @@ Lib: `regulated_machine_requires_total_declaration`, `non_regulated_absence_mean
 ## Frozen / seams
 
 Frozen: hook ABI, `SignatureDeclaration`, `Engine::{persist,spawn,transition,freeze}`
-(CONTRACT §6.2 rule 8, §6.3). Ledger coupling is trait-only (`&mut dyn PostingSink`);
-`cargo tree` must not show `datum-ledger`. Real `SignatureGate` is Wave 2b
-`datum-esign`. `Kernel::build` currently freezes with zero `register_machine`
-(FINDINGS-0 #1/#2).
+(CONTRACT §6.2 rule 8, §6.3). `persist` is idempotent on the declaration
+(`doc_type`, states, edges, signature requirements): a second persist of an
+identical catalog is a no-op and keeps the existing machine id; a different
+declaration for an existing `doc_type` is `Error::MachineChanged` (never a silent
+UPDATE; one audit row only when a row is written). Ledger coupling is trait-only
+(`&mut dyn PostingSink`); `cargo tree` must not show `datum-ledger`. Real
+`SignatureGate` is Wave 2b `datum-esign`. `Kernel::build` currently freezes with
+zero `register_machine` (FINDINGS-0 #1/#2).

@@ -9,13 +9,16 @@ use std::time::Duration;
 
 use datum_core::{NoPostings, NoSignatures, PostingError, PostingSink};
 use datum_db::Tx;
-use datum_statemachine::{DocRef, Engine, Error, HookPhase, ModuleNode, Veto, action_for};
+use datum_statemachine::{
+    DocRef, EdgeBuilder, Engine, Error, HookPhase, Machine, ModuleNode, Veto, action_for,
+};
 use datum_test::db_case;
 
 use common::{
-    CollectingSink, CountingGate, actor_with_perm, count_audit, draft_release_machine,
-    dummy_intent, dummy_token, instance_state, migrate_and_install, persist_spawn, pg_code,
-    raw_insert_machine, table_count, write_pool,
+    CollectingSink, CountingGate, actor_with_perm, catalog_audit_count, count_audit,
+    draft_release_machine, dummy_intent, dummy_token, instance_state, machine_id_for,
+    migrate_and_install, persist_spawn, pg_code, raw_insert_machine, system_ctx, table_count,
+    write_pool,
 };
 
 /// Four-node diamond: A ← B, A ← C, B ← D, C ← D (D depends on B and C).
@@ -681,6 +684,119 @@ async fn concurrent_transition_is_rejected() {
     assert!(
         matches!(err, Error::InvalidState { .. }),
         "lost-update UPDATE … AND state = from AND version = expected → InvalidState, got {err:?}"
+    );
+    db.finish().await.expect("finish");
+}
+
+#[tokio::test]
+async fn build_twice_same_declaration_is_idempotent() {
+    let db = db_case!("sm_idem");
+    migrate_and_install(&db).await;
+    let write = write_pool(&db);
+    let ctx = system_ctx("sm.persist");
+
+    let (mut eng, _doc) = engine_ready(false).await;
+    eng.freeze().expect("freeze");
+    let mut tx = Tx::begin(&write, &ctx).await.expect("begin 1");
+    eng.persist(&mut tx).await.expect("persist 1");
+    tx.commit().await.expect("commit 1");
+
+    let id1 = machine_id_for(db.app_pool(), "wo").await;
+    assert_eq!(
+        table_count(db.app_pool(), "SELECT count(*) FROM sm.machine").await,
+        1,
+        "first persist writes one sm.machine row"
+    );
+    let audit_before = catalog_audit_count(db.app_pool()).await;
+    assert!(
+        audit_before > 0,
+        "first persist must write catalog audit rows"
+    );
+
+    let (mut eng2, _doc2) = engine_ready(false).await;
+    eng2.freeze().expect("freeze 2");
+    let mut tx = Tx::begin(&write, &ctx).await.expect("begin 2");
+    eng2.persist(&mut tx).await.expect("persist 2");
+    tx.commit().await.expect("commit 2");
+
+    assert_eq!(
+        table_count(db.app_pool(), "SELECT count(*) FROM sm.machine").await,
+        1,
+        "two builds on one database, one sm.machine row"
+    );
+    assert_eq!(
+        machine_id_for(db.app_pool(), "wo").await,
+        id1,
+        "second persist returns the existing machine id"
+    );
+    assert_eq!(
+        catalog_audit_count(db.app_pool()).await,
+        audit_before,
+        "second build writes no audit row"
+    );
+    db.finish().await.expect("finish");
+}
+
+#[tokio::test]
+async fn changed_declaration_is_refused() {
+    let db = db_case!("sm_changed");
+    migrate_and_install(&db).await;
+    let write = write_pool(&db);
+    let ctx = system_ctx("sm.persist");
+
+    let (mut eng, _doc) = engine_ready(false).await;
+    eng.freeze().expect("freeze");
+    let mut tx = Tx::begin(&write, &ctx).await.expect("begin 1");
+    eng.persist(&mut tx).await.expect("persist 1");
+    tx.commit().await.expect("commit 1");
+
+    let id1 = machine_id_for(db.app_pool(), "wo").await;
+    let states_before = table_count(db.app_pool(), "SELECT count(*) FROM sm.state").await;
+    let audit_before = catalog_audit_count(db.app_pool()).await;
+
+    let changed = Machine::builder("wo")
+        .state("Draft")
+        .state("Released")
+        .state("Void")
+        .edge(
+            EdgeBuilder::new("Draft", "Released", "release", "wo.release")
+                .not_required("plain-shop; no signature on release"),
+        )
+        .edge(
+            EdgeBuilder::new("Draft", "Void", "void", "wo.void")
+                .not_required("void is not a quality decision"),
+        )
+        .build()
+        .expect("changed machine");
+    let mut eng2 = Engine::new();
+    eng2.set_module_graph(diamond_graph()).expect("graph");
+    eng2.register_machine(changed).expect("reg");
+    eng2.freeze().expect("freeze 2");
+    let mut tx = Tx::begin(&write, &ctx).await.expect("begin 2");
+    let err = eng2
+        .persist(&mut tx)
+        .await
+        .expect_err("changed declaration");
+    assert!(
+        matches!(err, Error::MachineChanged { ref doc_type } if doc_type == "wo"),
+        "got {err:?}"
+    );
+    tx.rollback().await.expect("rollback");
+
+    assert_eq!(
+        table_count(db.app_pool(), "SELECT count(*) FROM sm.machine").await,
+        1
+    );
+    assert_eq!(machine_id_for(db.app_pool(), "wo").await, id1);
+    assert_eq!(
+        table_count(db.app_pool(), "SELECT count(*) FROM sm.state").await,
+        states_before,
+        "catalog must be unchanged"
+    );
+    assert_eq!(
+        catalog_audit_count(db.app_pool()).await,
+        audit_before,
+        "refused persist must not write"
     );
     db.finish().await.expect("finish");
 }

@@ -340,6 +340,23 @@ pub async fn table_count(pool: &PgPool, sql: &'static str) -> i64 {
     sql_query_scalar(sql).fetch_one(pool).await.expect("count")
 }
 
+pub async fn machine_id_for(pool: &PgPool, doc_type: &str) -> uuid::Uuid {
+    sql_query_scalar("SELECT id FROM sm.machine WHERE doc_type = $1")
+        .bind(doc_type)
+        .fetch_one(pool)
+        .await
+        .expect("machine id")
+}
+
+pub async fn catalog_audit_count(pool: &PgPool) -> i64 {
+    sql_query_scalar(
+        "SELECT count(*) FROM audit.event WHERE table_name IN ('machine', 'state', 'edge')",
+    )
+    .fetch_one(pool)
+    .await
+    .expect("catalog audit")
+}
+
 pub async fn raw_insert_machine(pool: &PgPool) -> sqlx::Error {
     sql_query(
         r#"INSERT INTO sm.machine (id, doc_type, regulated)
