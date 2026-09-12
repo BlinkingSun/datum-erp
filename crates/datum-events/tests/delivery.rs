@@ -1,12 +1,6 @@
 //! At-least-once delivery, dead letter, skip locked, service principal.
 
-#![allow(
-    clippy::disallowed_methods,
-    clippy::disallowed_macros,
-    clippy::unwrap_used,
-    clippy::expect_used,
-    unused_crate_dependencies
-)]
+#![allow(clippy::unwrap_used, clippy::expect_used, unused_crate_dependencies)]
 
 mod common;
 

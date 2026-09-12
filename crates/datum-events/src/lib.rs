@@ -19,7 +19,6 @@
 //! is no DELETE path on `app.event`. `transient.delivery` is working state and
 //! is not audited.
 
-#![allow(clippy::disallowed_methods, clippy::disallowed_macros)] // Wave 2: this crate owns outbox SQL.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 pub mod dispatch;

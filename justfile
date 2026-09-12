@@ -22,8 +22,8 @@ lint-sql:
       echo "lint-sql: session-protocol SQL token outside crates/datum-db, crates/datum-audit, and crates/datum-test" >&2; \
       exit 1; \
     fi
-    if rg -n --glob '*.rs' --glob '!**/datum-db/**' --glob '!**/datum-audit/**' --glob '!**/datum-test/**' \
-        -e 'allow\(clippy::disallowed_' \
+    if rg -n -U --multiline-dotall --glob '*.rs' --glob '!**/datum-db/**' --glob '!**/datum-audit/**' --glob '!**/datum-test/**' \
+        -e 'allow\(.{0,400}?clippy::disallowed_' \
         "{{root}}/crates"; then \
       echo "lint-sql: clippy disallowed allow outside crates/datum-db, crates/datum-audit, and crates/datum-test" >&2; \
       exit 1; \

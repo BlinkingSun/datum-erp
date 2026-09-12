@@ -1,10 +1,5 @@
 #![allow(dead_code)]
-#![allow(
-    clippy::disallowed_methods,
-    clippy::disallowed_macros,
-    clippy::unwrap_used,
-    clippy::expect_used
-)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::time::Duration;
 
