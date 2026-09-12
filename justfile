@@ -16,6 +16,7 @@ clippy:
 
 # String-level raw-SQL fence (CONTRACT §5a / §5a.1). Fails on any hit outside datum-db / datum-audit / datum-test.
 lint-sql:
+    command -v rg >/dev/null 2>&1 || { echo 'lint-sql: ripgrep (rg) is required' >&2; exit 1; }
     if rg -n --glob '*.rs' --glob '!**/datum-db/**' --glob '!**/datum-audit/**' --glob '!**/datum-test/**' \
         -e 'QueryBuilder' -e 'raw_sql' -e 'copy_in_raw' -e 'set_config' -e 'current_setting' \
         "{{root}}/crates"; then \
