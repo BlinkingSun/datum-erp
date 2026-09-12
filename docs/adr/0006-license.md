@@ -1,8 +1,21 @@
 # 0006. License
 
-Status:   **Open. Needs a decision before the first public commit.**
-Date:     2026-09-11
-Decider:  project lead
+Status:   **Accepted** (2026-09-12)
+Date:     2026-09-11, accepted 2026-09-12
+Decider:  project owner
+
+## Decision
+
+**AGPL-3.0-or-later for the code. Contributions under the Developer Certificate of Origin,
+version 1.1. No contributor license agreement.** Copyright is held by the project owner as an
+individual until a foundation or company is deliberately chosen; that choice is not blocked
+by this record. The public repository is `https://github.com/BlinkingSun/datum-erp`.
+
+The owner's stated reason is the one the recommendation below rests on: the project exists
+so that others can contribute. Declining a CLA gives up the option to sell commercial
+exceptions later; that cost is accepted knowingly. While the owner is the only copyright
+holder this decision remains cheap to change; from the first outside contribution it does
+not.
 
 ## Context
 

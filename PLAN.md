@@ -39,10 +39,18 @@ Read this section first if you read v1.
    Rust is pinned at 1.98.1, PostgreSQL 17 is installed from Homebrew, `just` and
    `sqlx-cli` are on the path. The NUC (Linux) and shop PC (Windows) are CI nodes only, and
    neither has PostgreSQL yet. See §11.
-6. **Publication.** The owner authorised a public GitHub repository on 2026-09-12. The
-   license (ADR 0006) and the repository name are the owner's calls and are being asked
-   for. Until both land, the tree is mirrored to a **private** repository only. See §12.
-7. **Multi-application posture made explicit.** See §1a. The owner's stated goal is a
+6. **Publication.** The owner authorised, then restated, a public open source repository
+   on 2026-09-12: `github.com/BlinkingSun/datum-erp` is live (Actions off, plain
+   fast-forward pushes only), with the private mirror `datum-dev` kept as backup. License
+   AGPL-3.0-or-later + DCO per ADR 0006. See §12.
+7. **Multi-application posture made explicit.** See §1a.
+8. **Cycle-2 audit amendments (2026-09-12).** The placeholder-crate scheme is now enforced
+   by untracked placeholders, path-checkout integration and a `git ls-tree` gate (§3,
+   CONTRACT §10); the audit-persistence decision's Wave 1 obligations (§11 of that record)
+   are carried into the specs: five roles, two connection URLs, a raw-SQL fence, and a real
+   `Tx::begin` in the `datum-db` stub; per-test databases from a template; two contested
+   points (money column scale, the application role's DELETE grant) went to the decision
+   authority as `DECISION-w1-contracts.md`; invariant 19 added. The owner's stated goal is a
    system that replaces their company's ERP *and* can be configured for other kinds of
    business. The module system was already designed for that; v2 makes the plain-shop
    profile an acceptance target rather than an implication.
@@ -71,7 +79,7 @@ The decisions that bind every lane, **as amended**:
 | Audit trail and signature | Kernel, not module. **Written by a row trigger attached automatically at `CREATE TABLE`, through a security-definer function.** The application role holds SELECT only on the audit table. Per-transaction hash chain anchored off the server; the honest claim is tamper *evidence*, never tamper *proof*. | ADR 0005 as amended, `research/decisions/audit-persistence.md` (D3, D4) |
 | Tenancy | Single tenant, self-hosted; residency is an installation property | ADR 0008 |
 | Interface | TypeScript, React, TanStack; one application, three interaction modes; archival documents server-rendered to PDF; Tauri is optional and never required | ADR 0009 |
-| License | **Open — owner decision pending.** Recommendation AGPL-3.0-or-later with a Developer Certificate of Origin. Workspace carries `license = "UNLICENSED"` until it closes. | ADR 0006 |
+| License | **Decided by the owner 2026-09-12: AGPL-3.0-or-later, contributions under the Developer Certificate of Origin, no CLA.** Public repository `github.com/BlinkingSun/datum-erp`. | ADR 0006 (Accepted) |
 
 ### 1a. One kernel, many kinds of shop
 
@@ -150,6 +158,35 @@ Ownership rules that resolve the collisions the stub audit found:
   version, edition, rust-version, license, publish.
 - Not one lane touches `_team/`, `docs/adr/`, or another lane's files. A lane that
   believes it must raises an escalation in its report and stops.
+- **Placeholders and throwaway roots are untracked**, and the code lanes are integrated by
+  path checkout in a fixed order with a `git ls-tree` gate. The full recipe is
+  `_team/specs/CONTRACT-workspace.md` §10 and it is mechanical; nothing in Wave 2 starts
+  until its post-integration gate passes on the integrated tree.
+- The `datum-db` stub has real parts in Wave 1 (`connect`, pool hooks, `Tx::begin`), the
+  raw-SQL fence (`clippy.toml` + `just lint-sql`) is `ws-skeleton`'s, and the five roles
+  with two connection URLs are `harness`'s — all from
+  `research/decisions/audit-persistence.md` §11, which binds Wave 1.
+
+### Waves and phases
+
+The catalog's phases (`docs/04`) and this plan's waves, so no document invents a mapping:
+
+| Catalog phase | Waves | Ends with |
+|---|---|---|
+| Phase 0 — Kernel | Wave 1, Wave 2, Wave 2b | nothing user-visible; everything depends on it |
+| Phase 1 — We know what we have | Wave 2s (the slice) grows into it; the rest after Wave 3 | stock with lot and serial traceability |
+| Phases 2–7 | after this build | per the catalog |
+
+### Canonical example set
+
+Every document and every fixture that needs an example uses these, so `docs/05`, `docs/10`,
+the slice acceptance script and the mockups agree: item `MDS-450-M4x12` Rev C (cortical
+bone screw, Ti-6Al-4V ELI, make, stocking unit EA); raw material `RM-TI-BAR-12` (titanium
+bar, stocked in mm of length, bought in bars); mill heat `HT-ATI-24-8831` (240 kg, certified
+2024-09-11); bar-stock lot `LOT-BAR-24-4412` (86 bars, received on `PO-2024-0841`
+2024-10-03); work order `WO-2026-1847` (500 pieces, operation 20 TURN on `WC-LATHE-03`);
+finished lot `LOT-WO-1847`; serials `SN-450-000134` through `SN-450-000633`; operator
+`M. Reyes`; gage `G-1422`.
 
 ### Wave 2 — kernel, slice-first (batched; compile-parallel against stubs, done in order)
 
@@ -369,7 +406,12 @@ Wave 1 and Wave 2.
     stricter validation category permanently, raising their cost on every future
     release. This looks like a product decision and is an architectural one.
 
-Items 11, 12 and 18 add scope to the kernel that the original plan did not have. That is
+19. **Regulated document numbers are gap-free.** They are allocated from a counter row in
+    the caller's transaction, never from a PostgreSQL sequence, and a committed number is
+    never reused; cancellation is a visible status, not a missing number.
+    (`research/decisions/audit-persistence.md` §8 and §11 item 6.)
+
+Items 11, 12, 18 and 19 add scope to the kernel that the original plan did not have. That is
 the cost of having asked the question before building rather than after.
 
 ## 7. Testing obligation
@@ -452,9 +494,13 @@ items. The Tauri shell, until ADR 0009's revisit condition fires.
 
 Conventions every lane must follow:
 
-- `DATABASE_URL=postgres://datum_migrate:datum@127.0.0.1:5432/datum_test` is the local
-  default documented in `.env.example`; tests read it from the environment, never from a
-  committed `.env`. `SQLX_OFFLINE=true` is set in `.cargo/config.toml`, never in `.env`.
+- Two connection URLs, named as the audit decision names them: `DATUM_DATABASE_URL`
+  (`datum_app`) and `DATUM_MIGRATE_DATABASE_URL` (`datum_migrate`), plus
+  `DATUM_BOOTSTRAP_URL` for role and database creation and `DATUM_TEST_TEMPLATE` for
+  per-test database clones. Documented in `.env.example`; read from the environment, never
+  from a committed `.env`. There is no bare `DATABASE_URL` in the product. `SQLX_OFFLINE=true`
+  is set in `.cargo/config.toml`, never in `.env`. PostgreSQL major is pinned at 17 in the
+  contract (ADR 0003 pins none; the audit decision requires 15 or later).
 - `dev/compose.yml` is the portable path for machines with a container runtime; on this
   MacBook the Homebrew service plays the same role and `dev/sql/` is applied to it. Both
   paths must produce the same roles and grants.
@@ -465,13 +511,14 @@ Conventions every lane must follow:
 
 ## 12. Repository and publication
 
-- The owner authorised a public GitHub repository on 2026-09-12.
-- **Before the first public push:** the license decision (ADR 0006) and the repository
-  name are the owner's, and are being asked for. A public repository is never renamed,
-  made private, deleted, transferred or force-pushed afterwards, so the name is chosen
-  once.
-- Until then the tree is mirrored to a **private** repository, Actions off, as a backup
-  remote (`sync-dev` pattern). Pushes are plain fast-forward only.
+- Public repository: `https://github.com/BlinkingSun/datum-erp` (remote `origin`), created
+  2026-09-12 after the owner restated the decision. It is never renamed, made private,
+  deleted, transferred or force-pushed. Pushes are plain fast-forward only. Actions stay
+  off until the workflow is green on all three local nodes (§11).
+- Private mirror `BlinkingSun/datum-dev` (remote `dev`) is kept as the backup remote and
+  receives every landing first.
+- License AGPL-3.0-or-later; contributions under the DCO; `LICENSE`, `CONTRIBUTING.md` and
+  the header convention are `doc-repo`'s (Wave 1).
 - `_team/` never enters git. The substantive research is already promoted into
   `research/`; anything else worth keeping is promoted the same way at integration.
 - Once the license lands: `LICENSE`, `CONTRIBUTING.md` with the DCO or CLA choice, the
@@ -490,3 +537,12 @@ Conventions every lane must follow:
 - Commit budget is three per build lane; commits carry the `Lane:` trailer the git guards
   add. Read-only lane classes cannot commit. Nobody but the orchestrator pushes.
 - Absolute paths only, in every prompt and every report.
+- **Read-only lanes never run in the main tree.** The grok master, plan audits, decisions and
+  phase-end audits run with cwd `ERP-wt/wt-master` (a detached worktree of `main`); per-lane
+  audits run in the audited lane's worktree. Reason, measured 2026-09-12: the dispatcher's
+  commit guard counts any new commit in a lane's cwd against that lane's budget, so an
+  orchestrator commit on `main` killed a running plan audit and its sweeps. Corollary: the
+  orchestrator never commits on a tree that a live lane lists as cwd.
+- Sweep lanes run in consult mode and cannot write files; when a sweep's report is empty at
+  exit, the orchestrator persists the lane's reply from the bridge log
+  (`_team/state/persist-sweeps.py`) before the master consolidates.

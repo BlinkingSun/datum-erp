@@ -1,6 +1,6 @@
 # Handoff — Datum
 
-*Written 2026-09-11, at the end of the planning phase. For whoever picks this up next,
+*Written 2026-09-11, at the end of the planning phase. **Update 2026-09-12:** the license is decided (ADR 0006 Accepted, AGPL-3.0-or-later + DCO) and the public repository exists at github.com/BlinkingSun/datum-erp; PLAN.md is at v2, see its section 0. For whoever picks this up next,
 including a future version of the person who started it.*
 
 ---
