@@ -53,7 +53,7 @@ CREATE TABLE uom.factor (
   denominator     numeric(38, 18) NOT NULL CHECK (denominator <> 0),
   effective_from  timestamptz    NOT NULL,
   effective_to    timestamptz        NULL,
-  CHECK (effective_to IS NULL OR effective_to > effective_from)
+  CHECK (effective_to IS NULL OR effective_to >= effective_from)
 );
 ALTER TABLE uom.factor OWNER TO datum_owner;
 

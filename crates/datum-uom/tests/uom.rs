@@ -92,6 +92,134 @@ async fn effectivity_picks_the_factor_in_force() {
 }
 
 #[tokio::test]
+async fn inverse_factor_is_inferred_exactly() {
+    let db = datum_test::db_case!("inverse_factor");
+    common::migrate(&db).await;
+    let pool = WritePool::new(db.app_pool().clone());
+    let ctx = common::write_ctx("uom.inverse");
+    let mut tx = datum_db::Tx::begin(&pool, &ctx).await.unwrap();
+    let item = ItemId::generate();
+    let inch = UnitRef::<LengthDim>::checked(UnitId(3), DimensionKind::Length).unwrap();
+    let foot = UnitRef::<LengthDim>::checked(UnitId(4), DimensionKind::Length).unwrap();
+    let conv_ctx = ConversionContext { item, lot: None };
+
+    // Global seed IN→FT (1/12) implies FT→IN without a stored FT→IN row.
+    let catalog = load_catalog(&mut tx).await.unwrap();
+    let one_ft = Quantity::new(Decimal::ONE, foot).unwrap();
+    let to_in = catalog.convert(one_ft, inch, &conv_ctx).unwrap();
+    let (inches, _) = split_with_policy(&catalog, to_in, &conv_ctx, inch.id());
+    assert_eq!(inches.amount(), Decimal::from(12));
+    let back = catalog.convert(inches, foot, &conv_ctx).unwrap();
+    let (ft_back, res) = split_with_policy(&catalog, back, &conv_ctx, foot.id());
+    assert_eq!(ft_back.try_add(res).unwrap().amount(), Decimal::ONE);
+
+    // Stored FT→IN beats the reciprocal implied from item-scoped IN→FT.
+    tx.execute(
+        sqlx::query(
+            "INSERT INTO uom.factor (from_unit, to_unit, item_id, numerator, denominator, effective_from)
+             VALUES (3, 4, $1, 1, 12, '-infinity')",
+        )
+        .bind(item.as_uuid()),
+    )
+    .await
+    .unwrap();
+    tx.execute(
+        sqlx::query(
+            "INSERT INTO uom.factor (from_unit, to_unit, item_id, numerator, denominator, effective_from)
+             VALUES (4, 3, $1, 1, 10, '-infinity')",
+        )
+        .bind(item.as_uuid()),
+    )
+    .await
+    .unwrap();
+    let catalog = load_catalog(&mut tx).await.unwrap();
+    let to_in_stored = catalog.convert(one_ft, inch, &conv_ctx).unwrap();
+    let (inches_stored, _) = split_with_policy(&catalog, to_in_stored, &conv_ctx, inch.id());
+    assert_eq!(
+        inches_stored.amount(),
+        dec("0.1000"),
+        "explicit FT→IN 1/10 must beat implied 12/1 from IN→FT"
+    );
+
+    tx.rollback().await.unwrap();
+    db.finish().await.unwrap();
+}
+
+#[tokio::test]
+async fn repin_closes_the_open_pin() {
+    let db = datum_test::db_case!("repin");
+    common::migrate(&db).await;
+    let pool = WritePool::new(db.app_pool().clone());
+    let ctx = common::write_ctx("uom.repin");
+    let mut tx = datum_db::Tx::begin(&pool, &ctx).await.unwrap();
+    let item = ItemId::generate();
+    let lot = LotId::generate();
+    pin_lot_factor(
+        &mut tx,
+        item,
+        lot,
+        UnitId(3),
+        UnitId(4),
+        Decimal::ONE,
+        Decimal::from(8),
+    )
+    .await
+    .unwrap();
+    let (first_to,): (Option<chrono::DateTime<chrono::Utc>>,) = tx
+        .fetch_one(
+            sqlx::query_as(
+                "SELECT effective_to FROM uom.factor WHERE lot_id = $1 ORDER BY id LIMIT 1",
+            )
+            .bind(lot.as_uuid()),
+        )
+        .await
+        .unwrap();
+    assert!(first_to.is_none());
+
+    pin_lot_factor(
+        &mut tx,
+        item,
+        lot,
+        UnitId(3),
+        UnitId(4),
+        Decimal::ONE,
+        Decimal::from(10),
+    )
+    .await
+    .unwrap();
+
+    let rows: Vec<(Option<chrono::DateTime<chrono::Utc>>, Decimal, Decimal)> = tx
+        .fetch_all(
+            sqlx::query_as(
+                "SELECT effective_to, numerator, denominator FROM uom.factor WHERE lot_id = $1 ORDER BY id",
+            )
+            .bind(lot.as_uuid()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 2, "closed pin and new open pin");
+    assert!(rows[0].0.is_some(), "first row closed at re-pin");
+    assert!(rows[1].0.is_none());
+    assert_eq!(rows[1].1, Decimal::ONE);
+    assert_eq!(rows[1].2, Decimal::from(10));
+
+    let catalog = load_catalog(&mut tx).await.unwrap();
+    let lot_ctx = ConversionContext {
+        item,
+        lot: Some(lot),
+    };
+    let inch = UnitRef::<LengthDim>::checked(UnitId(3), DimensionKind::Length).unwrap();
+    let foot = UnitRef::<LengthDim>::checked(UnitId(4), DimensionKind::Length).unwrap();
+    let qty = Quantity::new(Decimal::from(10), inch).unwrap();
+    let converted = catalog.convert(qty, foot, &lot_ctx).unwrap();
+    let (v, _) = split_with_policy(&catalog, converted, &lot_ctx, foot.id());
+    assert_eq!(v.amount(), Decimal::ONE, "active pin is 1/10");
+
+    tx.rollback().await.unwrap();
+    db.finish().await.unwrap();
+}
+
+#[tokio::test]
 async fn lot_factor_beats_item_factor_beats_global() {
     let db = datum_test::db_case!("factor_rank");
     common::migrate(&db).await;

@@ -23,6 +23,23 @@ pub async fn pin_lot_factor(
     tx.execute(
         sqlx::query(
             r#"
+            UPDATE uom.factor
+               SET effective_to = $1
+             WHERE from_unit = $2 AND to_unit = $3
+               AND item_id = $4 AND lot_id = $5
+               AND effective_to IS NULL
+            "#,
+        )
+        .bind(as_of)
+        .bind(from.0)
+        .bind(to.0)
+        .bind(item.as_uuid())
+        .bind(lot.as_uuid()),
+    )
+    .await?;
+    tx.execute(
+        sqlx::query(
+            r#"
             INSERT INTO uom.factor (
               from_unit, to_unit, item_id, lot_id,
               numerator, denominator, effective_from, effective_to

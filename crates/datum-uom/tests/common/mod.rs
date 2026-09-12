@@ -13,6 +13,7 @@ pub fn write_ctx(action: &str) -> WriteContext {
         "ui",
     );
     ctx.actor_display = Some("test".into());
+    ctx.reason = Some("integration test".into());
     ctx
 }
 

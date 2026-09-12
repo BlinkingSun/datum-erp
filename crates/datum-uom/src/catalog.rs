@@ -36,6 +36,23 @@ struct FactorRow {
     denominator: Decimal,
 }
 
+struct ResolvedFactor<'a> {
+    row: &'a FactorRow,
+    inverse: bool,
+}
+
+impl ResolvedFactor<'_> {
+    fn apply(&self, amount: Decimal) -> (Decimal, Decimal) {
+        if self.inverse {
+            let factor = self.row.denominator / self.row.numerator;
+            ((amount * self.row.denominator) / self.row.numerator, factor)
+        } else {
+            let factor = self.row.numerator / self.row.denominator;
+            ((amount * self.row.numerator) / self.row.denominator, factor)
+        }
+    }
+}
+
 type FactorDbRow = (i64, i64, Option<Uuid>, Option<Uuid>, Decimal, Decimal);
 
 /// Cached catalog state for one database transaction.
@@ -70,22 +87,33 @@ impl UomCatalog {
         from: UnitId,
         to: UnitId,
         ctx: &ConversionContext,
-    ) -> core::result::Result<&FactorRow, QuantityError> {
-        let mut best: Option<(i32, &FactorRow)> = None;
+    ) -> core::result::Result<ResolvedFactor<'_>, QuantityError> {
+        // kind 0 = stored row in query direction; kind 1 = reciprocal of opposite-direction row.
+        let mut best: Option<(i32, i32, &FactorRow)> = None;
         for f in &self.factors {
-            if f.from != from || f.to != to {
+            let kind = if f.from == from && f.to == to {
+                0
+            } else if f.from == to && f.to == from {
+                1
+            } else {
                 continue;
-            }
+            };
             let Some(rank) = factor_rank(f, ctx) else {
                 continue;
             };
-            match best {
-                None => best = Some((rank, f)),
-                Some((r, _)) if rank < r => best = Some((rank, f)),
-                _ => {}
+            let better = match best {
+                None => true,
+                Some((br, bk, _)) => rank < br || (rank == br && kind < bk),
+            };
+            if better {
+                best = Some((rank, kind, f));
             }
         }
-        best.map(|(_, f)| f).ok_or(QuantityError::NoConversionPath {
+        best.map(|(_, kind, f)| ResolvedFactor {
+            row: f,
+            inverse: kind == 1,
+        })
+        .ok_or(QuantityError::NoConversionPath {
             from,
             to,
             item: ctx.item,
@@ -115,8 +143,7 @@ impl UomCatalog {
             return Ok((amount, Decimal::ONE));
         }
         let f = self.find_factor(from, to, ctx)?;
-        let factor = f.numerator / f.denominator;
-        Ok(((amount * f.numerator) / f.denominator, factor))
+        Ok(f.apply(amount))
     }
 }
 
