@@ -14,10 +14,10 @@ use datum_core::{
 };
 use datum_db::Tx;
 use datum_events::SchemaRegistry;
-use datum_ledger::{CostMethod, GroupBuilder, upsert_location, upsert_stock_item};
+use datum_ledger::{CostMethod, GroupBuilder, boundary_sql, upsert_location, upsert_stock_item};
 use datum_mod_locations::{
-    CreateLocation, Error, LocationKind, UpdateLocation, boundary_code, ensure_wip, install,
-    migrate, register_schemas, seed_install, store,
+    CreateLocation, Error, Location, LocationKind, LocationStatus, UpdateLocation, boundary_code,
+    ensure_wip, install, migrate, register_schemas, seed_install, store,
 };
 use datum_test::db_case;
 use rust_decimal::Decimal;
@@ -288,6 +288,51 @@ async fn ensure_wip_is_idempotent_per_work_order() {
     db.finish().await.unwrap();
 }
 
+type RegistryJoinRow = (
+    String,
+    String,
+    Option<uuid::Uuid>,
+    Option<String>,
+    Option<String>,
+);
+
+/// INNER JOIN `locations.location` to `ledger.location` and assert kind/status/parent
+/// plus matching `boundary_class`. Missing registry row fails the JOIN.
+async fn assert_registry_row_matches(tx: &mut Tx<'_>, loc: &Location) {
+    let row: Option<RegistryJoinRow> = tx
+        .fetch_optional(
+            sqlx::query_as(
+                "SELECT l.kind, l.status, l.parent_id, l.boundary_class::text,
+                        r.boundary_class::text
+                   FROM locations.location l
+                   JOIN ledger.location r ON r.location_id = l.id
+                  WHERE l.id = $1",
+            )
+            .bind(loc.id.as_uuid()),
+        )
+        .await
+        .unwrap();
+    let (kind, status, parent_id, loc_boundary, reg_boundary) =
+        row.unwrap_or_else(|| panic!("ledger.location JOIN missed {}", loc.id));
+    assert_eq!(kind, loc.kind.as_sql(), "kind {}", loc.code);
+    assert_eq!(status, loc.status.as_sql(), "status {}", loc.code);
+    assert_eq!(
+        parent_id,
+        loc.parent_id.map(|p| p.as_uuid()),
+        "parent {}",
+        loc.code
+    );
+    assert_eq!(loc_boundary, reg_boundary, "registry boundary {}", loc.code);
+    let expected_boundary = loc
+        .boundary_class
+        .map(|b| boundary_sql(b).unwrap().to_string());
+    assert_eq!(
+        loc_boundary, expected_boundary,
+        "location boundary {}",
+        loc.code
+    );
+}
+
 #[tokio::test]
 async fn registry_row_matches_location() {
     let db = db_case!("loc_registry");
@@ -295,7 +340,18 @@ async fn registry_row_matches_location() {
     let pool = write_pool(&db);
     let mut tx = Tx::begin(&pool, &write_ctx("locations.reg")).await.unwrap();
     seed_install(&mut tx).await.unwrap();
-    let loc = store::create(
+
+    for b in datum_mod_locations::BOUNDARY_VARIANTS {
+        let id = store::boundary_location_id(b);
+        let seeded = store::get(&mut tx, id).await.unwrap();
+        assert_eq!(seeded.kind, LocationKind::Virtual);
+        assert_eq!(seeded.status, LocationStatus::Active);
+        assert!(seeded.parent_id.is_none());
+        assert_eq!(seeded.boundary_class, Some(b));
+        assert_registry_row_matches(&mut tx, &seeded).await;
+    }
+
+    let warehouse = store::create(
         &mut tx,
         CreateLocation {
             code: "REG-1".into(),
@@ -307,10 +363,36 @@ async fn registry_row_matches_location() {
     )
     .await
     .unwrap();
-    let supplier_id = store::boundary_location_id(Boundary::Supplier);
-    let supplier = store::get(&mut tx, supplier_id).await.unwrap();
-    assert_eq!(supplier.boundary_class, Some(Boundary::Supplier));
-    assert!(loc.boundary_class.is_none());
+    assert_eq!(warehouse.kind, LocationKind::Warehouse);
+    assert_eq!(warehouse.status, LocationStatus::Active);
+    assert!(warehouse.parent_id.is_none());
+    assert!(warehouse.boundary_class.is_none());
+    assert_registry_row_matches(&mut tx, &warehouse).await;
+
+    let area = store::create(
+        &mut tx,
+        CreateLocation {
+            code: "REG-1-A".into(),
+            name: "Reg area".into(),
+            site_id: store::default_site_id(),
+            parent_id: Some(warehouse.id),
+            kind: LocationKind::Area,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(area.parent_id, Some(warehouse.id));
+    assert_registry_row_matches(&mut tx, &area).await;
+
+    let wo = Identifier::generate();
+    let wip_id = ensure_wip(&mut tx, wo).await.unwrap();
+    let wip = store::get(&mut tx, wip_id).await.unwrap();
+    assert_eq!(wip.kind, LocationKind::Wip);
+    assert_eq!(wip.status, LocationStatus::Active);
+    assert!(wip.parent_id.is_none());
+    assert!(wip.boundary_class.is_none());
+    assert_registry_row_matches(&mut tx, &wip).await;
+
     tx.commit().await.unwrap();
     db.finish().await.unwrap();
 }
