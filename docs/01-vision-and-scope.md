@@ -149,7 +149,7 @@ Stating these plainly now saves arguments later.
 - **Not an MES.** Second-by-second machine control is a different product with
   different latency requirements. Consume machine data, do not try to be the machine
   controller.
-- **Not multi-tenant SaaS.** See `adr/0008-single-tenant-self-hosted.md`. Regulated
+- **Not multi-tenant SaaS.** See `adr/0008-single-tenant.md`. Regulated
   customers self-host, and rolling updates actively conflict with a validated
   installation.
 - **Not a framework.** It is an application that happens to be extensible. Projects
