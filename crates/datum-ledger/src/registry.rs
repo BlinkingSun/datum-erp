@@ -1,0 +1,126 @@
+//! Published writers for `ledger.stock_item` and `ledger.location`.
+//!
+//! Modules write these registries through this interface, never by touching the
+//! tables directly (SPEC Owns).
+
+use datum_core::{Boundary, CurrencyId, ItemId, LocationId, Money, UnitId};
+use datum_db::Tx;
+use rust_decimal::Decimal;
+
+use crate::enums::{CostMethod, boundary_sql, cost_method_sql};
+use crate::{Error, Result};
+
+/// Insert or replace an item's stock measure and cost method.
+pub async fn upsert_stock_item(
+    tx: &mut Tx<'_>,
+    item: ItemId,
+    stock_uom: UnitId,
+    stock_scale: i16,
+    residual_tolerance: Decimal,
+    cost_method: CostMethod,
+    standard: Option<Money>,
+) -> Result<()> {
+    let (standard_cost, standard_currency) = match standard {
+        Some(m) => (Some(m.amount()), Some(m.currency().0 as i16)),
+        None => (None, None),
+    };
+    tx.execute(
+        sqlx::query(
+            "INSERT INTO ledger.stock_item (
+                 item_id, stock_uom_id, stock_scale, residual_tolerance,
+                 cost_method, standard_cost, standard_currency
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+             ON CONFLICT (item_id) DO UPDATE SET
+                 stock_uom_id = EXCLUDED.stock_uom_id,
+                 stock_scale = EXCLUDED.stock_scale,
+                 residual_tolerance = EXCLUDED.residual_tolerance,
+                 cost_method = EXCLUDED.cost_method,
+                 standard_cost = EXCLUDED.standard_cost,
+                 standard_currency = EXCLUDED.standard_currency",
+        )
+        .bind(item.as_uuid())
+        .bind(stock_uom.0)
+        .bind(stock_scale)
+        .bind(residual_tolerance)
+        .bind(cost_method_sql(cost_method))
+        .bind(standard_cost)
+        .bind(standard_currency),
+    )
+    .await?;
+    Ok(())
+}
+
+/// Insert a location. `boundary` is `None` for a real, owned, valued place.
+pub async fn upsert_location(
+    tx: &mut Tx<'_>,
+    location: LocationId,
+    boundary: Option<Boundary>,
+) -> Result<()> {
+    let class = match boundary {
+        Some(b) => Some(boundary_sql(b)?),
+        None => None,
+    };
+    tx.execute(
+        sqlx::query(
+            "INSERT INTO ledger.location (location_id, boundary_class)
+             VALUES ($1, $2::ledger.boundary)
+             ON CONFLICT (location_id) DO UPDATE SET
+                 boundary_class = EXCLUDED.boundary_class",
+        )
+        .bind(location.as_uuid())
+        .bind(class),
+    )
+    .await?;
+    Ok(())
+}
+
+/// Row loaded from `ledger.stock_item` at posting time.
+#[derive(Debug, Clone)]
+pub struct StockItem {
+    /// Item.
+    pub item: ItemId,
+    /// Canonical stock unit.
+    pub stock_uom: UnitId,
+    /// Declared scale (0–8).
+    pub stock_scale: i16,
+    /// Dust bound.
+    pub residual_tolerance: Decimal,
+    /// Cost method.
+    pub cost_method: CostMethod,
+    /// Standard unit cost when [`CostMethod::Standard`].
+    pub standard: Option<Money>,
+}
+
+/// Load a stock-item registry row.
+pub async fn load_stock_item(tx: &mut Tx<'_>, item: ItemId) -> Result<StockItem> {
+    type StockRow = (i64, i16, Decimal, String, Option<Decimal>, Option<i16>);
+    let row: Option<StockRow> = tx
+        .fetch_optional(
+            sqlx::query_as(
+                "SELECT stock_uom_id, stock_scale, residual_tolerance, cost_method,
+                    standard_cost, standard_currency
+               FROM ledger.stock_item WHERE item_id = $1",
+            )
+            .bind(item.as_uuid()),
+        )
+        .await?;
+    let Some((uom, scale, tol, method, sc, scur)) = row else {
+        return Err(Error::UnknownRegistry(format!("stock_item {}", item)));
+    };
+    let cost_method = crate::enums::cost_method_from_sql(&method)
+        .ok_or_else(|| Error::UnknownRegistry(format!("cost_method {method}")))?;
+    let standard = match (sc, scur) {
+        (Some(amount), Some(cur)) => {
+            Some(Money::new(amount, CurrencyId(i32::from(cur))).map_err(datum_core::Error::from)?)
+        }
+        _ => None,
+    };
+    Ok(StockItem {
+        item,
+        stock_uom: UnitId(uom),
+        stock_scale: scale,
+        residual_tolerance: tol,
+        cost_method,
+        standard,
+    })
+}
