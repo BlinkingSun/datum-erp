@@ -4,7 +4,7 @@
 use chrono::Utc;
 use datum_core::{
     AnyQuantity, AreaDim, Boundary, ConversionContext, CostElement, CountDim, DimensionKind,
-    GroupKind, Identifier, ItemId, LengthDim, LocationId, LotId, MassDim, Money,
+    GroupKind, Identifier, ItemId, LengthDim, LocationId, LotId, MassDim, Money, NoPostings,
     PostingGroupHeader, PostingIntent, PostingSink, QuantityPosting, TimeDim, ValueAccount,
     ValuePosting, VolumeDim,
 };
@@ -17,12 +17,14 @@ use datum_statemachine::DocRef;
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
+use crate::body_hash::sha256_hex;
 use crate::domain::{
     AdjustRequest, BalanceQuery, CountRequest, DOC_TYPE, Document, DocumentKind, DocumentLine,
     DocumentStatus, IssueRequest, LineInput, MoveRequest, ReceiveRequest, ReleaseRequest,
     ReturnRequest, ShipRequest,
 };
 use crate::error::{Error, Result};
+use crate::posting_path::{cover_layers, post_via_transition};
 use crate::{events, stamps};
 
 type DocRow = (
@@ -62,10 +64,10 @@ pub async fn receive(
     ctx: &datum_db::WriteContext,
     req: ReceiveRequest,
 ) -> Result<Document> {
-    if let Some((key, hash)) = replay_or_prepare(tx, req.idempotency_key, &req.reference).await?
-        && let Some(doc) = replayed(tx, key, &hash).await?
-    {
-        return Ok(doc);
+    let body_hash = hash_receive(&req);
+    let doc_id = Identifier::generate();
+    if let Some(existing) = begin_idempotent(tx, req.idempotency_key, &body_hash, doc_id).await? {
+        return load_document(tx, existing).await;
     }
     let supplier = boundary_location_id(tx, Boundary::Supplier).await?;
     let mut prepared = Vec::new();
@@ -89,7 +91,6 @@ pub async fn receive(
             ));
         }
     }
-    let doc_id = Identifier::generate();
     insert_document(
         tx,
         kernel,
@@ -103,16 +104,10 @@ pub async fn receive(
     for p in &prepared {
         contribute_receive(&mut builder, p, supplier, req.to_location)?;
     }
-    let group_id = datum_ledger::post(tx, builder).await?;
-    finish_posted(
-        tx,
-        kernel,
-        ctx,
-        doc_id,
-        DocumentKind::Receipt,
-        Some(group_id),
-    )
-    .await?;
+    let group_id = post_via_transition(kernel, tx, ctx, doc_id, DocumentKind::Receipt, builder)
+        .await?
+        .expect("receive posts");
+    stamp_posted(tx, doc_id, Some(group_id)).await?;
     for p in &prepared {
         if let Some(lot) = p.lot {
             kernel
@@ -137,7 +132,6 @@ pub async fn receive(
                 .await?;
         }
     }
-    remember_key(tx, req.idempotency_key, doc_id).await?;
     load_document(tx, doc_id).await
 }
 
@@ -148,6 +142,11 @@ pub async fn release_from_quarantine(
     ctx: &datum_db::WriteContext,
     req: ReleaseRequest,
 ) -> Result<Document> {
+    let body_hash = hash_release(&req);
+    let doc_id = Identifier::generate();
+    if let Some(existing) = begin_idempotent(tx, req.idempotency_key, &body_hash, doc_id).await? {
+        return load_document(tx, existing).await;
+    }
     let lot_rec = load_lot(tx, req.lot).await?;
     let line = LineInput {
         item: lot_rec.item,
@@ -161,7 +160,6 @@ pub async fn release_from_quarantine(
         reason_code: None,
     };
     let p = prepare_line(tx, kernel, line).await?;
-    let doc_id = Identifier::generate();
     insert_document(
         tx,
         kernel,
@@ -188,7 +186,6 @@ pub async fn release_from_quarantine(
     )
     .await?;
     stamp_posted(tx, doc_id, Some(group_id)).await?;
-    remember_key(tx, req.idempotency_key, doc_id).await?;
     load_document(tx, doc_id).await
 }
 
@@ -199,14 +196,29 @@ pub async fn issue_to_wip(
     ctx: &datum_db::WriteContext,
     req: IssueRequest,
 ) -> Result<Document> {
+    let body_hash = hash_issue(&req);
+    let doc_id = Identifier::generate();
+    if let Some(existing) = begin_idempotent(tx, req.idempotency_key, &body_hash, doc_id).await? {
+        return load_document(tx, existing).await;
+    }
     let wip = datum_mod_locations::ensure_wip(tx, req.work_order).await?;
     let mut prepared = Vec::new();
+    let mut residuals = Vec::new();
     for mut line in req.lines {
+        if let Some(lot) = line.lot {
+            let rec = load_lot(tx, lot).await?;
+            if rec.status != LotStatus::Available {
+                return Err(Error::LotNotIssuable);
+            }
+        }
         line.from_location = Some(req.from_location);
         line.to_location = Some(wip);
-        prepared.push(prepare_line(tx, kernel, line).await?);
+        let (p, res) = prepare_line_with_residual(tx, kernel, line).await?;
+        if !res.amount.is_zero() {
+            residuals.push((p.item, p.lot, res));
+        }
+        prepared.push(p);
     }
-    let doc_id = Identifier::generate();
     insert_document(
         tx,
         kernel,
@@ -220,8 +232,20 @@ pub async fn issue_to_wip(
     for p in &prepared {
         contribute_issue(&mut builder, tx, p, req.work_order).await?;
     }
-    let group_id = datum_ledger::post(tx, builder).await?;
-    finish_posted(tx, kernel, ctx, doc_id, DocumentKind::Issue, Some(group_id)).await?;
+    let movement_group = post_via_transition(kernel, tx, ctx, doc_id, DocumentKind::Issue, builder)
+        .await?
+        .expect("issue posts");
+    stamp_posted(tx, doc_id, Some(movement_group)).await?;
+    post_uom_residuals(
+        tx,
+        kernel,
+        ctx,
+        doc_id,
+        req.from_location,
+        movement_group,
+        &residuals,
+    )
+    .await?;
     for p in &prepared {
         kernel
             .publish_event(
@@ -236,7 +260,6 @@ pub async fn issue_to_wip(
             )
             .await?;
     }
-    remember_key(tx, req.idempotency_key, doc_id).await?;
     load_document(tx, doc_id).await
 }
 
@@ -247,13 +270,17 @@ pub async fn move_stock(
     ctx: &datum_db::WriteContext,
     req: MoveRequest,
 ) -> Result<Document> {
+    let body_hash = hash_move(&req);
+    let doc_id = Identifier::generate();
+    if let Some(existing) = begin_idempotent(tx, req.idempotency_key, &body_hash, doc_id).await? {
+        return load_document(tx, existing).await;
+    }
     let mut prepared = Vec::new();
     for mut line in req.lines {
         line.from_location = Some(req.from_location);
         line.to_location = Some(req.to_location);
         prepared.push(prepare_line(tx, kernel, line).await?);
     }
-    let doc_id = Identifier::generate();
     insert_document(
         tx,
         kernel,
@@ -267,9 +294,10 @@ pub async fn move_stock(
     for p in &prepared {
         contribute_move(&mut builder, tx, p, p.lot.is_some() || p.serial.is_some()).await?;
     }
-    let group_id = datum_ledger::post(tx, builder).await?;
-    finish_posted(tx, kernel, ctx, doc_id, DocumentKind::Move, Some(group_id)).await?;
-    remember_key(tx, req.idempotency_key, doc_id).await?;
+    let group_id = post_via_transition(kernel, tx, ctx, doc_id, DocumentKind::Move, builder)
+        .await?
+        .expect("move posts");
+    stamp_posted(tx, doc_id, Some(group_id)).await?;
     load_document(tx, doc_id).await
 }
 
@@ -280,6 +308,11 @@ pub async fn adjust(
     ctx: &datum_db::WriteContext,
     req: AdjustRequest,
 ) -> Result<Document> {
+    let body_hash = hash_adjust(&req);
+    let doc_id = Identifier::generate();
+    if let Some(existing) = begin_idempotent(tx, req.idempotency_key, &body_hash, doc_id).await? {
+        return load_document(tx, existing).await;
+    }
     if req.reason.trim().is_empty() {
         return Err(Error::ReasonRequired);
     }
@@ -291,7 +324,6 @@ pub async fn adjust(
         line.reason_code = Some(req.reason.clone());
         prepared.push(prepare_line(tx, kernel, line).await?);
     }
-    let doc_id = Identifier::generate();
     insert_document(
         tx,
         kernel,
@@ -314,16 +346,10 @@ pub async fn adjust(
     for p in &prepared {
         contribute_adjustment(&mut builder, tx, p, counterpart.1).await?;
     }
-    let group_id = datum_ledger::post(tx, builder).await?;
-    finish_posted(
-        tx,
-        kernel,
-        ctx,
-        doc_id,
-        DocumentKind::Adjustment,
-        Some(group_id),
-    )
-    .await?;
+    let group_id = post_via_transition(kernel, tx, ctx, doc_id, DocumentKind::Adjustment, builder)
+        .await?
+        .expect("adjust posts");
+    stamp_posted(tx, doc_id, Some(group_id)).await?;
     for p in &prepared {
         kernel
             .publish_event(
@@ -332,7 +358,6 @@ pub async fn adjust(
             )
             .await?;
     }
-    remember_key(tx, req.idempotency_key, doc_id).await?;
     load_document(tx, doc_id).await
 }
 
@@ -343,6 +368,11 @@ pub async fn cycle_count(
     ctx: &datum_db::WriteContext,
     req: CountRequest,
 ) -> Result<Document> {
+    let body_hash = hash_count(&req);
+    let doc_id = Identifier::generate();
+    if let Some(existing) = begin_idempotent(tx, req.idempotency_key, &body_hash, doc_id).await? {
+        return load_document(tx, existing).await;
+    }
     let mut prepared = Vec::new();
     for line in req.lines {
         let (counted, factor, _) =
@@ -372,6 +402,8 @@ pub async fn cycle_count(
         } else {
             "CYCLE_COUNT_OVER"
         };
+        let layers = load_open_layers(tx, line.item, req.location).await?;
+        let (money, _) = cover_layers(&layers, variance.abs(), line.lot, line.serial)?;
         prepared.push(PreparedLine {
             item: line.item,
             lot: line.lot,
@@ -385,12 +417,11 @@ pub async fn cycle_count(
                 dimension: counted.dimension,
             },
             conversion_factor: factor,
-            amount: line.amount,
+            amount: Some(money),
             reason_code: Some(reason.into()),
             package: None,
         });
     }
-    let doc_id = Identifier::generate();
     insert_document(
         tx,
         kernel,
@@ -401,25 +432,59 @@ pub async fn cycle_count(
     )
     .await?;
     if prepared.is_empty() {
-        finish_posted(tx, kernel, ctx, doc_id, DocumentKind::Count, None).await?;
+        let doc = DocRef {
+            doc_type: DOC_TYPE.into(),
+            doc_id,
+        };
+        kernel
+            .engine
+            .transition(
+                tx,
+                Box::new(NoPostings),
+                &doc,
+                DocumentKind::Count.post_edge(),
+                None,
+                kernel.signature_gate(),
+                ctx,
+            )
+            .await?;
+        stamp_posted(tx, doc_id, None).await?;
         return load_document(tx, doc_id).await;
     }
+    let header_reason = prepared[0]
+        .reason_code
+        .clone()
+        .unwrap_or_else(|| "CYCLE_COUNT_SHORT".into());
     let mut builder = GroupBuilder::new(
         GroupKind::Adjustment,
         PostingGroupHeader {
             source_kind: "inventory.count".into(),
             source_id: Some(doc_id),
             work_order_id: None,
-            reason_code: Some("CYCLE_COUNT_SHORT".into()),
+            reason_code: Some(header_reason.clone()),
             reverses_group_id: None,
         },
     );
     for p in &prepared {
         contribute_adjustment(&mut builder, tx, p, Boundary::Adjustment).await?;
     }
-    let group_id = datum_ledger::post(tx, builder).await?;
-    finish_posted(tx, kernel, ctx, doc_id, DocumentKind::Count, Some(group_id)).await?;
-    remember_key(tx, req.idempotency_key, doc_id).await?;
+    let group_id = post_via_transition(kernel, tx, ctx, doc_id, DocumentKind::Count, builder)
+        .await?
+        .expect("count posts");
+    stamp_posted(tx, doc_id, Some(group_id)).await?;
+    for p in &prepared {
+        kernel
+            .publish_event(
+                tx,
+                events::adjusted(
+                    p.item,
+                    p.canonical.amount,
+                    p.reason_code.as_deref().unwrap_or(&header_reason),
+                    doc_id,
+                )?,
+            )
+            .await?;
+    }
     load_document(tx, doc_id).await
 }
 
@@ -430,6 +495,11 @@ pub async fn ship_to_customer(
     ctx: &datum_db::WriteContext,
     req: ShipRequest,
 ) -> Result<Document> {
+    let body_hash = hash_ship(&req);
+    let doc_id = Identifier::generate();
+    if let Some(existing) = begin_idempotent(tx, req.idempotency_key, &body_hash, doc_id).await? {
+        return load_document(tx, existing).await;
+    }
     let customer = boundary_location_id(tx, Boundary::Customer).await?;
     let mut prepared = Vec::new();
     for mut line in req.lines {
@@ -437,7 +507,6 @@ pub async fn ship_to_customer(
         line.to_location = Some(customer);
         prepared.push(prepare_line(tx, kernel, line).await?);
     }
-    let doc_id = Identifier::generate();
     insert_document(
         tx,
         kernel,
@@ -453,9 +522,10 @@ pub async fn ship_to_customer(
     for p in &prepared {
         contribute_ship(&mut builder, tx, p, customer, req.order).await?;
     }
-    let group_id = datum_ledger::post(tx, builder).await?;
-    finish_posted(tx, kernel, ctx, doc_id, DocumentKind::Issue, Some(group_id)).await?;
-    remember_key(tx, req.idempotency_key, doc_id).await?;
+    let group_id = post_via_transition(kernel, tx, ctx, doc_id, DocumentKind::Issue, builder)
+        .await?
+        .expect("ship posts");
+    stamp_posted(tx, doc_id, Some(group_id)).await?;
     load_document(tx, doc_id).await
 }
 
@@ -466,6 +536,11 @@ pub async fn customer_return(
     ctx: &datum_db::WriteContext,
     req: ReturnRequest,
 ) -> Result<Document> {
+    let body_hash = hash_return(&req);
+    let doc_id = Identifier::generate();
+    if let Some(existing) = begin_idempotent(tx, req.idempotency_key, &body_hash, doc_id).await? {
+        return load_document(tx, existing).await;
+    }
     let customer = boundary_location_id(tx, Boundary::Customer).await?;
     let mut prepared = Vec::new();
     for mut line in req.lines {
@@ -473,7 +548,6 @@ pub async fn customer_return(
         line.to_location = Some(req.to_location);
         prepared.push(prepare_line(tx, kernel, line).await?);
     }
-    let doc_id = Identifier::generate();
     insert_document(
         tx,
         kernel,
@@ -487,17 +561,10 @@ pub async fn customer_return(
     for p in &prepared {
         contribute_return(&mut builder, p, customer, req.to_location)?;
     }
-    let group_id = datum_ledger::post(tx, builder).await?;
-    finish_posted(
-        tx,
-        kernel,
-        ctx,
-        doc_id,
-        DocumentKind::Receipt,
-        Some(group_id),
-    )
-    .await?;
-    remember_key(tx, req.idempotency_key, doc_id).await?;
+    let group_id = post_via_transition(kernel, tx, ctx, doc_id, DocumentKind::Receipt, builder)
+        .await?
+        .expect("return posts");
+    stamp_posted(tx, doc_id, Some(group_id)).await?;
     load_document(tx, doc_id).await
 }
 
@@ -577,6 +644,41 @@ pub async fn available(tx: &mut Tx<'_>, query: BalanceQuery) -> Result<Decimal> 
         if rec.status != LotStatus::Available {
             return Ok(Decimal::ZERO);
         }
+        let stock = load_stock_item(tx, query.item).await?;
+        let instant = Utc::now();
+        if let Some(location) = query.location {
+            return Ok(datum_ledger::balance_at(
+                tx,
+                BalanceSlice {
+                    item: query.item,
+                    location,
+                    lot: Some(lot),
+                    serial: None,
+                    unit: stock.stock_uom,
+                },
+                instant,
+            )
+            .await?);
+        }
+        let mut total = Decimal::ZERO;
+        for loc in datum_mod_locations::list_flat(tx).await? {
+            if loc.boundary_class.is_some() || loc.kind == LocationKind::Wip {
+                continue;
+            }
+            total += datum_ledger::balance_at(
+                tx,
+                BalanceSlice {
+                    item: query.item,
+                    location: loc.id,
+                    lot: Some(lot),
+                    serial: None,
+                    unit: stock.stock_uom,
+                },
+                instant,
+            )
+            .await?;
+        }
+        return Ok(total);
     }
     let stock = load_stock_item(tx, query.item).await?;
     let instant = Utc::now();
@@ -595,13 +697,38 @@ pub async fn available(tx: &mut Tx<'_>, query: BalanceQuery) -> Result<Decimal> 
             BalanceSlice {
                 item: query.item,
                 location: loc.id,
-                lot: query.lot,
+                lot: None,
                 serial: None,
                 unit: stock.stock_uom,
             },
             instant,
         )
         .await?;
+        let layers = load_open_layers(tx, query.item, loc.id).await?;
+        let mut seen = std::collections::HashSet::new();
+        for layer in layers {
+            if let Some(lot) = layer.lot {
+                if !seen.insert(lot) {
+                    continue;
+                }
+                let rec = load_lot(tx, lot).await?;
+                if rec.status != LotStatus::Available {
+                    continue;
+                }
+                total += datum_ledger::balance_at(
+                    tx,
+                    BalanceSlice {
+                        item: query.item,
+                        location: loc.id,
+                        lot: Some(lot),
+                        serial: None,
+                        unit: stock.stock_uom,
+                    },
+                    instant,
+                )
+                .await?;
+            }
+        }
     }
     Ok(total)
 }
@@ -753,6 +880,42 @@ struct PreparedLine {
     amount: Option<Money>,
     reason_code: Option<String>,
     package: Option<PackageId>,
+}
+
+async fn prepare_line_with_residual(
+    tx: &mut Tx<'_>,
+    kernel: &Kernel,
+    mut line: LineInput,
+) -> Result<(PreparedLine, AnyQuantity)> {
+    if let Some(pkg) = line.package {
+        let lot = line
+            .lot
+            .ok_or_else(|| Error::Document("package requires a lot entity".into()))?;
+        let nodes = package_hierarchy(tx, lot).await?;
+        let found = nodes
+            .iter()
+            .find(|n| n.id == pkg)
+            .ok_or_else(|| Error::Document("package is not in this lot".into()))?;
+        line.entered = found.contained;
+    }
+    let (canonical, factor, residual) =
+        convert_entered(tx, kernel, line.item, line.lot, line.entered).await?;
+    Ok((
+        PreparedLine {
+            item: line.item,
+            lot: line.lot,
+            serial: line.serial,
+            from_location: line.from_location,
+            to_location: line.to_location,
+            entered: line.entered,
+            canonical,
+            conversion_factor: factor,
+            amount: line.amount,
+            reason_code: line.reason_code,
+            package: line.package,
+        },
+        residual,
+    ))
 }
 
 async fn prepare_line(
@@ -961,24 +1124,45 @@ async fn contribute_move(
         p.serial,
         Some(p.entered),
     )))?;
-    if let Some(amount) = p.amount {
+    let (money, edges) = if let Some(amount) = p.amount {
+        (amount, Vec::new())
+    } else {
+        let layers = load_open_layers(tx, p.item, from).await?;
+        cover_layers(&layers, p.canonical.amount.abs(), p.lot, p.serial)?
+    };
+    if !money.amount().is_zero() {
         builder.contribute(PostingIntent::Value(ValuePosting {
             account: ValueAccount::Inventory,
             cost_element: CostElement::Material,
             cost_object: None,
-            amount: amount.negate(),
+            amount: money.negate(),
             values: Some(out),
         }))?;
         builder.contribute(PostingIntent::Value(ValuePosting {
             account: ValueAccount::Inventory,
             cost_element: CostElement::Material,
             cost_object: None,
-            amount,
+            amount: money,
             values: Some(into),
         }))?;
     }
     if explicit {
-        contribute_explicit(builder, tx, p, out, from).await?;
+        if edges.is_empty() {
+            contribute_explicit(builder, tx, p, out, from).await?;
+        } else {
+            for edge in edges {
+                builder.contribute(PostingIntent::Consumption(datum_core::ConsumptionPosting {
+                    consuming: out,
+                    consumed_posting_id: edge.posting_id,
+                    quantity: AnyQuantity {
+                        amount: edge.qty,
+                        unit: p.canonical.unit,
+                        dimension: p.canonical.dimension,
+                    },
+                    amount: edge.amount,
+                }))?;
+            }
+        }
     }
     Ok(())
 }
@@ -1013,24 +1197,46 @@ async fn contribute_issue(
         p.serial,
         Some(p.entered),
     )))?;
-    if let Some(amount) = p.amount {
+    let explicit = p.lot.is_some() || p.serial.is_some();
+    let (money, edges) = if let Some(amount) = p.amount {
+        (amount, Vec::new())
+    } else {
+        let layers = load_open_layers(tx, p.item, from).await?;
+        cover_layers(&layers, p.canonical.amount.abs(), p.lot, p.serial)?
+    };
+    if !money.amount().is_zero() {
         builder.contribute(PostingIntent::Value(ValuePosting {
             account: ValueAccount::Inventory,
             cost_element: CostElement::Material,
             cost_object: None,
-            amount: amount.negate(),
+            amount: money.negate(),
             values: Some(out),
         }))?;
         builder.contribute(PostingIntent::Value(ValuePosting {
             account: ValueAccount::Wip,
             cost_element: CostElement::Material,
             cost_object: Some(work_order),
-            amount,
+            amount: money,
             values: Some(into),
         }))?;
     }
-    if p.lot.is_some() || p.serial.is_some() {
-        contribute_explicit(builder, tx, p, out, from).await?;
+    if explicit {
+        if edges.is_empty() {
+            contribute_explicit(builder, tx, p, out, from).await?;
+        } else {
+            for edge in edges {
+                builder.contribute(PostingIntent::Consumption(datum_core::ConsumptionPosting {
+                    consuming: out,
+                    consumed_posting_id: edge.posting_id,
+                    quantity: AnyQuantity {
+                        amount: edge.qty,
+                        unit: p.canonical.unit,
+                        dimension: p.canonical.dimension,
+                    },
+                    amount: edge.amount,
+                }))?;
+            }
+        }
     }
     Ok(())
 }
@@ -1063,24 +1269,46 @@ async fn contribute_ship(
         p.serial,
         Some(p.entered),
     )))?;
-    if let Some(amount) = p.amount {
+    let explicit = p.lot.is_some() || p.serial.is_some();
+    let (money, edges) = if let Some(amount) = p.amount {
+        (amount, Vec::new())
+    } else {
+        let layers = load_open_layers(tx, p.item, from).await?;
+        cover_layers(&layers, p.canonical.amount.abs(), p.lot, p.serial)?
+    };
+    if !money.amount().is_zero() {
         builder.contribute(PostingIntent::Value(ValuePosting {
             account: ValueAccount::Inventory,
             cost_element: CostElement::Material,
             cost_object: None,
-            amount: amount.negate(),
+            amount: money.negate(),
             values: Some(out),
         }))?;
         builder.contribute(PostingIntent::Value(ValuePosting {
             account: ValueAccount::Cogs,
             cost_element: CostElement::Material,
             cost_object: Some(order),
-            amount,
+            amount: money,
             values: None,
         }))?;
     }
-    if p.lot.is_some() || p.serial.is_some() {
-        contribute_explicit(builder, tx, p, out, from).await?;
+    if explicit {
+        if edges.is_empty() {
+            contribute_explicit(builder, tx, p, out, from).await?;
+        } else {
+            for edge in edges {
+                builder.contribute(PostingIntent::Consumption(datum_core::ConsumptionPosting {
+                    consuming: out,
+                    consumed_posting_id: edge.posting_id,
+                    quantity: AnyQuantity {
+                        amount: edge.qty,
+                        unit: p.canonical.unit,
+                        dimension: p.canonical.dimension,
+                    },
+                    amount: edge.amount,
+                }))?;
+            }
+        }
     }
     Ok(())
 }
@@ -1258,7 +1486,10 @@ async fn insert_document(
     reference: Option<String>,
     lines: &[PreparedLine],
 ) -> Result<()> {
-    let (app, cfg) = stamps(tx).await?;
+    let (app, mut cfg) = stamps(tx).await?;
+    if cfg.is_empty() {
+        cfg = kernel.profile.spec_version.clone();
+    }
     tx.execute(
         sqlx::query(
             "INSERT INTO inventory.document (
@@ -1322,22 +1553,58 @@ async fn insert_document(
     Ok(())
 }
 
-async fn finish_posted(
+/// Void a posted document (ledger rows remain; state machine `void` edge).
+pub async fn void_document(
     tx: &mut Tx<'_>,
     kernel: &Kernel,
     ctx: &datum_db::WriteContext,
     id: Identifier,
-    kind: DocumentKind,
-    group_id: Option<Identifier>,
-) -> Result<()> {
+) -> Result<Document> {
     let doc = DocRef {
         doc_type: DOC_TYPE.into(),
         doc_id: id,
     };
     kernel
-        .transition(tx, &doc, kind.post_edge(), None, ctx)
+        .engine
+        .transition(
+            tx,
+            Box::new(NoPostings),
+            &doc,
+            "void",
+            None,
+            kernel.signature_gate(),
+            ctx,
+        )
         .await?;
-    stamp_posted(tx, id, group_id).await
+    tx.execute(
+        sqlx::query(
+            "UPDATE inventory.document SET status = 'voided', version = version + 1 WHERE id = $1",
+        )
+        .bind(id.as_uuid()),
+    )
+    .await?;
+    load_document(tx, id).await
+}
+
+/// Post a ledger [`REVERSAL`] for a posted issue document (D2 case l).
+pub async fn reverse_posted_issue(
+    tx: &mut Tx<'_>,
+    kernel: &Kernel,
+    ctx: &datum_db::WriteContext,
+    id: Identifier,
+) -> Result<Identifier> {
+    let doc = load_document(tx, id).await?;
+    if doc.kind != DocumentKind::Issue {
+        return Err(Error::Document(
+            "only issue documents can be reversed here".into(),
+        ));
+    }
+    let group = doc
+        .posted_group_id
+        .ok_or_else(|| Error::Document("document is not posted".into()))?;
+    let _ = kernel;
+    let _ = ctx;
+    Ok(datum_ledger::reverse(tx, group, "ISSUE_REVERSAL").await?)
 }
 
 async fn stamp_posted(tx: &mut Tx<'_>, id: Identifier, group_id: Option<Identifier>) -> Result<()> {
@@ -1354,58 +1621,255 @@ async fn stamp_posted(tx: &mut Tx<'_>, id: Identifier, group_id: Option<Identifi
     Ok(())
 }
 
-async fn replay_or_prepare(
+async fn begin_idempotent(
     tx: &mut Tx<'_>,
     key: Option<Uuid>,
-    _hint: &Option<String>,
-) -> Result<Option<(Uuid, String)>> {
+    body_hash: &str,
+    document_id: Identifier,
+) -> Result<Option<Identifier>> {
     let Some(key) = key else {
         return Ok(None);
     };
-    let row: Option<(String, Uuid)> = tx
+    let row: Option<(Uuid, String)> = tx
         .fetch_optional(
             sqlx::query_as(
-                "SELECT body_hash, document_id FROM inventory_transient.idempotency WHERE key = $1",
+                "SELECT document_id, body_hash FROM inventory_transient.idempotency WHERE key = $1",
             )
             .bind(key),
         )
         .await?;
-    if let Some((_hash, doc)) = row {
-        let _ = tx;
-        let _ = doc;
+    if let Some((id, hash)) = row {
+        if hash != body_hash {
+            return Err(Error::IdempotencyConflict);
+        }
+        return Ok(Some(Identifier::from_uuid(id)));
     }
-    Ok(Some((key, key.to_string())))
-}
-
-async fn replayed(tx: &mut Tx<'_>, key: Uuid, _hash: &str) -> Result<Option<Document>> {
-    let row: Option<(Uuid,)> = tx
-        .fetch_optional(
-            sqlx::query_as(
-                "SELECT document_id FROM inventory_transient.idempotency WHERE key = $1",
-            )
-            .bind(key),
-        )
-        .await?;
-    match row {
-        Some((id,)) => Ok(Some(load_document(tx, Identifier::from_uuid(id)).await?)),
-        None => Ok(None),
-    }
-}
-
-async fn remember_key(tx: &mut Tx<'_>, key: Option<Uuid>, doc: Identifier) -> Result<()> {
-    let Some(key) = key else {
-        return Ok(());
-    };
     tx.execute(
         sqlx::query(
             "INSERT INTO inventory_transient.idempotency (key, body_hash, document_id)
-             VALUES ($1, $2, $3)
-             ON CONFLICT (key) DO NOTHING",
+             VALUES ($1, $2, $3)",
         )
         .bind(key)
-        .bind(key.to_string())
-        .bind(doc.as_uuid()),
+        .bind(body_hash)
+        .bind(document_id.as_uuid()),
     )
     .await?;
+    Ok(None)
+}
+
+async fn post_uom_residuals(
+    tx: &mut Tx<'_>,
+    kernel: &Kernel,
+    _ctx: &datum_db::WriteContext,
+    doc_id: Identifier,
+    location: LocationId,
+    parent_group: Identifier,
+    residuals: &[(ItemId, Option<LotId>, AnyQuantity)],
+) -> Result<()> {
+    let rounding = boundary_location_id(tx, Boundary::Rounding).await?;
+    for (item, lot, residual) in residuals {
+        if residual.amount.is_zero() {
+            continue;
+        }
+        let stock = load_stock_item(tx, *item).await?;
+        let scale = u32::try_from(stock.stock_scale).unwrap_or(0);
+        let mut amount = residual.amount;
+        if amount.scale() > scale {
+            let rounded = amount.round_dp(scale);
+            if rounded.is_zero() && !amount.is_zero() {
+                // R-2s-6: residual is its own ADJUSTMENT in this Tx; the leftover
+                // must be exact at stock_scale to pass quantity_exact_at_scale.
+                let quantum = Decimal::new(1, scale);
+                amount = if amount.is_sign_negative() {
+                    -quantum
+                } else {
+                    quantum
+                };
+            } else {
+                amount = rounded;
+            }
+        }
+        if amount.is_zero() || amount.abs() > stock.residual_tolerance {
+            continue;
+        }
+        let residual = AnyQuantity {
+            amount: -amount.abs(),
+            unit: residual.unit,
+            dimension: residual.dimension,
+        };
+        let layers = load_open_layers(tx, *item, location).await?;
+        let (money, _) = cover_layers(&layers, residual.amount.abs(), *lot, None)?;
+        let adj = GroupBuilder::new(
+            GroupKind::Adjustment,
+            PostingGroupHeader {
+                source_kind: format!("inventory.residual.parent.{parent_group}"),
+                source_id: Some(doc_id),
+                work_order_id: None,
+                reason_code: Some(datum_ledger::UOM_CONVERSION_RESIDUAL.into()),
+                reverses_group_id: None,
+            },
+        );
+        let line = PreparedLine {
+            item: *item,
+            lot: *lot,
+            serial: None,
+            from_location: Some(location),
+            to_location: Some(rounding),
+            entered: residual,
+            canonical: residual,
+            conversion_factor: Decimal::ONE,
+            amount: if money.amount().is_zero() {
+                None
+            } else {
+                Some(money)
+            },
+            reason_code: Some(datum_ledger::UOM_CONVERSION_RESIDUAL.into()),
+            package: None,
+        };
+        let mut builder = adj;
+        contribute_adjustment(&mut builder, tx, &line, Boundary::Rounding).await?;
+        kernel.bind_sink(tx, &mut builder).await?;
+        let _ = datum_ledger::post(tx, builder).await?;
+    }
     Ok(())
+}
+
+fn hash_receive(req: &ReceiveRequest) -> String {
+    sha256_hex(
+        serde_json::to_string(&(
+            "receive",
+            req.to_location,
+            req.reference.as_deref(),
+            line_fingerprints(&req.lines),
+            req.expected,
+            req.tolerance,
+        ))
+        .unwrap_or_default()
+        .as_bytes(),
+    )
+}
+
+fn hash_release(req: &ReleaseRequest) -> String {
+    sha256_hex(
+        serde_json::to_string(&(
+            "release",
+            req.lot,
+            req.from_location,
+            req.to_location,
+            req.entered.amount,
+            req.amount.map(|m| m.amount().to_string()),
+        ))
+        .unwrap_or_default()
+        .as_bytes(),
+    )
+}
+
+fn hash_issue(req: &IssueRequest) -> String {
+    sha256_hex(
+        serde_json::to_string(&(
+            "issue",
+            req.work_order,
+            req.from_location,
+            req.reference.as_deref(),
+            line_fingerprints(&req.lines),
+        ))
+        .unwrap_or_default()
+        .as_bytes(),
+    )
+}
+
+fn hash_move(req: &MoveRequest) -> String {
+    sha256_hex(
+        serde_json::to_string(&(
+            "move",
+            req.from_location,
+            req.to_location,
+            req.reference.as_deref(),
+            line_fingerprints(&req.lines),
+        ))
+        .unwrap_or_default()
+        .as_bytes(),
+    )
+}
+
+fn hash_adjust(req: &AdjustRequest) -> String {
+    sha256_hex(
+        serde_json::to_string(&(
+            "adjust",
+            req.reason.as_str(),
+            req.location,
+            req.reference.as_deref(),
+            line_fingerprints(&req.lines),
+        ))
+        .unwrap_or_default()
+        .as_bytes(),
+    )
+}
+
+fn hash_count(req: &CountRequest) -> String {
+    sha256_hex(
+        serde_json::to_string(&(
+            "count",
+            req.location,
+            req.reference.as_deref(),
+            req.tolerance,
+            req.lines
+                .iter()
+                .map(|l| {
+                    format!(
+                        "{}:{}:{}:{}",
+                        l.item,
+                        l.lot.map(|x| x.to_string()).unwrap_or_default(),
+                        l.counted.amount,
+                        l.expected.amount
+                    )
+                })
+                .collect::<Vec<_>>(),
+        ))
+        .unwrap_or_default()
+        .as_bytes(),
+    )
+}
+
+fn hash_ship(req: &ShipRequest) -> String {
+    sha256_hex(
+        serde_json::to_string(&(
+            "ship",
+            req.order,
+            req.from_location,
+            req.reference.as_deref(),
+            line_fingerprints(&req.lines),
+        ))
+        .unwrap_or_default()
+        .as_bytes(),
+    )
+}
+
+fn hash_return(req: &ReturnRequest) -> String {
+    sha256_hex(
+        serde_json::to_string(&(
+            "return",
+            req.order,
+            req.to_location,
+            req.reference.as_deref(),
+            line_fingerprints(&req.lines),
+        ))
+        .unwrap_or_default()
+        .as_bytes(),
+    )
+}
+
+fn line_fingerprints(lines: &[LineInput]) -> Vec<String> {
+    lines
+        .iter()
+        .map(|l| {
+            format!(
+                "{}:{}:{}:{}",
+                l.item,
+                l.lot.map(|x| x.to_string()).unwrap_or_default(),
+                l.entered.amount,
+                l.amount.map(|m| m.amount().to_string()).unwrap_or_default()
+            )
+        })
+        .collect()
 }

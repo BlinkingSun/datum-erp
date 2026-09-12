@@ -70,6 +70,9 @@ pub enum Error {
     /// Operator named a lot or serial with no matching open layer.
     #[error("no eligible layer for the named lot or serial")]
     NoEligibleLayer,
+    /// Lot is quarantined, on hold, or otherwise not issuable.
+    #[error("lot is not available for issue")]
+    LotNotIssuable,
 }
 
 impl From<datum_core::PostingError> for Error {

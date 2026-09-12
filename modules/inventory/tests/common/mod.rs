@@ -10,6 +10,7 @@ use datum_db::{Tx, WriteContext, WritePool};
 use datum_identity::rbac::{RoleBundle, assign_role, seed_bundles};
 use datum_identity::{PrincipalKind, SYSTEM_ID, create_principal};
 use datum_ledger::CostMethod;
+use datum_mod_inventory::{ReceiveRequest, ReleaseRequest, receive, release_from_quarantine};
 use datum_mod_items::{Kind, NewItem};
 use datum_mod_locations::{CreateLocation, LocationKind, seed_install};
 use datum_mod_lots::{CreateLot, LotStatus};
@@ -74,10 +75,11 @@ pub fn boot_ctx() -> WriteContext {
     ctx
 }
 
-pub fn action_ctx(actor: Actor, action: &str) -> WriteContext {
-    let mut ctx = WriteContext::new(actor, action, "ui");
+pub fn action_ctx(w: &World, action: &str) -> WriteContext {
+    let mut ctx = WriteContext::new(w.actor, action, "ui");
     ctx.actor_display = Some("M. Reyes".into());
     ctx.reason = Some("inventory-test".into());
+    ctx.config_version = Some(w.kernel.profile.spec_version.clone());
     ctx
 }
 
@@ -110,8 +112,11 @@ pub async fn migrate_all(db: &datum_test::TestDb) {
 }
 
 pub async fn boot_kernel(db: &datum_test::TestDb) -> Kernel {
+    boot_kernel_with(db, Profile::plain_shop().unwrap()).await
+}
+
+pub async fn boot_kernel_with(db: &datum_test::TestDb, profile: Profile) -> Kernel {
     migrate_all(db).await;
-    let profile = Profile::plain_shop().unwrap();
     let mut builder = Kernel::builder(db.app_pool().clone(), profile.clone());
     datum_mod_items::register(&mut builder, &profile).expect("register items");
     builder
@@ -375,6 +380,51 @@ pub async fn reason_code(pool: &PgPool, group: uuid::Uuid) -> Option<String> {
         .expect("reason")
 }
 
+pub fn residual_parent_tag(parent: uuid::Uuid) -> String {
+    format!("inventory.residual.parent.{parent}")
+}
+
+pub async fn residual_group_for(pool: &PgPool, parent: uuid::Uuid) -> uuid::Uuid {
+    sql_query_scalar(
+        "SELECT group_id FROM ledger.posting_group WHERE source_kind = $1 AND kind = 'ADJUSTMENT'",
+    )
+    .bind(residual_parent_tag(parent))
+    .fetch_one(pool)
+    .await
+    .expect("residual group")
+}
+
+pub async fn assert_group_conserves(pool: &PgPool, group: uuid::Uuid) {
+    let qty_bad: i64 = sql_query_scalar(
+        r#"SELECT count(*) FROM (
+             SELECT item_id, uom_id
+               FROM ledger.posting
+              WHERE group_id = $1 AND measure = 'QUANTITY'
+              GROUP BY item_id, uom_id
+             HAVING SUM(quantity) <> 0
+           ) s"#,
+    )
+    .bind(group)
+    .fetch_one(pool)
+    .await
+    .expect("qty conserve");
+    assert_eq!(qty_bad, 0, "SUM(qty) must be 0 per item/uom in {group}");
+    let amt_bad: i64 = sql_query_scalar(
+        r#"SELECT count(*) FROM (
+             SELECT currency_id
+               FROM ledger.posting
+              WHERE group_id = $1 AND measure = 'VALUE'
+              GROUP BY currency_id
+             HAVING SUM(amount) <> 0
+           ) s"#,
+    )
+    .bind(group)
+    .fetch_one(pool)
+    .await
+    .expect("amt conserve");
+    assert_eq!(amt_bad, 0, "SUM(amount) must be 0 in {group}");
+}
+
 pub fn line(
     item: ItemId,
     entered: AnyQuantity,
@@ -392,4 +442,53 @@ pub fn line(
         amount,
         reason_code: None,
     }
+}
+
+pub async fn receive_bars(w: &World, pool: &WritePool) -> datum_mod_inventory::Document {
+    let ctx = action_ctx(w, "inventory.receive");
+    let mut tx = Tx::begin(pool, &ctx).await.expect("begin receive");
+    let doc = receive(
+        &mut tx,
+        &w.kernel,
+        &ctx,
+        ReceiveRequest {
+            to_location: w.quarantine,
+            reference: Some("PO-2024-0841".into()),
+            lines: vec![line(
+                w.bar,
+                qty_ft("2000.0000"),
+                Some(w.lot_bar),
+                Some(usd("4720.00")),
+            )],
+            expected: Some(qty_ft("2000.0000")),
+            tolerance: Some(dec("0.0000")),
+            idempotency_key: Some(uuid::Uuid::now_v7()),
+        },
+    )
+    .await
+    .expect("receive");
+    tx.commit().await.expect("commit receive");
+    doc
+}
+
+pub async fn release_lot(w: &World, pool: &WritePool) -> datum_mod_inventory::Document {
+    let ctx = action_ctx(w, "lot.release");
+    let mut tx = Tx::begin(pool, &ctx).await.expect("begin release");
+    let doc = release_from_quarantine(
+        &mut tx,
+        &w.kernel,
+        &ctx,
+        ReleaseRequest {
+            lot: w.lot_bar,
+            from_location: w.quarantine,
+            to_location: w.available,
+            entered: qty_ft("2000.0000"),
+            amount: Some(usd("4720.00")),
+            idempotency_key: Some(uuid::Uuid::now_v7()),
+        },
+    )
+    .await
+    .expect("release");
+    tx.commit().await.expect("commit release");
+    doc
 }

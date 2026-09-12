@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::domain::{Document, DocumentLine};
+use crate::error::Error;
 
 /// One route this module registers (`docs/03` §3.4, `docs/10`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,6 +64,55 @@ pub const ROUTES: &[Route] = &[
         operation_id: "getDocument",
     },
 ];
+
+/// Module error-code table (`docs/10` §2.6). HTTP status is [`http_status`].
+pub const ERROR_CODES: &[&str] = &[
+    "VALIDATION",
+    "UNAUTHENTICATED",
+    "FORBIDDEN",
+    "NOT_FOUND",
+    "CONFLICT",
+    "IDEMPOTENCY_CONFLICT",
+    "SIGNATURE_REQUIRED",
+    "SIGNATURE_NO_PROVIDER",
+    "RATE_LIMITED",
+    "PAYLOAD_TOO_LARGE",
+    "TIMEOUT",
+    "INTERNAL",
+];
+
+/// Map crate errors to the `docs/10` code string.
+pub fn error_code(err: &Error) -> &'static str {
+    match err {
+        Error::IdempotencyConflict => "IDEMPOTENCY_CONFLICT",
+        Error::VersionConflict => "CONFLICT",
+        Error::NotFound => "NOT_FOUND",
+        Error::Document(_)
+        | Error::ReasonRequired
+        | Error::IdempotencyRequired
+        | Error::InvalidLimit
+        | Error::UnknownDimension
+        | Error::NoEligibleLayer
+        | Error::LotNotIssuable
+        | Error::Manifest(_) => "VALIDATION",
+        _ => "INTERNAL",
+    }
+}
+
+/// HTTP status for [`error_code`] (`docs/10` §2.6).
+pub fn http_status(err: &Error) -> u16 {
+    match error_code(err) {
+        "VALIDATION" => 400,
+        "UNAUTHENTICATED" => 401,
+        "FORBIDDEN" => 403,
+        "NOT_FOUND" => 404,
+        "CONFLICT" | "IDEMPOTENCY_CONFLICT" | "SIGNATURE_NO_PROVIDER" => 409,
+        "PAYLOAD_TOO_LARGE" => 413,
+        "RATE_LIMITED" => 429,
+        "TIMEOUT" => 504,
+        _ => 500,
+    }
+}
 
 /// Error envelope (`docs/10` §2.6).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -219,7 +269,7 @@ pub fn openapi_document() -> Value {
                         "error": {
                             "type": "object",
                             "properties": {
-                                "code": {"type": "string", "enum": ["VALIDATION", "IDEMPOTENCY_CONFLICT"]},
+                                "code": {"type": "string", "enum": ERROR_CODES},
                                 "message": {"type": "string"},
                                 "field": {"type": "string"},
                                 "request_id": {"type": "string"}

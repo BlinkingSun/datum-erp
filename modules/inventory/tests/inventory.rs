@@ -8,67 +8,18 @@ use datum_core::Identifier;
 use datum_db::Tx;
 use datum_mod_inventory::{
     AdjustRequest, BalanceQuery, CountLine, CountRequest, DocumentStatus, IssueRequest, LineInput,
-    ReceiveRequest, ReleaseRequest, ReturnRequest, ShipRequest, adjust, allocated, available,
-    customer_return, cycle_count, document_history, issue_to_wip, on_hand, receive,
-    release_from_quarantine, ship_to_customer,
+    ReceiveRequest, ReturnRequest, ShipRequest, adjust, allocated, available, customer_return,
+    cycle_count, document_history, issue_to_wip, on_hand, receive, ship_to_customer,
 };
 use datum_test::db_case;
 use sqlx::query as sql_query;
 use sqlx::query_scalar as sql_query_scalar;
 
 use common::{
-    World, action_ctx, boot_kernel, consumption_count, dec, group_kind, has_zz_audit, line,
-    pg_code, qty_ea, qty_ft, qty_in, reason_code, seed_world, table_owner, usd, write_pool,
+    action_ctx, assert_group_conserves, boot_kernel, consumption_count, dec, group_kind,
+    has_zz_audit, line, pg_code, qty_ea, qty_ft, qty_in, reason_code, receive_bars, release_lot,
+    residual_group_for, residual_parent_tag, seed_world, table_owner, usd, write_pool,
 };
-
-async fn receive_bars(w: &World, pool: &datum_db::WritePool) -> datum_mod_inventory::Document {
-    let ctx = action_ctx(w.actor, "inventory.receive");
-    let mut tx = Tx::begin(pool, &ctx).await.expect("begin receive");
-    let doc = receive(
-        &mut tx,
-        &w.kernel,
-        &ctx,
-        ReceiveRequest {
-            to_location: w.quarantine,
-            reference: Some("PO-2024-0841".into()),
-            lines: vec![line(
-                w.bar,
-                qty_ft("2000.0000"),
-                Some(w.lot_bar),
-                Some(usd("4720.00")),
-            )],
-            expected: Some(qty_ft("2000.0000")),
-            tolerance: Some(dec("0.0000")),
-            idempotency_key: Some(uuid::Uuid::now_v7()),
-        },
-    )
-    .await
-    .expect("receive");
-    tx.commit().await.expect("commit receive");
-    doc
-}
-
-async fn release_lot(w: &World, pool: &datum_db::WritePool) -> datum_mod_inventory::Document {
-    let ctx = action_ctx(w.actor, "lot.release");
-    let mut tx = Tx::begin(pool, &ctx).await.expect("begin release");
-    let doc = release_from_quarantine(
-        &mut tx,
-        &w.kernel,
-        &ctx,
-        ReleaseRequest {
-            lot: w.lot_bar,
-            from_location: w.quarantine,
-            to_location: w.available,
-            entered: qty_ft("2000.0000"),
-            amount: Some(usd("4720.00")),
-            idempotency_key: Some(uuid::Uuid::now_v7()),
-        },
-    )
-    .await
-    .expect("release");
-    tx.commit().await.expect("commit release");
-    doc
-}
 
 #[tokio::test]
 async fn case_a_receive_into_quarantine_posts_movement_from_supplier() {
@@ -80,7 +31,7 @@ async fn case_a_receive_into_quarantine_posts_movement_from_supplier() {
     assert_eq!(doc.status, DocumentStatus::Posted);
     let group = doc.posted_group_id.expect("group");
     assert_eq!(group_kind(db.app_pool(), group.as_uuid()).await, "MOVEMENT");
-    let ctx = action_ctx(w.actor, "inventory.view");
+    let ctx = action_ctx(&w, "inventory.view");
     let mut tx = Tx::begin(&pool, &ctx).await.expect("begin read");
     let q = on_hand(
         &mut tx,
@@ -122,7 +73,7 @@ async fn case_b_release_quarantine_posts_and_changes_status() {
     let doc = release_lot(&w, &pool).await;
     let group = doc.posted_group_id.expect("group");
     assert_eq!(group_kind(db.app_pool(), group.as_uuid()).await, "MOVEMENT");
-    let ctx = action_ctx(w.actor, "inventory.view");
+    let ctx = action_ctx(&w, "inventory.view");
     let mut tx = Tx::begin(&pool, &ctx).await.expect("begin");
     let lot = datum_mod_lots::load_lot(&mut tx, w.lot_bar)
         .await
@@ -151,7 +102,7 @@ async fn case_c_issue_one_bar_to_wip_with_explicit_lot_pick_contributes_consumpt
     let pool = write_pool(&db);
     receive_bars(&w, &pool).await;
     release_lot(&w, &pool).await;
-    let ctx = action_ctx(w.actor, "inventory.issue");
+    let ctx = action_ctx(&w, "inventory.issue");
     let mut tx = Tx::begin(&pool, &ctx).await.expect("begin issue");
     let doc = issue_to_wip(
         &mut tx,
@@ -178,7 +129,7 @@ async fn case_c_issue_one_bar_to_wip_with_explicit_lot_pick_contributes_consumpt
         consumption_count(db.app_pool(), group.as_uuid()).await >= 1,
         "explicit lot pick must contribute a Consumption edge (D-W1-3 (c))"
     );
-    let ctx = action_ctx(w.actor, "inventory.view");
+    let ctx = action_ctx(&w, "inventory.view");
     let mut tx = Tx::begin(&pool, &ctx).await.expect("begin read");
     let alloc = allocated(
         &mut tx,
@@ -201,7 +152,7 @@ async fn case_e_scrap_is_adjustment_with_reason() {
     let kernel = boot_kernel(&db).await;
     let w = seed_world(&db, kernel).await;
     let pool = write_pool(&db);
-    let ctx = action_ctx(w.actor, "inventory.receive");
+    let ctx = action_ctx(&w, "inventory.receive");
     let mut tx = Tx::begin(&pool, &ctx).await.expect("begin");
     receive(
         &mut tx,
@@ -219,7 +170,7 @@ async fn case_e_scrap_is_adjustment_with_reason() {
     .await
     .expect("seed fg");
     tx.commit().await.expect("commit seed");
-    let ctx = action_ctx(w.actor, "inventory.adjust");
+    let ctx = action_ctx(&w, "inventory.adjust");
     let mut tx = Tx::begin(&pool, &ctx).await.expect("begin scrap");
     let doc = adjust(
         &mut tx,
@@ -266,7 +217,7 @@ async fn case_f_cycle_count_variance_is_adjustment() {
     let pool = write_pool(&db);
     receive_bars(&w, &pool).await;
     release_lot(&w, &pool).await;
-    let ctx = action_ctx(w.actor, "inventory.count");
+    let ctx = action_ctx(&w, "inventory.count");
     let mut tx = Tx::begin(&pool, &ctx).await.expect("begin count");
     let doc = cycle_count(
         &mut tx,
@@ -304,7 +255,7 @@ async fn case_h_customer_return_into_quarantine() {
     let kernel = boot_kernel(&db).await;
     let w = seed_world(&db, kernel).await;
     let pool = write_pool(&db);
-    let ctx = action_ctx(w.actor, "inventory.receive");
+    let ctx = action_ctx(&w, "inventory.receive");
     let mut tx = Tx::begin(&pool, &ctx).await.expect("begin");
     receive(
         &mut tx,
@@ -323,7 +274,7 @@ async fn case_h_customer_return_into_quarantine() {
     .expect("seed");
     tx.commit().await.expect("commit seed");
     let order = Identifier::generate();
-    let ctx = action_ctx(w.actor, "inventory.issue");
+    let ctx = action_ctx(&w, "inventory.issue");
     let mut tx = Tx::begin(&pool, &ctx).await.expect("begin ship");
     ship_to_customer(
         &mut tx,
@@ -340,7 +291,7 @@ async fn case_h_customer_return_into_quarantine() {
     .await
     .expect("ship");
     tx.commit().await.expect("commit ship");
-    let ctx = action_ctx(w.actor, "inventory.receive");
+    let ctx = action_ctx(&w, "inventory.receive");
     let mut tx = Tx::begin(&pool, &ctx).await.expect("begin return");
     let doc = customer_return(
         &mut tx,
@@ -372,7 +323,7 @@ async fn case_k_issue_by_the_inch_posts_uom_rounding_residual() {
     let pool = write_pool(&db);
     receive_bars(&w, &pool).await;
     release_lot(&w, &pool).await;
-    let ctx = action_ctx(w.actor, "inventory.issue");
+    let ctx = action_ctx(&w, "inventory.issue");
     let mut tx = Tx::begin(&pool, &ctx).await.expect("begin issue");
     let issued = issue_to_wip(
         &mut tx,
@@ -393,42 +344,22 @@ async fn case_k_issue_by_the_inch_posts_uom_rounding_residual() {
     assert_eq!(line.entered.amount, dec("7"));
     assert_eq!(line.entered.unit, common::IN);
     assert_eq!(line.canonical.amount, dec("0.5833"));
-    let ctx = action_ctx(w.actor, "inventory.adjust");
-    let mut tx = Tx::begin(&pool, &ctx).await.expect("begin residual");
-    let residual = adjust(
-        &mut tx,
-        &w.kernel,
-        &ctx,
-        AdjustRequest {
-            reason: datum_ledger::UOM_CONVERSION_RESIDUAL.into(),
-            location: w.available,
-            reference: Some("dust".into()),
-            lines: vec![LineInput {
-                item: w.bar,
-                entered: qty_ft("-0.0057"),
-                lot: Some(w.lot_bar),
-                serial: None,
-                from_location: None,
-                to_location: None,
-                package: None,
-                amount: Some(usd("0.01")),
-                reason_code: None,
-            }],
-            idempotency_key: Some(uuid::Uuid::now_v7()),
-        },
-    )
-    .await
-    .expect("residual flush");
-    tx.commit().await.expect("commit residual");
-    let group = residual.posted_group_id.expect("group");
+    let movement = issued.posted_group_id.expect("group");
+    let residual = residual_group_for(db.app_pool(), movement.as_uuid()).await;
+    assert_eq!(group_kind(db.app_pool(), residual).await, "ADJUSTMENT");
     assert_eq!(
-        group_kind(db.app_pool(), group.as_uuid()).await,
-        "ADJUSTMENT"
-    );
-    assert_eq!(
-        reason_code(db.app_pool(), group.as_uuid()).await.as_deref(),
+        reason_code(db.app_pool(), residual).await.as_deref(),
         Some(datum_ledger::UOM_CONVERSION_RESIDUAL)
     );
+    let tag: String =
+        sql_query_scalar("SELECT source_kind FROM ledger.posting_group WHERE group_id = $1")
+            .bind(residual)
+            .fetch_one(db.app_pool())
+            .await
+            .expect("source_kind");
+    assert_eq!(tag, residual_parent_tag(movement.as_uuid()));
+    assert_group_conserves(db.app_pool(), movement.as_uuid()).await;
+    assert_group_conserves(db.app_pool(), residual).await;
     db.finish().await.expect("finish");
 }
 
@@ -438,7 +369,7 @@ async fn over_receipt_beyond_tolerance_is_a_document_error_not_a_ledger_error() 
     let kernel = boot_kernel(&db).await;
     let w = seed_world(&db, kernel).await;
     let pool = write_pool(&db);
-    let ctx = action_ctx(w.actor, "inventory.receive");
+    let ctx = action_ctx(&w, "inventory.receive");
     let mut tx = Tx::begin(&pool, &ctx).await.expect("begin");
     let err = receive(
         &mut tx,
@@ -494,7 +425,7 @@ async fn on_hand_equals_ledger_fold_after_every_document() {
     let w = seed_world(&db, kernel).await;
     let pool = write_pool(&db);
     receive_bars(&w, &pool).await;
-    let ctx = action_ctx(w.actor, "inventory.view");
+    let ctx = action_ctx(&w, "inventory.view");
     let mut tx = Tx::begin(&pool, &ctx).await.expect("begin");
     let ours = on_hand(
         &mut tx,
@@ -606,7 +537,7 @@ async fn document_history_lists_item_and_lot() {
     let w = seed_world(&db, kernel).await;
     let pool = write_pool(&db);
     receive_bars(&w, &pool).await;
-    let ctx = action_ctx(w.actor, "inventory.view");
+    let ctx = action_ctx(&w, "inventory.view");
     let mut tx = Tx::begin(&pool, &ctx).await.expect("begin");
     let hist = document_history(&mut tx, Some(w.bar), Some(w.lot_bar))
         .await

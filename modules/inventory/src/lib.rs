@@ -8,16 +8,18 @@
 #![cfg_attr(test, allow(unused_crate_dependencies))]
 
 mod api;
+mod body_hash;
 mod domain;
 mod error;
 mod events;
 mod hooks;
+mod posting_path;
 mod states;
 mod store;
 
 pub use api::{
-    DocumentBody, ErrorBody, ErrorFields, LineBody, OnHandBody, QuantityBody, ROUTES,
-    openapi_document,
+    DocumentBody, ERROR_CODES, ErrorBody, ErrorFields, LineBody, OnHandBody, QuantityBody, ROUTES,
+    error_code, http_status, openapi_document,
 };
 pub use domain::{
     AdjustRequest, BalanceQuery, CountLine, CountRequest, DOC_TYPE, Document, DocumentKind,
@@ -30,7 +32,8 @@ pub use hooks::register as register_hooks;
 pub use states::document_machine;
 pub use store::{
     adjust, allocated, available, customer_return, cycle_count, document_history, issue_to_wip,
-    load_document, move_stock, on_hand, receive, release_from_quarantine, ship_to_customer,
+    load_document, move_stock, on_hand, receive, release_from_quarantine, reverse_posted_issue,
+    ship_to_customer, void_document,
 };
 
 use datum_db::Tx;
@@ -117,6 +120,22 @@ mod tests {
             envelope["properties"]["error"]["properties"]["code"]["type"],
             "string"
         );
+        let codes = &envelope["properties"]["error"]["properties"]["code"]["enum"];
+        assert!(
+            codes
+                .as_array()
+                .is_some_and(|e| e.iter().any(|v| v == "IDEMPOTENCY_CONFLICT"))
+        );
+    }
+
+    #[test]
+    fn idempotency_conflict_maps_to_http_409() {
+        assert!(ERROR_CODES.contains(&"IDEMPOTENCY_CONFLICT"));
+        assert_eq!(
+            error_code(&Error::IdempotencyConflict),
+            "IDEMPOTENCY_CONFLICT"
+        );
+        assert_eq!(http_status(&Error::IdempotencyConflict), 409);
     }
 
     #[test]

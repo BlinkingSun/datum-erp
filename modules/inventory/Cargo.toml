@@ -18,6 +18,7 @@ test-utils = []
 [dependencies]
 chrono.workspace = true
 datum-core.workspace = true
+datum-audit.workspace = true
 datum-db.workspace = true
 datum-events.workspace = true
 datum-ledger.workspace = true
