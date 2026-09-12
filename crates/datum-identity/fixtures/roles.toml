@@ -1,0 +1,8 @@
+# Test fixture only. Profile values are supplied by the composition root (D-W1-5 key 10).
+[[bundle]]
+name = "operator"
+permissions = ["identity.session", "calibration.view"]
+
+[[bundle]]
+name = "admin"
+permissions = ["identity.manage", "identity.session", "calibration.approve"]
