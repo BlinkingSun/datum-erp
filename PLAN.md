@@ -115,8 +115,11 @@ Not yet written: `docs/05` data model, `docs/06` regulatory, `docs/07` roadmap, 
 competitive landscape, `docs/10` API conventions, the repository files (README,
 CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, LICENSE, .gitignore), and **all code**.
 
-Repository: local `main`, three commits, no remote yet. Author identity is the owner's
-Gmail, which is correct and stays. `_team/` is excluded via `.git/info/exclude`.
+Repository: public `github.com/BlinkingSun/datum-erp` (remote `origin`) plus the private
+mirror `datum-dev` (remote `dev`); `main` only, plain fast-forward pushes. Author identity
+is the owner's Gmail, which is correct and stays. `_team/` is excluded via
+`.git/info/exclude`. Decisions made during this build live in `_team/reports/DECISION-*.md`
+and are promoted into `research/decisions/` at integration.
 
 ## 3. Wave structure
 
@@ -396,8 +399,18 @@ Wave 1 and Wave 2.
 15. **A signature snapshots the signer's printed name as of signing.** Rendering it by
     joining to a live user table is wrong, because people change their names and the
     regulation asks for the name at the time of signing.
-16. **No hard deletes anywhere, and no cascade deletes.** One `ON DELETE CASCADE`
-    permanently removes the history of those rows, and it is found at inspection.
+16. **No hard deletes of any record, and no cascade deletes.** A record — anything an
+    audit trigger attests to, or that a history-bearing table references — is retired by
+    state change, never by `DELETE`. This is a privilege fact, not a convention:
+    `datum_app` holds no `DELETE` on schema `app` and no `TRUNCATE` in any schema
+    (D-W1-2). Working state that carries no history — sessions, idempotency keys,
+    completed job rows, projection caches — lives in schema `transient`, where `DELETE`
+    is granted and expected; a table qualifies for `transient` only if it has no audit
+    trigger and no history-bearing table references it. `ON DELETE CASCADE` remains
+    prohibited in **every** schema, `transient` included, because one cascade
+    permanently removes the history of rows the author never looked at, and it is found
+    at inspection.
+    (Amended by `_team/reports/DECISION-w1-contracts.md` D-W1-2, 2026-09-12.)
 17. **Every record carries the application version and configuration version that
     produced it**, because the customer's change assessment depends on knowing which
     build wrote what.
