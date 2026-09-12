@@ -5,9 +5,8 @@ use std::time::Duration;
 
 use datum_core::{Actor, ActorKind, Identifier};
 use datum_db::{WriteContext, WritePool};
-use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
-use sqlx::{AssertSqlSafe, Connection, PgConnection, PgPool};
-use sqlx::{query, query_as, query_scalar};
+use sqlx::postgres::PgPoolOptions;
+use sqlx::{PgPool, query_as, query_scalar};
 
 pub fn user_ctx() -> WriteContext {
     let mut ctx = WriteContext::new(
@@ -40,57 +39,9 @@ pub fn rewrite_database(url: &str, database: &str) -> String {
     format!("{prefix}/{database}{qs}")
 }
 
-pub async fn bootstrap_pool(database: &str) -> PgPool {
-    let url = std::env::var("DATUM_BOOTSTRAP_URL").expect("DATUM_BOOTSTRAP_URL");
-    let rewritten = rewrite_database(&url, database);
-    let mut opts: PgConnectOptions = rewritten.parse().expect("bootstrap url");
-    if !url_has_userinfo(&url)
-        && let Ok(user) = std::env::var("USER").or_else(|_| std::env::var("LOGNAME"))
-    {
-        opts = opts.username(&user);
-    }
-    PgPoolOptions::new()
-        .max_connections(2)
-        .acquire_timeout(Duration::from_secs(5))
-        .connect_with(opts)
-        .await
-        .expect("bootstrap pool")
-}
-
-pub async fn grant_create_on_database(database: &str) {
-    assert!(
-        database
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
-    );
-    let url = std::env::var("DATUM_BOOTSTRAP_URL").expect("DATUM_BOOTSTRAP_URL");
-    let mut opts: PgConnectOptions = url.parse().expect("bootstrap url");
-    if !url_has_userinfo(&url)
-        && let Ok(user) = std::env::var("USER").or_else(|_| std::env::var("LOGNAME"))
-    {
-        opts = opts.username(&user);
-    }
-    let mut conn = PgConnection::connect_with(&opts)
-        .await
-        .expect("bootstrap connect");
-    let sql = format!("GRANT CREATE ON DATABASE {database} TO datum_migrate, datum_owner");
-    query(AssertSqlSafe(sql))
-        .execute(&mut conn)
-        .await
-        .expect("GRANT CREATE");
-}
-
-fn url_has_userinfo(url: &str) -> bool {
-    let Some((_, rest)) = url.split_once("://") else {
-        return false;
-    };
-    rest.split(['/', '?']).next().unwrap_or("").contains('@')
-}
-
 /// Migrate db + audit, install the event trigger, then migrate events so `app.*`
 /// tables created here are attached by `audit_attach`.
 pub async fn migrate_and_install(db: &datum_test::TestDb) {
-    grant_create_on_database(db.database()).await;
     datum_db::migrate::run(
         db.migrate_pool(),
         &[
@@ -100,7 +51,7 @@ pub async fn migrate_and_install(db: &datum_test::TestDb) {
     )
     .await
     .expect("migrate db+audit");
-    let boot = bootstrap_pool(db.database()).await;
+    let boot = db.bootstrap_pool().await.expect("bootstrap pool");
     datum_audit::install_privileged(&boot)
         .await
         .expect("install_privileged");

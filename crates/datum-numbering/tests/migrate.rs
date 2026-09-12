@@ -12,7 +12,7 @@ use sqlx::Row;
 use sqlx::migrate::{Migration, MigrationType, Migrator};
 use sqlx::{Executor, SqlSafeStr};
 
-use common::{grant_create_on_database, migrate_and_install};
+use common::migrate_and_install;
 
 fn numbering_sqlx_migrator() -> Migrator {
     let mut migrator = Migrator::with_migrations(MIGRATOR.iter().cloned().collect());
@@ -23,7 +23,6 @@ fn numbering_sqlx_migrator() -> Migrator {
 #[tokio::test]
 async fn migrate_down_then_up() {
     let db = db_case!("num_down_up");
-    grant_create_on_database(db.database()).await;
     datum_db::migrate::run(
         db.migrate_pool(),
         &[
@@ -33,7 +32,7 @@ async fn migrate_down_then_up() {
     )
     .await
     .expect("db+audit");
-    let boot = common::bootstrap_pool(db.database()).await;
+    let boot = db.bootstrap_pool().await.expect("bootstrap pool");
     datum_audit::install_privileged(&boot)
         .await
         .expect("privileged");

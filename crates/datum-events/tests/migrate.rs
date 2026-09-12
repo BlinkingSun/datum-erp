@@ -8,7 +8,7 @@ use datum_events::MIGRATOR;
 use datum_test::db_case;
 use sqlx::{migrate::Migrator, query_scalar};
 
-use common::{bootstrap_pool, grant_create_on_database, table_schema};
+use common::table_schema;
 
 fn events_migrator() -> Migrator {
     let mut migrator = Migrator::with_migrations(MIGRATOR.iter().cloned().collect());
@@ -19,7 +19,6 @@ fn events_migrator() -> Migrator {
 #[tokio::test]
 async fn migration_is_reversible() {
     let db = db_case!("evt_rev");
-    grant_create_on_database(db.database()).await;
     datum_db::migrate::run(
         db.migrate_pool(),
         &[
@@ -29,7 +28,7 @@ async fn migration_is_reversible() {
     )
     .await
     .expect("kernel");
-    let boot = bootstrap_pool(db.database()).await;
+    let boot = db.bootstrap_pool().await.expect("bootstrap pool");
     datum_audit::install_privileged(&boot)
         .await
         .expect("privileged");

@@ -136,6 +136,21 @@ impl TestDb {
         &self.app_pool
     }
 
+    /// Pool connected as the bootstrap/superuser role against this case database.
+    ///
+    /// Module crates use this for `datum_audit::install_privileged` (event
+    /// triggers and writer-role function owners). Opening a bootstrap connection
+    /// belongs in this harness, not in a module crate (CONTRACT §5a.1).
+    pub async fn bootstrap_pool(&self) -> Result<PgPool, Error> {
+        let url = rewrite_database(&self.bootstrap_url, &self.database)?;
+        let opts = bootstrap_options(&url)?;
+        Ok(PgPoolOptions::new()
+            .max_connections(2)
+            .acquire_timeout(Duration::from_secs(5))
+            .connect_with(opts)
+            .await?)
+    }
+
     /// Ephemeral database name (`datum_t_<name>_<random>`).
     pub fn database(&self) -> &str {
         &self.database
@@ -586,6 +601,20 @@ mod tests {
         .await
         .expect("pg_database.datdba");
         assert_eq!(owner, "datum_owner");
+        db.finish().await.expect("finish");
+    }
+
+    #[tokio::test]
+    async fn bootstrap_pool_connects_as_superuser() {
+        let db = db_case!("boot_super");
+        let boot = db.bootstrap_pool().await.expect("bootstrap pool");
+        let superuser: bool =
+            sqlx::query_scalar("SELECT rolsuper FROM pg_roles WHERE rolname = current_user")
+                .fetch_one(&boot)
+                .await
+                .expect("rolsuper");
+        assert!(superuser, "bootstrap pool must be the superuser role");
+        boot.close().await;
         db.finish().await.expect("finish");
     }
 
