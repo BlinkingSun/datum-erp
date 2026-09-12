@@ -45,6 +45,15 @@ legal here (D3 §11). Event-trigger attach is `datum-audit`.
 - `log_unattributable_write_unimplemented` / `log_unattributable_write_calls_audit_log_event`
 - trybuild: `tx_has_no_deref`, `tx_has_no_public_constructor`
 
+## Tx::commit and the poison flag
+
+`Tx::commit` does not consult the in-process ledger poison flag (there is no
+`Tx::poison`). An unfinalized posting sink marks poison by transaction id when it
+is dropped; committing that work must go through [`datum_ledger::commit`], which
+returns `Error::Unfinalized` and rolls back. Module code that posts through the
+kernel transition path finalizes or posts inside the same `Tx` and then calls
+`Tx::commit` on success paths only.
+
 ## Frozen / seams
 
 Frozen: `Tx::begin` / `WritePool` / `ReadPool` / `connect` hooks (CONTRACT §4 REAL

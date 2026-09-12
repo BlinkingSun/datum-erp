@@ -35,14 +35,6 @@ CREATE TABLE uom.item_stock (
 );
 ALTER TABLE uom.item_stock OWNER TO datum_owner;
 
--- Seam until ledger.posting exists: tests and pre-ledger immutability checks read this.
-CREATE TABLE uom.posting_stub (
-  item_id uuid NOT NULL PRIMARY KEY
-);
-ALTER TABLE uom.posting_stub OWNER TO datum_owner;
-COMMENT ON TABLE uom.posting_stub IS
-  'Pre-ledger seam: uom.item_has_postings reads ledger.posting when present, else this table.';
-
 CREATE TABLE uom.factor (
   id              bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   from_unit       bigint         NOT NULL REFERENCES uom.unit (id),
@@ -97,9 +89,7 @@ BEGIN
       SELECT 1 FROM ledger.posting p WHERE p.item_id = p_item_id
     );
   END IF;
-  RETURN EXISTS (
-    SELECT 1 FROM uom.posting_stub s WHERE s.item_id = p_item_id
-  );
+  RETURN FALSE;
 END
 $uom$;
 ALTER FUNCTION uom.item_has_postings(uuid) OWNER TO datum_owner;
@@ -136,7 +126,6 @@ SELECT audit.attach('uom.rounding_policy'::regclass);
 GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA uom TO datum_app;
 REVOKE DELETE ON ALL TABLES IN SCHEMA uom FROM PUBLIC, datum_app;
 
-GRANT SELECT ON uom.posting_stub TO datum_app;
 GRANT EXECUTE ON FUNCTION uom.item_has_postings(uuid) TO datum_owner, datum_migrate;
 
 DO $grant$

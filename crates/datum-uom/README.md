@@ -26,7 +26,7 @@ boundary helper `to_stock`. Factors may be global, item-scoped, or lot-pinned.
 
 - `00000000000000_placeholder` — no-op
 - `00000000000001_uom` — schema `uom` (app): `uom.unit`, `uom.item_stock`,
-  `uom.posting_stub`, `uom.factor`, `uom.rounding_policy` (all app)
+  `uom.factor`, `uom.rounding_policy` (all app)
 
 ## Tests (`tests/`)
 
@@ -44,7 +44,7 @@ boundary helper `to_stock`. Factors may be global, item-scoped, or lot-pinned.
 
 Frozen: `to_stock` signature (held through ledger landing) and `UnitConverter`
 (CONTRACT §4, §6 convert traits). Ledger is landed: `ledger.posting` is the
-source of truth for `uom.item_has_postings` when present. `uom.posting_stub`
-remains a seam (FINDINGS-0 #6), not a second ledger. The unused catalog
-parameter on `to_stock` is kept until a later cleanup. `as_of` is still
-transaction_timestamp, not an explicit argument.
+source of truth for `uom.item_has_postings` when present; the function returns
+false when that relation is absent. The unused catalog parameter on `to_stock`
+is kept until a later cleanup. `as_of` is still transaction_timestamp, not an
+explicit argument.

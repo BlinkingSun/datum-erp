@@ -12,7 +12,8 @@ Frozen public API for Wave 2s.
 - Lifecycle: `install` / `enable` / `disable` / `upgrade` against
   `module.installed` (`docs/03` §6). Disable never drops; disabling a depended-on
   module is refused with the dependents named.
-- `KERNEL_ORDER` and `run_migrations` / `migrate_prefix` / `migrate_suffix`.
+- `KERNEL_ORDER` and `run_migrations` / `migrate_prefix` / `migrate_suffix` /
+  `install_kernel` (privileged before identity seeds).
 - Configuration manifest export/verify (`docs/03` §8).
 - The composed kernel path (ADDENDUM 1).
 

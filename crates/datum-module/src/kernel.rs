@@ -294,8 +294,12 @@ impl Kernel {
     }
 
     /// `WriteContext` whose bound action is `"<doc_type>.<edge>"` (executor obligation).
-    pub fn transition_context(actor: Actor, doc: &DocRef, edge: &str) -> WriteContext {
-        let ctx = WriteContext::new(actor, "pending", "ui");
+    ///
+    /// Stamps `config_version` from the built profile spec. `app_version` is
+    /// bound by [`Tx::begin`] from [`datum_db::app_version`].
+    pub fn transition_context(&self, actor: Actor, doc: &DocRef, edge: &str) -> WriteContext {
+        let mut ctx = WriteContext::new(actor, "pending", "ui");
+        ctx.config_version = Some(self.profile.spec_version.clone());
         datum_statemachine::with_action(ctx, doc, edge)
     }
 

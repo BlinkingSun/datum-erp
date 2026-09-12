@@ -9,23 +9,14 @@ use datum_identity::{PrincipalKind, create_principal};
 use datum_statemachine::{DocRef, with_action};
 use sqlx::{PgPool, query_scalar as sql_query_scalar};
 
-use datum_module::{attach_kernel_audit, migrate_prefix, migrate_suffix};
+use datum_module::install_kernel;
 
 pub async fn migrate_and_install(db: &datum_test::TestDb) {
-    migrate_prefix(db.migrate_pool())
-        .await
-        .expect("migrate prefix");
-    migrate_suffix(db.migrate_pool())
-        .await
-        .unwrap_or_else(|e| panic!("migrate suffix: {e:#}"));
     let boot = db.bootstrap_pool().await.expect("bootstrap pool");
-    datum_audit::install_privileged(&boot)
+    install_kernel(db.migrate_pool(), &boot)
         .await
-        .expect("install_privileged");
+        .unwrap_or_else(|e| panic!("install_kernel: {e:#}"));
     boot.close().await;
-    attach_kernel_audit(db.migrate_pool())
-        .await
-        .expect("attach_kernel_audit");
 }
 
 pub fn write_pool(db: &datum_test::TestDb) -> WritePool {

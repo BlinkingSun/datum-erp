@@ -128,21 +128,21 @@ async fn machine_registered_through_kernel_is_transitionable_after_build() {
     let mut kernel = builder.build().await.expect("build");
     let write = kernel.write_pool();
     let doc = DocRef {
-        doc_type: "wo".into(),
+        doc_type: "extra.doc".into(),
         doc_id: Identifier::generate(),
     };
-    let (_, ctx) = actor_with_perm(&write, "wo.release", &doc, "release").await;
+    let (_, ctx) = actor_with_perm(&write, "wo.release", &doc, "go").await;
     let mut tx = Tx::begin(&write, &ctx).await.expect("begin spawn");
-    kernel.spawn(&mut tx, &doc, "Draft").await.expect("spawn");
+    kernel.spawn(&mut tx, &doc, "A").await.expect("spawn");
     tx.commit().await.expect("commit spawn");
 
     let mut tx = Tx::begin(&write, &ctx).await.expect("begin tr");
     let inst = kernel
-        .transition(&mut tx, &doc, "release", None, &ctx)
+        .transition(&mut tx, &doc, "go", None, &ctx)
         .await
         .expect("transition after build");
     tx.commit().await.expect("commit tr");
-    assert_eq!(inst.state.0, "Released");
+    assert_eq!(inst.state.0, "B");
 
     let late = Machine::builder("late.doc")
         .edge(EdgeBuilder::new("X", "Y", "n", "wo.release"))
@@ -257,7 +257,10 @@ async fn hook_postings_reach_the_ledger() {
         doc_type: "wo".into(),
         doc_id: Identifier::generate(),
     };
-    let (actor, ctx) = actor_with_perm(&write, "wo.release", &doc, "release").await;
+    let (actor, _) = actor_with_perm(&write, "wo.release", &doc, "release").await;
+    let mut ctx = kernel.transition_context(actor, &doc, "release");
+    ctx.actor_display = Some("Operator".into());
+    ctx.reason = Some("module-glue-test".into());
 
     let mut tx = Tx::begin(&write, &common_boot()).await.expect("reg");
     upsert_stock_item(
@@ -330,6 +333,22 @@ async fn hook_postings_reach_the_ledger() {
     .await
     .expect("post audit");
     assert_eq!(post_ins, 4, "one audit row per posting insert");
+    let receipt_cfg: String = query_scalar(
+        "SELECT config_version FROM audit.event
+          WHERE actor_id = $1 AND table_name = 'posting_group' AND op = 'INSERT'",
+    )
+    .bind(actor.id.as_uuid())
+    .fetch_one(db.app_pool())
+    .await
+    .expect("receipt config_version");
+    assert!(
+        !receipt_cfg.is_empty(),
+        "glue receipt config_version must be non-empty"
+    );
+    assert_eq!(
+        receipt_cfg, kernel.profile.spec_version,
+        "glue receipt config_version equals the profile spec"
+    );
     let foreign: i64 = query_scalar(
         "SELECT count(*) FROM audit.event
           WHERE table_name IN ('instance', 'posting_group', 'posting')
@@ -424,6 +443,12 @@ fn common_boot() -> datum_db::WriteContext {
     );
     ctx.actor_display = Some("system".into());
     ctx.reason = Some("module-glue-test".into());
+    ctx.config_version = Some(
+        Profile::plain_shop()
+            .expect("plain-shop")
+            .spec_version
+            .clone(),
+    );
     ctx
 }
 

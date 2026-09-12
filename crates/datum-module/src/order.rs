@@ -85,9 +85,10 @@ pub async fn migrate_prefix(pool: &datum_db::Pool) -> Result<()> {
     Ok(())
 }
 
-/// Apply identity through this crate. Call [`datum_audit::install_privileged`]
-/// **after** this (so uom seed inserts are not judged by `zz_audit_row`), then
-/// [`attach_kernel_audit`].
+/// Apply identity through this crate. Identity builtin INSERTs are audited
+/// when [`install_kernel`] runs privileged **before** this crate and drops the
+/// event trigger before the remaining suffix (uom/events/ledger have no
+/// TRIGGER default-privilege grant). Then [`attach_kernel_audit`].
 pub async fn migrate_suffix(pool: &datum_db::Pool) -> Result<()> {
     let crates = kernel_migrators();
     let rest: Vec<_> = crates
@@ -103,11 +104,13 @@ pub async fn migrate_suffix(pool: &datum_db::Pool) -> Result<()> {
     Ok(())
 }
 
-/// App-class tables created before [`datum_audit::install_privileged`].
+/// App-class tables the event trigger misses (`datum` schema is skipped;
+/// numbering.counter is `audit.exempt`; `datum.schema_class` stays unattached
+/// so later migrators can INSERT class rows without actor GUCs).
 ///
-/// `numbering.counter` is `audit.exempt`; `datum.schema_class` stays
-/// unattached so later migrators can INSERT class rows without actor GUCs.
-const KERNEL_AUDIT_RELS: &[&str] = &[
+/// Documentation of the attach set; the catalog (`datum.schema_class`) is the
+/// coverage truth. [`attach_kernel_audit`] is idempotent.
+pub const KERNEL_AUDIT_RELS: &[&str] = &[
     "datum.schema_history",
     "module.installed",
     "module.configuration",
@@ -123,7 +126,6 @@ const KERNEL_AUDIT_RELS: &[&str] = &[
     "identity.principal_role",
     "uom.unit",
     "uom.item_stock",
-    "uom.posting_stub",
     "uom.factor",
     "uom.rounding_policy",
     "app.event",
@@ -141,11 +143,41 @@ const KERNEL_AUDIT_RELS: &[&str] = &[
 ];
 
 /// Attach `datum.schema_history` and every other app-class table that missed
-/// the event trigger (tables created before `install_privileged`).
+/// the event trigger (`datum` schema, or tables created before privileged).
 pub async fn attach_kernel_audit(pool: &datum_db::Pool) -> Result<()> {
     for rel in KERNEL_AUDIT_RELS {
         datum_audit::attach(pool, rel).await?;
     }
+    Ok(())
+}
+
+/// Prefix, privileged event triggers, identity (so builtin seeds are audited),
+/// remaining suffix with the event trigger down, attach, then privileged again.
+///
+/// Identity 0001 is written to be judged by `zz_audit_row` (GUCs + TRIGGER
+/// grants). Later kernel crates create tables as `datum_migrate` without that
+/// grant; attaching after `ALTER TABLE ... OWNER TO datum_owner` is the
+/// composition-path attach, same as before this residual.
+pub async fn install_kernel(migrate: &datum_db::Pool, bootstrap: &datum_db::Pool) -> Result<()> {
+    migrate_prefix(migrate).await?;
+    datum_audit::install_privileged(bootstrap).await?;
+    datum_db::migrate::run(migrate, &[("datum-identity", &datum_identity::MIGRATOR)])
+        .await
+        .map_err(|e| Error::Manifest(format!("migrate datum-identity: {e}")))?;
+    datum_audit::uninstall_privileged(bootstrap).await?;
+    let rest: Vec<_> = kernel_migrators()
+        .into_iter()
+        .filter(|(name, _)| {
+            *name != "datum-db" && *name != "datum-audit" && *name != "datum-identity"
+        })
+        .collect();
+    for (name, migrator) in &rest {
+        datum_db::migrate::run(migrate, &[(*name, *migrator)])
+            .await
+            .map_err(|e| Error::Manifest(format!("migrate {name}: {e}")))?;
+    }
+    attach_kernel_audit(migrate).await?;
+    datum_audit::install_privileged(bootstrap).await?;
     Ok(())
 }
 

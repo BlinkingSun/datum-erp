@@ -36,9 +36,9 @@ pub use manifest::{
     ModuleManifest, compiled_in, compiled_in_graph,
 };
 pub use order::{
-    CONTRACT_KERNEL_EDGES, KERNEL_ORDER, MIGRATE_PREFIX, ModuleNode, attach_kernel_audit,
-    is_topological_sort, kernel_crates, kernel_migrators, migrate_prefix, migrate_suffix,
-    run_migrations, topological_order,
+    CONTRACT_KERNEL_EDGES, KERNEL_AUDIT_RELS, KERNEL_ORDER, MIGRATE_PREFIX, ModuleNode,
+    attach_kernel_audit, install_kernel, is_topological_sort, kernel_crates, kernel_migrators,
+    migrate_prefix, migrate_suffix, run_migrations, topological_order,
 };
 pub use profile::{
     DELTA_ALLOWED, GateBinding, Profile, ProfileId, ProfileModule, SignatureEdge, delta_keys,

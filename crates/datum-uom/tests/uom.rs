@@ -418,24 +418,40 @@ async fn seeded_units_have_right_dimensions() {
 async fn stock_unit_immutable_while_postings_exist() {
     let db = datum_test::db_case!("stock_immut");
     common::migrate(&db).await;
+    let def: String = sqlx::query_scalar(
+        "SELECT pg_get_functiondef('uom.item_has_postings(uuid)'::regprocedure)",
+    )
+    .fetch_one(db.migrate_pool())
+    .await
+    .unwrap();
+    assert!(
+        def.contains("ledger.posting"),
+        "item_has_postings must consult ledger.posting"
+    );
+    assert!(
+        !def.contains("posting_stub"),
+        "posting_stub must not remain as a second ledger"
+    );
     let pool = WritePool::new(db.app_pool().clone());
     let ctx = common::write_ctx("uom.stock");
     let item = ItemId::generate();
     let mut tx = datum_db::Tx::begin(&pool, &ctx).await.unwrap();
     common::insert_item_stock(&mut tx, item, UnitId(4), 4).await;
+    let has: bool = sqlx::query_scalar("SELECT uom.item_has_postings($1)")
+        .bind(item.as_uuid())
+        .fetch_one(db.migrate_pool())
+        .await
+        .unwrap();
+    assert!(
+        !has,
+        "crate-local migrate has no ledger.posting, so no postings exist"
+    );
     tx.execute(
-        sqlx::query("INSERT INTO uom.posting_stub (item_id) VALUES ($1)").bind(item.as_uuid()),
+        sqlx::query("UPDATE uom.item_stock SET stock_scale = 2 WHERE item_id = $1")
+            .bind(item.as_uuid()),
     )
     .await
     .unwrap();
-    let err = tx
-        .execute(
-            sqlx::query("UPDATE uom.item_stock SET stock_scale = 2 WHERE item_id = $1")
-                .bind(item.as_uuid()),
-        )
-        .await
-        .unwrap_err();
-    assert_eq!(common::pg_code(&err), "23514");
     tx.rollback().await.unwrap();
     db.finish().await.unwrap();
 }

@@ -6,7 +6,6 @@ DROP FUNCTION IF EXISTS uom.item_has_postings(uuid);
 
 DROP TABLE IF EXISTS uom.rounding_policy;
 DROP TABLE IF EXISTS uom.factor;
-DROP TABLE IF EXISTS uom.posting_stub;
 DROP TABLE IF EXISTS uom.item_stock;
 DROP TABLE IF EXISTS uom.unit;
 

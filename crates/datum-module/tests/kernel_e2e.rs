@@ -427,10 +427,9 @@ async fn composed_path(db: &datum_test::TestDb, profile: Profile, rebuild_projec
         doc_type: DOC_TYPE.into(),
         doc_id: Identifier::generate(),
     };
-    let mut recv_ctx = Kernel::transition_context(actor, &flow, RECEIVE);
+    let mut recv_ctx = kernel.transition_context(actor, &flow, RECEIVE);
     recv_ctx.actor_display = Some("Operator".into());
     recv_ctx.reason = Some("kernel-e2e".into());
-    recv_ctx.config_version = Some(kernel.profile.spec_version.clone());
 
     let pool = db.app_pool();
     let mut tx = Tx::begin(&write, &recv_ctx).await.expect("spawn flow");
@@ -482,6 +481,24 @@ async fn composed_path(db: &datum_test::TestDb, profile: Profile, rebuild_projec
             .await
             .expect("receive postings");
     assert_eq!(recv_postings, 4, "receive group {recv_group} posting count");
+
+    let mut tx = Tx::begin(&write, &recv_ctx).await.expect("immut tx");
+    let err = tx
+        .execute(
+            sqlx::query("UPDATE uom.item_stock SET stock_scale = 2 WHERE item_id = $1")
+                .bind(item.as_uuid()),
+        )
+        .await
+        .expect_err("stock unit immutable while ledger.posting rows exist");
+    let code = match &err {
+        datum_db::Error::Sqlx(e) => e
+            .as_database_error()
+            .and_then(|d| d.code().map(|c| c.into_owned()))
+            .unwrap_or_default(),
+        other => other.to_string(),
+    };
+    assert_eq!(code, "23514", "got {err}");
+    tx.rollback().await.expect("rollback immut");
 
     let mut tx = Tx::begin(&write, &recv_ctx).await.expect("uom/event tx");
     let catalog = datum_uom::load_catalog(&mut tx).await.expect("catalog");
@@ -541,10 +558,9 @@ async fn composed_path(db: &datum_test::TestDb, profile: Profile, rebuild_projec
             .expect("job done");
     assert_eq!(done, 1, "one genealogy.refresh succeeded");
 
-    let mut issue_ctx = Kernel::transition_context(actor, &flow, ISSUE);
+    let mut issue_ctx = kernel.transition_context(actor, &flow, ISSUE);
     issue_ctx.actor_display = Some("Operator".into());
     issue_ctx.reason = Some("kernel-e2e".into());
-    issue_ctx.config_version = Some(kernel.profile.spec_version.clone());
     let mut tx = Tx::begin(&write, &issue_ctx).await.expect("issue tx");
     let inst = kernel
         .transition(&mut tx, &flow, ISSUE, None, &issue_ctx)
@@ -570,10 +586,9 @@ async fn composed_path(db: &datum_test::TestDb, profile: Profile, rebuild_projec
         doc_type: DOC_TYPE.into(),
         doc_id: Identifier::generate(),
     };
-    let mut appr_ctx = Kernel::transition_context(actor, &sig, APPROVE);
+    let mut appr_ctx = kernel.transition_context(actor, &sig, APPROVE);
     appr_ctx.actor_display = Some("Operator".into());
     appr_ctx.reason = Some("kernel-e2e".into());
-    appr_ctx.config_version = Some(kernel.profile.spec_version.clone());
     let mut tx = Tx::begin(&write, &appr_ctx).await.expect("spawn sig");
     kernel
         .spawn(&mut tx, &sig, "Open")
