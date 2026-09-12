@@ -333,7 +333,10 @@ async fn create_database(bootstrap_url: &str, database: &str, template: &str) ->
             .execute(&mut conn)
             .await
         {
-            Ok(_) => return Ok(()),
+            Ok(_) => {
+                stamp_created_at_comment(&mut conn, database).await?;
+                return Ok(());
+            }
             Err(e) if is_sqlstate_55006(&e) => {
                 #[cfg(test)]
                 CREATE_DATABASE_55006_RETRIES.fetch_add(1, Ordering::SeqCst);
@@ -364,6 +367,21 @@ async fn create_database(bootstrap_url: &str, database: &str, template: &str) ->
             }
         }
     }
+}
+
+/// ISO-8601 stamp for `just db-gc` (read from `pg_shdescription`; name suffix is only a fallback).
+async fn stamp_created_at_comment(conn: &mut PgConnection, database: &str) -> Result<(), Error> {
+    assert_safe_ident(database)?;
+    let stamp: String = sqlx::query_scalar(
+        "SELECT 'datum.harness_created_at=' || to_char(now() AT TIME ZONE 'utc', \
+         'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')",
+    )
+    .fetch_one(&mut *conn)
+    .await?;
+    let escaped = stamp.replace('\'', "''");
+    let sql = format!("COMMENT ON DATABASE {database} IS '{escaped}'");
+    sqlx::raw_sql(AssertSqlSafe(sql)).execute(conn).await?;
+    Ok(())
 }
 
 async fn drop_database(bootstrap_url: &str, database: &str) -> Result<(), Error> {

@@ -32,7 +32,7 @@ Half a day of reading. There is no shortcut.
 
 Rust **1.98.1** is pinned in `rust-toolchain.toml` (`PLAN.md` §11). PostgreSQL **17** is installed and lifecycle-managed by the operating system; Datum never installs or manages PostgreSQL (`docs/adr/0003-database.md` as amended). You also need `just` and `sqlx-cli` 0.9.0 (`PLAN.md` §11).
 
-`just ci` is the local gate: `fmt-check`, `clippy`, `lint-sql`, and `test-lib` (`PLAN.md` §11). Machines with a container runtime can bring up Postgres from `dev/compose.yml` (image `postgres:17`). Machines without one use the OS-managed server on `127.0.0.1:5432`. Datum never installs that server.
+`just ci` is the local gate: `fmt-check`, `clippy`, `lint-sql`, and `test-lib` (`PLAN.md` §11). Machines with a container runtime can bring up Postgres from `dev/compose.yml` (image `postgres:17`). Machines without one use the OS-managed server on `127.0.0.1:5432`. Datum never installs that server. Run `just db-gc` to drop orphaned `datum_t_*` test databases left behind by killed test runs (default age threshold 60 minutes, override with `DATUM_DB_GC_MIN`).
 
 ## 6. License
 

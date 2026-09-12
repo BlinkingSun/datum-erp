@@ -90,8 +90,22 @@ db-reset:
       exit 1; \
     fi; \
     for f in "${files[@]}"; do \
+      case "$(basename "$f")" in \
+        *-gc.sql) continue ;; \
+      esac; \
       "$psql" "$url" -v ON_ERROR_STOP=1 -f "$f"; \
     done
+
+# Drop stale ephemeral test databases (datum_t_*) older than DATUM_DB_GC_MIN minutes (default 60).
+db-gc:
+    url="${DATUM_BOOTSTRAP_URL:?DATUM_BOOTSTRAP_URL is required}"; \
+    gc_min="${DATUM_DB_GC_MIN:-60}"; \
+    if command -v brew >/dev/null 2>&1 && [ -x "$(brew --prefix postgresql@17)/bin/psql" ]; then \
+      psql="$(brew --prefix postgresql@17)/bin/psql"; \
+    else \
+      psql="$(command -v psql)"; \
+    fi; \
+    "$psql" "$url" -v ON_ERROR_STOP=1 -v gc_minutes="${gc_min}" -f "{{root}}/dev/sql/90-gc.sql"
 
 # Run sqlx migrate for one crate. Usage: just migrate datum-db
 migrate crate:
