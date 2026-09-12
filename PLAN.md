@@ -56,7 +56,10 @@ Read this section first if you read v1.
    authority as `DECISION-w1-contracts.md`; invariant 19 added. The two core traits were
    completed after the traits slice: consumption edges, a group header, one finalize point,
    and a content hash on the signature token, with the state machine obliged to call the
-   gate from edge metadata (CONTRACT §6.2–6.3). The owner's stated goal is a
+   gate from edge metadata (CONTRACT §6.2–6.3), then ratified and sharpened by decisions
+   D-W1-3, D-W1-4 (typed `PostingId`, four more error variants, money-half independence of
+   the allocator, per-signature single use, total signature declarations) and D-W1-5
+   (profiles). The contract carries the rulings' text verbatim. The owner's stated goal is a
    system that replaces their company's ERP *and* can be configured for other kinds of
    business. The module system was already designed for that; v2 makes the plain-shop
    profile an acceptance target rather than an implication.
@@ -98,15 +101,21 @@ screen.* What v2 adds is an acceptance target, so the claim is tested rather tha
 - **Two installation profiles ship from the first release.** A profile is **runtime
   enablement of compiled-in modules** plus declarative configuration (`docs/03` §5 Phase 1
   and §6 lifecycle): one binary, one license, one schema, never a second build.
-  `regulated-device` (the beachhead) enables the regulated modules and declares
-  signature-bearing transitions; `plain-shop` enables no module marked `regulated = true`
-  and declares no signature requirement on any transition. The kernel's record properties
+  `regulated-device` (the beachhead) enables the regulated modules; `plain-shop` enables
+  no module marked `regulated = true`. **Signature requirements are module-owned**: a
+  profile may not add, remove or downgrade one; enablement is the only lever a profile has,
+  and `plain-shop` has no signature-bearing edge because it enables no regulated module,
+  not because it overrode anything. `regulated = true` marks a module whose workflow exists
+  only because of a regulation the shop may not be subject to (CAPA, complaints,
+  calibration and training gates, e-signature workflows, validation navigation); lot
+  traceability is a business capability, so `mod-genealogy` is `regulated = false` and
+  the slice acceptance passes unchanged under both profiles. The kernel's record properties
   are identical in both and always on: the audit trigger and hash chain, server-side time,
   attributable actors, no hard deletes of records, version stamping, the constrained lot
   and serial identifier, and the audit export. A plain shop sees none of it in its screens
   and pays for it only in storage; it is not free and the plan does not say it is. The
-  profile definitions are frozen in `_team/specs/SPEC-profiles.md` before Wave 2s and
-  consumed by `datum-module` and `server-slice`.
+  profile definitions are frozen in `_team/specs/SPEC-profiles.md` (the eleven keys of
+  DECISION D-W1-5) before Wave 2.6 and consumed by `datum-module` and `server-slice`.
 - Wave 3's phase-end test runs the whole-program API test under **both** profiles.
 - **No customer-specific code, ever** (invariant 18). Anything the owner's own company
   needs that another shop would not is configuration or a module, never a branch.
