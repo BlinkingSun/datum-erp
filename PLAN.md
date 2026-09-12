@@ -561,7 +561,7 @@ items. The Tauri shell, until ADR 0009's revisit condition fires.
 | Node | Role | State 2026-09-12 |
 |---|---|---|
 | MacBook (Apple Silicon) | **Primary build node.** All lanes, all worktrees, integration. | named toolchain `1.98.1` with rustfmt and clippy installed (plus stable 1.98.1), cargo, PostgreSQL 17.11 (Homebrew, keg-only but linked; client path `$(brew --prefix postgresql@17)/bin`; loopback `trust`), `just`, `sqlx-cli` **0.9.0** (the crate is pinned to the 0.9 line to match), node 26. No docker. |
-| NUC (Linux, `ssh cnc`) | Linux CI node, single tenant. | No PostgreSQL, no docker. Provision before the first Linux CI round. |
+| NUC (Linux, `ssh cnc`) | Linux CI node, single tenant (also hosts the live CNC node: node lock, no third-party apt repos). | Ubuntu 26.04: PostgreSQL **18** (the OS's own; the contract pins 17 as the minimum, so the NUC is the cross-major check), `just`, rustup 1.98.1 user-local, no docker. Provisioned 2026-09-12. |
 | Shop PC (Windows) | Windows CI node, single tenant. | Rust present from the v1 run; PostgreSQL unknown. Provision before the first Windows CI round. |
 
 Conventions every lane must follow:
