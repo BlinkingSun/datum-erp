@@ -588,8 +588,9 @@ Conventions every lane must follow:
 
 - Public repository: `https://github.com/BlinkingSun/datum-erp` (remote `origin`), created
   2026-09-12 after the owner restated the decision. It is never renamed, made private,
-  deleted, transferred or force-pushed. Pushes are plain fast-forward only. Actions stay
-  off until the workflow is green on all three local nodes (§11).
+  deleted, transferred or force-pushed. Pushes are plain fast-forward only. GitHub Actions
+  are **on** for the public repository since 2026-09-12 (the three-node local round went
+  green first, §11); the private mirror keeps Actions off.
 - Private mirror `BlinkingSun/datum-dev` (remote `dev`) is kept as the backup remote and
   receives every landing first.
 - License AGPL-3.0-or-later; contributions under the DCO; `LICENSE`, `CONTRIBUTING.md` and
