@@ -116,14 +116,14 @@ CREATE TABLE ledger.posting (
   cost_element      ledger.cost_element,
   cost_object_id    uuid,                   -- work order for WIP, sales order for COGS
   currency_id       smallint,
-  amount            numeric(24,6),   -- D1 §2.5 MONEY_MAX_SCALE = 6; D-W1-1
+  amount            numeric(24,6),   -- D1 §2.5 MONEY_MAX_SCALE = 6; the column is never a rounding site (D-W1-1)
   values_posting_id bigint,                 -- the QUANTITY row this money prices
 
   -- provenance. Recorded, audited, NEVER summed by any invariant.
   entered_quantity  numeric(24,8),
   entered_uom_id    uuid,
   conversion_factor numeric(38,18),
-  unit_cost_applied numeric(24,8),   -- D1 §2.5 RATE_MAX_SCALE = 8; D-W1-1
+  unit_cost_applied numeric(24,8),   -- D1 §2.5 RATE_MAX_SCALE = 8 (D-W1-1)
 
   UNIQUE (posting_id, group_id),            -- FK target for values_posting_id
 
@@ -143,27 +143,32 @@ CREATE TABLE ledger.posting (
        AND stock_scale IS NULL AND residual_tolerance IS NULL)
   ),
 
+  -- a zero row carries no information and is a cheap way to fake a counterpart
   CONSTRAINT no_zero_rows CHECK (COALESCE(quantity, amount) <> 0),
 
+  ---------------- §7 R1: quantity is exact at the item's declared scale ----------------
   CONSTRAINT quantity_exact_at_scale CHECK (
     measure <> 'QUANTITY' OR quantity = round(quantity, stock_scale::int)
   ),
 
+  ---------------- §4.2: the boundary matrix, immediate ----------------
   CONSTRAINT boundary_permitted CHECK (
     boundary IS NULL
     OR (kind = 'MOVEMENT'       AND boundary IN ('SUPPLIER','CUSTOMER'))
     OR (kind = 'ADJUSTMENT'     AND boundary IN ('SCRAP','ADJUSTMENT','ROUNDING'))
     OR (kind = 'TRANSFORMATION' AND boundary IN ('CONSUMED','PRODUCED'))
-    OR  kind = 'REVERSAL'
+    OR  kind = 'REVERSAL'                       -- P4 pins a reversal exactly
   ),
   CONSTRAINT valuation_moves_no_matter CHECK (
     kind <> 'VALUATION' OR measure = 'VALUE'
   ),
 
+  ---------------- §7 R4: dust must actually be dust ----------------
   CONSTRAINT rounding_is_dust CHECK (
     boundary IS DISTINCT FROM 'ROUNDING' OR abs(quantity) <= residual_tolerance
   ),
 
+  ---------------- value must attach to matter, except in VALUATION ----------------
   CONSTRAINT value_attaches_to_matter CHECK (
     measure <> 'VALUE'
     OR kind = 'VALUATION'
@@ -174,6 +179,7 @@ CREATE TABLE ledger.posting (
     account IS DISTINCT FROM 'WIP' OR cost_object_id IS NOT NULL
   ),
 
+  ---------------- the five pins ----------------
   FOREIGN KEY (group_id, kind)
     REFERENCES ledger.posting_group (group_id, kind),
   FOREIGN KEY (item_id, uom_id, stock_scale, residual_tolerance)
@@ -181,10 +187,17 @@ CREATE TABLE ledger.posting (
   FOREIGN KEY (location_id, boundary)
     REFERENCES ledger.location (location_id, boundary_class),
   FOREIGN KEY (group_id, cost_object_id)
-    REFERENCES ledger.posting_group (group_id, work_order_id),
+    REFERENCES ledger.posting_group (group_id, work_order_id),   -- MATCH SIMPLE: skipped when NULL
   FOREIGN KEY (values_posting_id, group_id)
-    REFERENCES ledger.posting (posting_id, group_id)
+    REFERENCES ledger.posting (posting_id, group_id)             -- value stays in its own group
 );
+
+CREATE INDEX posting_group_idx   ON ledger.posting (group_id);
+CREATE INDEX posting_values_idx  ON ledger.posting (values_posting_id)
+  WHERE values_posting_id IS NOT NULL;
+CREATE INDEX posting_balance_idx ON ledger.posting (item_id, location_id, lot_id)
+  WHERE measure = 'QUANTITY';
+CREATE INDEX posting_xid_brin    ON ledger.posting USING brin (created_xid);
 ```
 
 **What a posting is:** one immutable row in an append-only group — either a quantity movement at a location (with optional lot/serial) or a value leg priced against a quantity row (`values_posting_id`) or a pure valuation leg. **Why a group has a kind:** dispatch and the boundary matrix are keyed off kind; the trigger adds kind-specific predicates (P2-B, P4) without exempting any kind from P0/P1/P2-A.
@@ -231,7 +244,7 @@ Function `ledger.enforce_group_invariants()` (D2 §5.4) runs on **`CREATE CONSTR
 
 **R3** — Same canonical number on both legs of a transfer within a group so P1 cannot fail on rounding.
 
-**R4** — Quantity residual lives in **balance**, not inside a balanced group; flushed via **`ADJUSTMENT`** to `ROUNDING` with reason code, capped by `rounding_is_dust` and item tolerance.
+**R4** — Quantity residual lives in **balance**, not inside a balanced group; flushed via **`ADJUSTMENT`** to `ROUNDING` with reason **`UOM_CONVERSION_RESIDUAL`**, capped by `rounding_is_dust` and item tolerance.
 
 **R5** — Item/lot conversion factors pinned; stock UOM/scale/tolerance immutable while postings reference them (composite FK).
 
@@ -243,7 +256,7 @@ Allocating a $47.20 receipt across three lots with `Money::allocate` at scale 6 
 
 > **A value residual is a discrepancy between postings, so the database enforces it. A quantity residual is a discrepancy between the postings and the physical world, so the database bounds it and a cycle count finds it.**
 
-**R7** — Dust report is a **report**, not a constraint; drives reason-coded `ADJUSTMENT`.
+**R7** — Dust report is a **report**, not a constraint; drives an `ADJUSTMENT` with reason **`UOM_CONVERSION_RESIDUAL`**.
 
 **Where rounding residual goes (value):** `ROUNDING` value account in the **same group** when settle returns `Settled`; P2-A catches drops.
 
@@ -355,7 +368,7 @@ Regulated document numbers use **`numbering.counter`** transactional `UPDATE …
 
 | Item | Rule |
 |---|---|
-| **9** | Lot/serial **identifiers at generation**: uppercase letters, digits, hyphen only; **≤ 20 characters** (barcode and 21 CFR 830.20(c) alignment) |
+| **9** | Lot/serial **identifiers at generation**: uppercase letters, digits, hyphen only; **≤ 20 characters** (`research/background/regulatory.md` §1.0.4: GS1 20-char cap, 21 CFR 830.20(c) ISO/IEC 646, HIBCC A–Z/0–9) |
 | **10** | **Tracked entity** is a lot or a **unit within a lot** from the first posting — kernel lot entities, not ad hoc strings |
 | **11** | **Package hierarchy** (each, inner, case, pallet, contained qty, parent link) is kernel inventory structure |
 | **12** | **Expiry** stores **precision** (e.g. day vs month-end), not a bare `DATE` that invents a day |
@@ -366,7 +379,7 @@ Regulated document numbers use **`numbering.counter`** transactional `UPDATE …
 
 ## 6. Version stamping and delete conventions (items 16–17)
 
-Every **`app`** record table carries **`application_version`** and **`configuration_version`** (semver or build id + config hash) set at insert/update from the running binary and enabled profile (PLAN §6b item 17; `docs/02-architecture.md` §136).
+Every **`app`** record table carries **`application_version`** and **`configuration_version`** (semver or build id + config hash) set at insert/update from the running binary and enabled profile (PLAN §6b item 17; `docs/02-architecture.md` §2).
 
 **No hard delete of records** (item 16, D-W1-2): retire by state change; enforcement is **`DELETE` privilege** — none on **`app`**, allowed on **`transient`** only for qualifying tables.
 
@@ -380,12 +393,13 @@ Identifiers from `PLAN.md` §3 (same set intended for `docs/10-api-conventions.m
 
 Narrative mapping to ledger cases (D2 §8):
 
-1. **Receive bar stock** — `MOVEMENT`: mill heat and **`LOT-BAR-24-4412`** as lot entities; receiving two cases posts **48 EA** of screws’ raw material equivalent (package hierarchy, inv. 11).
-2. **Quarantine → available** — `MOVEMENT` with **P3** consumption from receipt layer (case b).
-3. **Issue bar to `WO-2026-1847`** — `MOVEMENT`; WIP **`cost_object_id`** = work order id; FIFO layer edges (case c with WO-2026-1847).
-4. **Complete 500 EA `MDS-450-M4x12`** — `TRANSFORMATION` on **`WO-2026-1847`**: bar through **`CONSUMED`/`PRODUCED`**, finished **`LOT-WO-1847`**, P2-A and P3 carry value across the identity seam (case d).
-5. **Invalid lot id** — generation rejects lowercase, space, or 21st character (inv. 9).
-6. **Reverse a mistaken issue** — `REVERSAL` group; **P4**; nothing deleted (case l).
+1. **Receive bar stock** — `MOVEMENT`: mill heat **`HT-ATI-24-8831`** and **`LOT-BAR-24-4412`** as lot entities on **`PO-2024-0841`** (D2 §8 case a).
+2. **Receive two cases** — package hierarchy: two cases post **48 EA** of screws (PLAN §6b item 11).
+3. **Quarantine → available** — `MOVEMENT` with **P3** consumption from receipt layer (case b).
+4. **Issue bar to `WO-2026-1847`** — `MOVEMENT`; WIP **`cost_object_id`** = work order id; FIFO layer edges (case c with WO-2026-1847).
+5. **Complete 500 EA `MDS-450-M4x12`** — `TRANSFORMATION` on **`WO-2026-1847`**: bar through **`CONSUMED`/`PRODUCED`**, finished **`LOT-WO-1847`**, P2-A and P3 carry value across the identity seam (case d).
+6. **Invalid lot id** — generation rejects lowercase, space, or 21st character (inv. 9).
+7. **Reverse a mistaken issue** — `REVERSAL` group; **P4**; nothing deleted (case l).
 
 Full numeric matrices: `research/decisions/ledger-invariant.md` §8 table (BAR/SCREW fixture); substitute WO-1041 → **`WO-2026-1847`** and part numbers above where illustrative.
 
