@@ -590,6 +590,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "datum-mod-locations"
+version = "0.1.0"
+dependencies = [
+ "datum-audit",
+ "datum-core",
+ "datum-db",
+ "datum-events",
+ "datum-identity",
+ "datum-ledger",
+ "datum-module",
+ "datum-test",
+ "datum-uom",
+ "proptest",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "datum-module"
 version = "0.1.0"
 dependencies = [
@@ -1271,6 +1294,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 
 [[package]]
+name = "items"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "datum-audit",
+ "datum-core",
+ "datum-db",
+ "datum-events",
+ "datum-identity",
+ "datum-ledger",
+ "datum-module",
+ "datum-statemachine",
+ "datum-test",
+ "datum-uom",
+ "proptest",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1329,6 +1377,29 @@ name = "log"
 version = "0.4.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
+
+[[package]]
+name = "lots"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "datum-audit",
+ "datum-core",
+ "datum-db",
+ "datum-events",
+ "datum-identity",
+ "datum-module",
+ "datum-numbering",
+ "datum-test",
+ "proptest",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "uuid",
+]
 
 [[package]]
 name = "matchit"
