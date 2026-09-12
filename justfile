@@ -14,12 +14,24 @@ fmt-check:
 clippy:
     cargo clippy --manifest-path "{{root}}/Cargo.toml" --workspace --all-targets --all-features -- -D warnings
 
-# String-level raw-SQL fence (CONTRACT §5a). Fails on any hit outside datum-db / datum-audit / datum-test.
+# String-level raw-SQL fence (CONTRACT §5a / §5a.1). Fails on any hit outside datum-db / datum-audit / datum-test.
 lint-sql:
     if rg -n --glob '*.rs' --glob '!**/datum-db/**' --glob '!**/datum-audit/**' --glob '!**/datum-test/**' \
         -e 'QueryBuilder' -e 'raw_sql' -e 'copy_in_raw' -e 'set_config' -e 'current_setting' \
         "{{root}}/crates"; then \
       echo "lint-sql: session-protocol SQL token outside crates/datum-db, crates/datum-audit, and crates/datum-test" >&2; \
+      exit 1; \
+    fi
+    if rg -n --glob '*.rs' --glob '!**/datum-db/**' --glob '!**/datum-audit/**' --glob '!**/datum-test/**' \
+        -e 'allow\(clippy::disallowed_' \
+        "{{root}}/crates"; then \
+      echo "lint-sql: clippy disallowed allow outside crates/datum-db, crates/datum-audit, and crates/datum-test" >&2; \
+      exit 1; \
+    fi
+    if rg -n --glob 'build.rs' --glob '!**/datum-db/**' --glob '!**/datum-audit/**' --glob '!**/datum-test/**' \
+        -e 'sqlx' \
+        "{{root}}/crates"; then \
+      echo "lint-sql: sqlx token in build.rs outside crates/datum-db, crates/datum-audit, and crates/datum-test" >&2; \
       exit 1; \
     fi
 
