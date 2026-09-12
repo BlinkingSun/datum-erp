@@ -513,7 +513,7 @@ async fn event_bridge_enqueues_job() {
         .payload(json!({
             "item_id": Identifier::generate().as_uuid().to_string(),
             "lot_id": Identifier::generate().as_uuid().to_string(),
-            "quantity": "1 ea"
+            "qty": "1"
         }))
         .build_with(&registry)
         .expect("event");

@@ -17,19 +17,9 @@ pub const ISSUED: &str = "inventory.issued";
 /// Adjustment posted.
 pub const ADJUSTED: &str = "inventory.adjusted";
 
-/// Register payload contracts on the process-global schema registry.
+/// Register `inventory.issued.v1`. Kernel-owned inventory contracts live in
+/// [`datum_events::SchemaRegistry::standard`] (R-2s-4).
 pub fn register_schemas() -> Result<()> {
-    datum_events::schema::register(EventSchema {
-        name: RECEIPT_POSTED.into(),
-        version: 1,
-        fields: vec![
-            Field::required("item_id"),
-            Field::required("location_id"),
-            Field::required("qty"),
-            Field::required("uom"),
-            Field::required("posting_group_id"),
-        ],
-    })?;
     datum_events::schema::register(EventSchema {
         name: ISSUED.into(),
         version: 1,
@@ -38,15 +28,6 @@ pub fn register_schemas() -> Result<()> {
             Field::required("qty"),
             Field::optional("lot_id"),
             Field::optional("work_order_id"),
-        ],
-    })?;
-    datum_events::schema::register(EventSchema {
-        name: ADJUSTED.into(),
-        version: 1,
-        fields: vec![
-            Field::required("item_id"),
-            Field::required("qty"),
-            Field::required("reason_code"),
         ],
     })?;
     Ok(())
