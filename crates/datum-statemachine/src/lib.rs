@@ -11,8 +11,10 @@
 //!   ([`Error::AfterHookCannotVeto`]).
 //! - **Sink.** One [`datum_core::PostingSink`] per transaction, handed to every hook as
 //!   `&mut dyn PostingSink`. The executor calls `finalize` exactly once after every hook
-//!   has run, including when an after-hook returns `Err` (finalize first; the hook error
-//!   is still surfaced). The transition never commits; the caller's [`datum_db::Tx`] does.
+//!   has run, including when a before-hook or after-hook returns `Err` (finalize first;
+//!   the hook error is still surfaced). CONTRACT §6.2: `NoPostings` finalize is
+//!   `Err(NoSink)` — a defined outcome mapped to transition `Ok(())`. The transition
+//!   never commits; the caller's [`datum_db::Tx`] does.
 //! - **Freeze.** Hook order is computed once at startup ([`Engine::freeze`]). Registration
 //!   after freeze is [`Error::Frozen`]. `persist` / `spawn` / `transition` refuse until
 //!   frozen ([`Error::NotFrozen`]).

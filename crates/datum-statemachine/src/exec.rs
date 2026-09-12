@@ -57,14 +57,14 @@ impl Engine {
     ///
     /// Does not commit: the caller's [`Tx`] does. `sink` is the one posting sink for
     /// this transaction; hooks receive `&mut dyn PostingSink` and cannot `finalize`.
-    /// The executor `finalize`s exactly once after every hook, including when an
-    /// after-hook returns `Err` (finalize first; the hook error is still surfaced).
-    /// Refuses until [`Engine::freeze`].
+    /// The executor `finalize`s exactly once after every hook, including when a
+    /// before-hook or after-hook returns `Err` (finalize first; the hook error is
+    /// still surfaced). Refuses until [`Engine::freeze`].
     #[allow(clippy::too_many_arguments)] // SPEC executor ABI: tx, sink, doc, edge, token, gate, ctx
     pub async fn transition(
         &self,
         tx: &mut Tx<'_>,
-        sink: Box<dyn PostingSink>,
+        mut sink: Box<dyn PostingSink>,
         doc: &DocRef,
         edge_name: &str,
         token: Option<&SignatureToken>,
@@ -112,10 +112,18 @@ impl Engine {
             module_id: String::new(),
         };
 
-        let mut sink = sink;
-        if edge.hooks_allowed {
-            // (c) before_transition, topological order, one sink, time budget
-            self.run_hooks(HookPhase::Before, &view, sink.as_mut())?;
+        let hook_err = if edge.hooks_allowed {
+            // (c) before_transition, topological order, one sink, time budget.
+            // Do not `?` here: CONTRACT §6.2 rule 1 requires exactly one
+            // `sink.finalize()` after every hook run, including a before-hook Err.
+            self.run_hooks(HookPhase::Before, &view, sink.as_mut())
+                .err()
+        } else {
+            None
+        };
+        if let Some(e) = hook_err {
+            let _ = finalize_sink(sink);
+            return Err(e);
         }
 
         // (d) mutate sm.instance — the only writer of the state column
@@ -128,22 +136,29 @@ impl Engine {
             None
         };
 
-        // (f) exactly one finalize after every hook, including after-hook Err
-        // (CONTRACT §6.2 rule 1). Finalize first; the hook error is still surfaced.
-        // NoPostings::finalize is NoSink; a transition that must not post treats
-        // that as success. Any other finalize error is surfaced.
-        let finalize_err = match sink.finalize() {
-            Ok(()) | Err(PostingError::NoSink) => None,
-            Err(e) => Some(Error::Posting(e)),
-        };
+        // (f) exactly one finalize after every hook, including before-hook and
+        // after-hook Err (CONTRACT §6.2 rule 1). Finalize first; the hook error
+        // is still surfaced.
+        let finalize_err = finalize_sink(sink).err();
         if let Some(e) = after_err {
             return Err(e);
         }
         if let Some(e) = finalize_err {
             return Err(e);
         }
-
         Ok(updated)
+    }
+}
+
+/// CONTRACT §6.2: `pub struct NoPostings;   // contribute -> Err(NoSink); finalize -> Err(NoSink)`
+///
+/// Rule 1: exactly one `finalize` after every hook. NoPostings is "for tests and
+/// for transitions that must not post"; `Err(NoSink)` is that defined outcome
+/// (not a dropped sink) and maps to the transition's `Ok(())`.
+fn finalize_sink(sink: Box<dyn PostingSink>) -> Result<()> {
+    match sink.finalize() {
+        Ok(()) | Err(PostingError::NoSink) => Ok(()),
+        Err(e) => Err(Error::Posting(e)),
     }
 }
 

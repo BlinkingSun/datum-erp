@@ -7,7 +7,7 @@ mod common;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use datum_core::{NoPostings, NoSignatures, PostingSink};
+use datum_core::{NoPostings, NoSignatures, PostingError, PostingSink};
 use datum_db::Tx;
 use datum_statemachine::{DocRef, Engine, Error, HookPhase, ModuleNode, Veto, action_for};
 use datum_test::db_case;
@@ -456,6 +456,71 @@ async fn startup_fails_when_required_edge_meets_no_signatures_in_release() {
         .check_gate_binding(true, true)
         .expect_err("release+noop");
     assert!(matches!(err, Error::StartupGate { .. }), "got {err:?}");
+}
+
+#[tokio::test]
+async fn before_hook_error_still_finalizes_sink() {
+    let db = db_case!("sm_before_fin");
+    migrate_and_install(&db).await;
+    let write = write_pool(&db);
+    let (mut eng, doc) = engine_ready(false).await;
+    eng.register_hook(
+        "mod-a",
+        "wo",
+        "release",
+        HookPhase::Before,
+        200,
+        |_v, sink| {
+            sink.contribute(dummy_intent())
+                .expect("contrib before veto");
+            Err(Veto {
+                module: "mod-a".into(),
+                reason: "before must finalize".into(),
+            })
+        },
+    )
+    .expect("before");
+    eng.freeze().expect("freeze");
+    let (_, ctx) = actor_with_perm(&write, "wo.release", &doc, "release").await;
+    persist_spawn(&eng, &write, &ctx, &doc).await;
+    let probe = CollectingSink::new();
+    let finalized = Arc::clone(&probe.finalized);
+    let sink = probe.into_box();
+    let mut tx = Tx::begin(&write, &ctx).await.expect("begin");
+    let err = eng
+        .transition(&mut tx, sink, &doc, "release", None, &NoSignatures, &ctx)
+        .await
+        .expect_err("before-hook Err");
+    assert!(
+        matches!(err, Error::Veto { ref module, ref reason } if module == "mod-a" && reason.contains("finalize")),
+        "got {err:?}"
+    );
+    assert!(
+        finalized.load(std::sync::atomic::Ordering::SeqCst),
+        "CONTRACT §6.2 rule 1: finalize after every hook including before-hook Err"
+    );
+    tx.rollback().await.expect("rollback");
+    assert_eq!(
+        instance_state(db.app_pool(), &doc).await.as_deref(),
+        Some("Draft"),
+        "before-hook Err must not mutate sm.instance"
+    );
+    db.finish().await.expect("finish");
+}
+
+#[test]
+fn no_postings_finalize_reports_no_sink() {
+    // CONTRACT §6.2: `pub struct NoPostings;   // contribute -> Err(NoSink); finalize -> Err(NoSink)`
+    let mut np = NoPostings;
+    assert!(
+        matches!(np.contribute(dummy_intent()), Err(PostingError::NoSink)),
+        "CONTRACT §6.2: contribute -> Err(NoSink)"
+    );
+    let sink: Box<dyn PostingSink> = Box::new(np);
+    assert!(
+        matches!(sink.finalize(), Err(PostingError::NoSink)),
+        "CONTRACT §6.2: NoPostings finalize -> Err(NoSink) is the defined outcome, not silent success"
+    );
 }
 
 #[tokio::test]
