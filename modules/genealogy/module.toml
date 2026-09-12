@@ -1,0 +1,50 @@
+[module]
+id = "mod-genealogy"
+version = "0.1.0"
+name = "Genealogy"
+description = "Forward and backward trace over the ledger consumption graph"
+
+[dependencies]
+kernel = "^0.1"
+mod-inventory = "^0.1"
+mod-lots = "^0.1"
+mod-items = "^0.1"
+mod-locations = "^0.1"
+
+[permissions]
+"genealogy.view" = "View genealogy traces and recall impact"
+"genealogy.export" = "Export a genealogy tree as CSV or JSON"
+
+[capabilities]
+requires-signature = []
+regulated = false
+
+[[subscriptions]]
+event = "inventory.lot_received"
+subscriber = "mod-genealogy"
+
+[[subscriptions]]
+event = "inventory.issued"
+subscriber = "mod-genealogy"
+
+[[subscriptions]]
+event = "production.completed"
+subscriber = "mod-genealogy"
+
+[[jobs]]
+kind = "genealogy.trace"
+
+[[jobs]]
+kind = "genealogy.refresh"
+
+[[routes]]
+path = "/api/v1/genealogy/trace"
+permission = "genealogy.view"
+
+[[routes]]
+path = "/api/v1/genealogy/impact/{lot}"
+permission = "genealogy.view"
+
+[[routes]]
+path = "/api/v1/genealogy/jobs/{id}"
+permission = "genealogy.view"

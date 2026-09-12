@@ -1,0 +1,43 @@
+[package]
+name = "datum-mod-production-min"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Minimal work-order surface (Wave 2s slice): create, release, issue, complete."
+build = "build.rs"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+
+[dependencies]
+chrono.workspace = true
+datum-core.workspace = true
+datum-db.workspace = true
+datum-events.workspace = true
+datum-ledger.workspace = true
+datum-module.workspace = true
+datum-numbering.workspace = true
+datum-statemachine.workspace = true
+datum-uom.workspace = true
+datum-mod-inventory = { path = "../inventory" }
+datum-mod-items = { path = "../items" }
+datum-mod-locations = { path = "../locations" }
+datum-mod-lots = { path = "../lots" }
+rust_decimal.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+datum-audit.workspace = true
+datum-identity.workspace = true
+datum-test.workspace = true
+proptest.workspace = true
+tokio.workspace = true

@@ -1,0 +1,102 @@
+[module]
+id = "mod-production-min"
+version = "0.1.0"
+name = "Production (slice)"
+description = "Minimal work order: create, release, issue material, complete, receive finished lot"
+
+[dependencies]
+kernel = "^0.1"
+mod-items = "^0.1"
+mod-locations = "^0.1"
+mod-lots = "^0.1"
+mod-inventory = "^0.1"
+
+[permissions]
+"production.view" = "View work orders"
+"production.create" = "Create a work order"
+"production.release" = "Release a work order"
+"production.issue" = "Issue material to a work order"
+"production.complete" = "Complete a work order"
+
+[capabilities]
+requires-signature = []
+regulated = false
+
+[[machines]]
+doc_type = "production"
+regulated = false
+states = ["draft", "released", "in_process", "completed", "cancelled"]
+
+[[machines.edges]]
+from = "draft"
+to = "released"
+name = "release"
+permission = "production.release"
+required = false
+reason = "v1 minimal work order; signature points belong to the Phase 3 production module"
+
+[[machines.edges]]
+from = "released"
+to = "in_process"
+name = "issue"
+permission = "production.issue"
+required = false
+reason = "v1 minimal work order; signature points belong to the Phase 3 production module"
+
+[[machines.edges]]
+from = "in_process"
+to = "completed"
+name = "complete"
+permission = "production.complete"
+required = false
+reason = "v1 minimal work order; signature points belong to the Phase 3 production module"
+
+[[machines.edges]]
+from = "draft"
+to = "cancelled"
+name = "cancel_draft"
+permission = "production.release"
+required = false
+reason = "v1 minimal work order; signature points belong to the Phase 3 production module"
+
+[[machines.edges]]
+from = "released"
+to = "cancelled"
+name = "cancel"
+permission = "production.release"
+required = false
+reason = "v1 minimal work order; signature points belong to the Phase 3 production module"
+
+[[routes]]
+path = "/api/v1/work-orders"
+method = "GET"
+permission = "production.view"
+
+[[routes]]
+path = "/api/v1/work-orders"
+method = "POST"
+permission = "production.create"
+
+[[routes]]
+path = "/api/v1/work-orders/{id}"
+method = "GET"
+permission = "production.view"
+
+[[routes]]
+path = "/api/v1/work-orders/{id}/release"
+method = "POST"
+permission = "production.release"
+
+[[routes]]
+path = "/api/v1/work-orders/{id}/issue"
+method = "POST"
+permission = "production.issue"
+
+[[routes]]
+path = "/api/v1/work-orders/{id}/complete"
+method = "POST"
+permission = "production.complete"
+
+[[subscriptions]]
+event = "production.completed"
+subscriber = "mod-genealogy"

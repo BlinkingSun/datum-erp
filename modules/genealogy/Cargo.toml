@@ -1,0 +1,42 @@
+[package]
+name = "datum-mod-genealogy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Forward and backward lot genealogy over the ledger (Wave 2s slice)."
+build = "build.rs"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+test-utils = []
+
+[dependencies]
+chrono.workspace = true
+datum-core.workspace = true
+datum-db.workspace = true
+datum-events.workspace = true
+datum-jobs.workspace = true
+datum-ledger.workspace = true
+datum-module.workspace = true
+datum-mod-inventory = { path = "../inventory" }
+datum-mod-items = { path = "../items" }
+datum-mod-locations = { path = "../locations" }
+datum-mod-lots = { path = "../lots" }
+rust_decimal.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+datum-audit.workspace = true
+datum-identity.workspace = true
+datum-test.workspace = true
+proptest.workspace = true
+tokio.workspace = true
