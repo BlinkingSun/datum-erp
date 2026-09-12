@@ -520,6 +520,7 @@ name = "datum-events"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "datum-audit",
  "datum-core",
  "datum-db",
  "datum-test",
@@ -529,6 +530,7 @@ dependencies = [
  "sqlx",
  "thiserror",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -610,6 +612,7 @@ dependencies = [
 name = "datum-numbering"
 version = "0.1.0"
 dependencies = [
+ "datum-audit",
  "datum-core",
  "datum-db",
  "datum-test",
