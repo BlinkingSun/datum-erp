@@ -13,12 +13,11 @@ use datum_core::{
     PostingIntent, PostingSink, QuantityPosting, UnitId,
 };
 use datum_db::Tx;
-use datum_events::SchemaRegistry;
 use datum_ledger::{CostMethod, GroupBuilder, boundary_sql, upsert_location, upsert_stock_item};
 use datum_mod_locations::{
     CreateLocation, Error, ListFilter, Location, LocationKind, LocationStatus, LocationTreeNode,
     UpdateLocation, boundary_code, ensure_wip, install, list, list_locations, migrate,
-    register_schemas, seed_install, store,
+    seed_install, store,
 };
 use datum_test::db_case;
 use rust_decimal::Decimal;
@@ -259,13 +258,11 @@ async fn deactivate_refused_while_on_hand() {
     datum_ledger::post(&mut tx, builder).await.unwrap();
     tx.commit().await.unwrap();
 
-    let mut registry = SchemaRegistry::new();
-    register_schemas(&mut registry).unwrap();
     let mut tx = Tx::begin(&pool, &write_ctx("locations.deact"))
         .await
         .unwrap();
     let loc2 = store::get(&mut tx, loc.id).await.unwrap();
-    let err = store::deactivate(&mut tx, loc.id, loc2.version, &registry)
+    let err = store::deactivate(&mut tx, loc.id, loc2.version)
         .await
         .unwrap_err();
     assert!(matches!(err, Error::OnHand));
@@ -501,7 +498,7 @@ async fn list_tree_filters_inactive_by_default() {
     let mut tx = Tx::begin(&pool, &write_ctx("locations.tree_status"))
         .await
         .unwrap();
-    seed_install(&mut tx).await.unwrap();
+    install(&mut tx, true).await.unwrap();
     let bin = store::create(
         &mut tx,
         CreateLocation {
@@ -516,13 +513,10 @@ async fn list_tree_filters_inactive_by_default() {
     .unwrap();
     tx.commit().await.unwrap();
 
-    let mut registry = SchemaRegistry::new();
-    register_schemas(&mut registry).unwrap();
-    register_schemas(&mut datum_events::schema::global_mut().unwrap()).unwrap();
     let mut tx = Tx::begin(&pool, &write_ctx("locations.tree_deact"))
         .await
         .unwrap();
-    store::deactivate(&mut tx, bin.id, bin.version, &registry)
+    store::deactivate(&mut tx, bin.id, bin.version)
         .await
         .unwrap();
 
@@ -551,5 +545,39 @@ async fn list_tree_filters_inactive_by_default() {
         })
     }
     assert!(has_inactive_bin(&with_inactive));
+    db.finish().await.unwrap();
+}
+
+#[tokio::test]
+async fn deactivate_after_plain_install() {
+    let db = db_case!("loc_deact_install");
+    migrate_kernel(&db).await;
+    let pool = write_pool(&db);
+    let mut tx = Tx::begin(&pool, &write_ctx("locations.install"))
+        .await
+        .unwrap();
+    install(&mut tx, true).await.unwrap();
+    let bin = store::create(
+        &mut tx,
+        CreateLocation {
+            code: "BIN-PLAIN".into(),
+            name: "Plain bin".into(),
+            site_id: store::default_site_id(),
+            parent_id: None,
+            kind: LocationKind::Bin,
+        },
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+
+    let mut tx = Tx::begin(&pool, &write_ctx("locations.deact_plain"))
+        .await
+        .unwrap();
+    let done = store::deactivate(&mut tx, bin.id, bin.version)
+        .await
+        .unwrap();
+    assert_eq!(done.status, LocationStatus::Inactive);
+    tx.commit().await.unwrap();
     db.finish().await.unwrap();
 }

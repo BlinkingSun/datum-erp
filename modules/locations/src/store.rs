@@ -2,7 +2,7 @@
 
 use datum_core::{Boundary, Identifier, LocationId};
 use datum_db::Tx;
-use datum_events::{Event, SchemaRegistry};
+use datum_events::Event;
 use datum_ledger::upsert_location;
 use serde_json::json;
 
@@ -314,12 +314,9 @@ async fn would_cycle(tx: &mut Tx<'_>, id: LocationId, mut cursor: LocationId) ->
 }
 
 /// Mark inactive when empty; emits [`events::LOCATION_DEACTIVATED`].
-pub async fn deactivate(
-    tx: &mut Tx<'_>,
-    id: LocationId,
-    version: i64,
-    registry: &SchemaRegistry,
-) -> Result<Location> {
+///
+/// Schemas must already be on the process-global registry (`install` registers them).
+pub async fn deactivate(tx: &mut Tx<'_>, id: LocationId, version: i64) -> Result<Location> {
     let current = get(tx, id).await?;
     if current.version != version {
         return Err(Error::Conflict("version mismatch".into()));
@@ -341,7 +338,7 @@ pub async fn deactivate(
         .name(events::LOCATION_DEACTIVATED)
         .version(1)
         .payload(json!({ "location_id": id.as_uuid().to_string() }))
-        .build_with(registry)?;
+        .build()?;
     datum_events::publish(tx, event).await?;
     get(tx, id).await
 }

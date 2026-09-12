@@ -22,7 +22,7 @@ pub use domain::{
     LocationTreeNode, Site, UpdateLocation, boundary_code, validate_code,
 };
 pub use error::{Error, Result};
-pub use events::{LOCATION_DEACTIVATED, register_schemas};
+pub use events::{LOCATION_DEACTIVATED, register_schemas, register_schemas_global};
 pub use store::{
     boundary_location_id, create, deactivate, ensure_wip, get, list, list_flat, seed_install,
     update,
@@ -45,8 +45,9 @@ pub async fn migrate(pool: &datum_db::Pool) -> Result<()> {
         .map_err(Error::from)
 }
 
-/// Install: module migrations are already applied; seed boundaries and register module row.
+/// Install: seed boundaries, register event schemas, register module row.
 pub async fn install(tx: &mut datum_db::Tx<'_>, enabled: bool) -> Result<()> {
+    register_schemas_global()?;
     store::seed_install(tx).await?;
     let manifest = manifest()?;
     datum_module::install(tx, &manifest, enabled).await?;

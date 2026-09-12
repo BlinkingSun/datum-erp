@@ -4,7 +4,6 @@
 
 use datum_core::LocationId;
 use datum_db::Tx;
-use datum_events::SchemaRegistry;
 use serde_json::{Value, json};
 
 use crate::domain::{CreateLocation, ListFilter, Location, LocationTreeNode, UpdateLocation};
@@ -161,9 +160,8 @@ pub async fn deactivate_location(
     tx: &mut Tx<'_>,
     id: LocationId,
     version: i64,
-    registry: &SchemaRegistry,
 ) -> Result<Location> {
-    store::deactivate(tx, id, version, registry).await
+    store::deactivate(tx, id, version).await
 }
 
 /// Map module errors to HTTP-style codes for server-slice.

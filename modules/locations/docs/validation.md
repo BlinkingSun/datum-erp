@@ -13,5 +13,6 @@ Executable tests (commit mode, `DATUM_REQUIRE_PG=1`):
 - `http_manifest_binds_view_and_edit`
 - `list_paginates_by_cursor`
 - `list_tree_filters_inactive_by_default`
+- `deactivate_after_plain_install`
 
 Run: `cargo test -p datum-mod-locations`
