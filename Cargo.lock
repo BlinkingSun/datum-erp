@@ -442,6 +442,7 @@ dependencies = [
  "proptest",
  "rust_decimal",
  "serde",
+ "serde_json",
  "thiserror",
  "trybuild",
  "uuid",
