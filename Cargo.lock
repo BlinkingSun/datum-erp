@@ -710,6 +710,7 @@ dependencies = [
 name = "datum-uom"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "datum-audit",
  "datum-core",
  "datum-db",
@@ -720,6 +721,8 @@ dependencies = [
  "sqlx",
  "thiserror",
  "tokio",
+ "trybuild",
+ "uuid",
 ]
 
 [[package]]
