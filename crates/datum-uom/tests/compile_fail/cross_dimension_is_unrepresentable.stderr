@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+  --> tests/compile_fail/cross_dimension_is_unrepresentable.rs:19:34
+   |
+19 |     let _ = catalog.convert(qty, lb, &ctx);
+   |                     -------      ^^ expected `UnitRef<LengthDim>`, found `UnitRef<MassDim>`
+   |                     |
+   |                     arguments to this method are incorrect
+   |
+   = note: expected struct `UnitRef<LengthDim>`
+              found struct `UnitRef<MassDim>`
+note: method defined here
+  --> $WORKSPACE/crates/datum-core/src/convert.rs
+   |
+   |     fn convert<D: Dimension>(
+   |        ^^^^^^^

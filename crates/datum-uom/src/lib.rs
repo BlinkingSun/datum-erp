@@ -1,53 +1,52 @@
-//! Kernel units of measure (stub API; Wave 2 fills the engine).
+//! Kernel units of measure: catalog, conversion engine, and stock boundary helper.
 
-use serde::{Deserialize, Serialize};
+#![cfg_attr(test, allow(unused_crate_dependencies))]
 
-/// Crate error.
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum Error {
-    /// Not implemented.
-    #[error("unimplemented")]
-    Unimplemented,
-    /// Core error.
-    #[error(transparent)]
-    Core(#[from] datum_core::Error),
-    /// Database error.
-    #[error(transparent)]
-    Db(#[from] datum_db::Error),
-}
+use datum_audit as _;
+use serde as _;
 
-/// Crate result alias.
-pub type Result<T> = core::result::Result<T, Error>;
+mod catalog;
+mod error;
+mod pin;
+mod policy;
+mod stock;
 
-/// Marker so serde stays linked in the stub.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct UomStub;
+pub use catalog::{UomCatalog, load_catalog, split_with_policy};
+pub use error::{Error, Result};
+pub use pin::pin_lot_factor;
+pub use policy::{Operation, apply_rounding_policy};
+pub use stock::{StockConversion, to_stock};
 
-/// Embedded placeholder migrator.
+pub use datum_core::{
+    ConversionContext, Converted, DimensionKind, Rounding, UnitCatalog, UnitConverter, UnitId,
+};
+
+/// Embedded migrator (`placeholder` + `0001_uom`).
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
-/// Convert a quantity to another unit. Always unimplemented in the stub.
-pub fn convert(
-    _qty: datum_core::AnyQuantity,
-    _to: datum_core::UnitId,
-) -> Result<datum_core::AnyQuantity> {
-    let _ = rust_decimal::Decimal::ZERO;
-    let _ = core::any::type_name::<datum_audit::Error>();
-    Err(Error::Unimplemented)
+/// Load a unit id from the catalog (read pool).
+pub async fn load_unit(pool: &datum_db::Pool, id: UnitId) -> Result<UnitId> {
+    let row: Option<(i64,)> = sqlx::query_as("SELECT id FROM uom.unit WHERE id = $1")
+        .bind(id.0)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| Error::Db(e.into()))?;
+    row.map(|(id,)| UnitId(id)).ok_or(Error::UnknownUnit(id))
 }
 
-/// Load a unit from the catalog.
-pub async fn load_unit(
-    _pool: &datum_db::Pool,
-    _id: datum_core::UnitId,
-) -> Result<datum_core::UnitId> {
-    Err(Error::Unimplemented)
+/// Convenience convert using a loaded catalog (same as [`UnitConverter::convert`]).
+pub fn convert<D: datum_core::Dimension>(
+    catalog: &UomCatalog,
+    qty: datum_core::Quantity<D>,
+    to: datum_core::UnitRef<D>,
+    ctx: &ConversionContext,
+) -> core::result::Result<Converted<D>, datum_core::QuantityError> {
+    catalog.convert(qty, to, ctx)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{Error, MIGRATOR};
     use proptest::prelude::*;
     use tokio as _;
 
@@ -67,6 +66,8 @@ mod tests {
     }
 
     proptest! {
+        #![proptest_config(ProptestConfig { cases: 256, .. ProptestConfig::default() })]
+
         #[test]
         fn unimplemented_display_is_stable(_x in 0u8..4) {
             prop_assert!(!Error::Unimplemented.to_string().is_empty());
