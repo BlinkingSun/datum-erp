@@ -1,0 +1,33 @@
+[package]
+name = "datum-documents"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Controlled documents (stub API)."
+build = "build.rs"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+test-utils = []
+
+[dependencies]
+datum-core.workspace = true
+datum-db.workspace = true
+datum-audit.workspace = true
+datum-identity.workspace = true
+datum-numbering.workspace = true
+datum-statemachine.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+datum-test.workspace = true
+tokio.workspace = true
+proptest.workspace = true
+

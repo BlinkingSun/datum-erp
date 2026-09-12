@@ -1,0 +1,30 @@
+[package]
+name = "datum-db"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Kernel persistence: pool, sealed transaction, migrations."
+build = "build.rs"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+test-utils = []
+
+[dependencies]
+datum-core.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+datum-core.workspace = true
+datum-test.workspace = true
+tokio.workspace = true
+proptest.workspace = true
+sqlx.workspace = true

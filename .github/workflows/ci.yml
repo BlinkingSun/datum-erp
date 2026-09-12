@@ -1,0 +1,61 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Remote Actions stay off; the orchestrator runs this locally on three nodes first.
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: just ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: extractions/setup-just@v2
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - name: just ci
+        run: just ci
+
+  ci-db:
+    name: just ci-db
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: datum_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -p 5432"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATUM_REQUIRE_PG: "1"
+      DATUM_BOOTSTRAP_URL: postgres://127.0.0.1:5432/postgres?sslmode=disable
+      DATUM_DATABASE_URL: postgres://datum_app@127.0.0.1:5432/datum_test?sslmode=disable
+      DATUM_MIGRATE_DATABASE_URL: postgres://datum_migrate@127.0.0.1:5432/datum_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: extractions/setup-just@v2
+      - name: Install ripgrep and postgresql-client
+        run: sudo apt-get update && sudo apt-get install -y ripgrep postgresql-client
+      - name: just db-reset then just ci-db
+        run: just db-reset && just ci-db
