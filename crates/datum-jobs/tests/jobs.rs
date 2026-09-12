@@ -4,8 +4,10 @@
 
 mod common;
 
-use std::sync::Arc;
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread::ThreadId;
 use std::time::Duration;
 
 use datum_core::Identifier;
@@ -51,7 +53,8 @@ impl JobHandler for FailHandler {
 }
 
 struct ComputeThreads {
-    max_threads: Arc<AtomicU32>,
+    thread_ids: Arc<Mutex<HashSet<ThreadId>>>,
+    hold_at_half: Arc<Mutex<Option<std::sync::mpsc::Receiver<()>>>>,
 }
 
 impl JobHandler for ComputeThreads {
@@ -62,25 +65,21 @@ impl JobHandler for ComputeThreads {
     ) -> std::pin::Pin<
         Box<dyn std::future::Future<Output = datum_jobs::Result<HandlerOutcome>> + Send + '_>,
     > {
-        let max_threads = self.max_threads.clone();
+        let thread_ids = self.thread_ids.clone();
+        let hold_at_half = self.hold_at_half.clone();
         Box::pin(async move {
             let work = Box::new(move |prog: Progress| {
                 let n = std::thread::available_parallelism()
                     .map(|p| p.get())
                     .unwrap_or(2)
-                    .min(8);
-                let active = Arc::new(AtomicU32::new(0));
+                    .clamp(2, 8);
                 std::thread::scope(|s| {
-                    for i in 0..n {
+                    for _ in 0..n {
                         s.spawn(|| {
-                            let cur = active.fetch_add(1, Ordering::SeqCst) + 1;
-                            let prev = max_threads.load(Ordering::SeqCst);
-                            if cur > prev {
-                                max_threads.store(cur, Ordering::SeqCst);
-                            }
-                            std::thread::sleep(Duration::from_millis(80));
-                            active.fetch_sub(1, Ordering::SeqCst);
-                            let _ = i;
+                            thread_ids
+                                .lock()
+                                .expect("thread id set")
+                                .insert(std::thread::current().id());
                         });
                     }
                 });
@@ -89,8 +88,12 @@ impl JobHandler for ComputeThreads {
                     .build()
                     .expect("rt");
                 rt.block_on(prog.report(50, "half"))?;
+                let rx = hold_at_half.lock().expect("hold gate").take();
+                if let Some(rx) = rx {
+                    let _ = rx.recv();
+                }
                 rt.block_on(prog.report(100, "done"))?;
-                Ok(json!({ "threads": max_threads.load(Ordering::SeqCst) }))
+                Ok(json!({ "threads": thread_ids.lock().expect("thread id set").len() }))
             });
             Ok(HandlerOutcome::Compute(work))
         })
@@ -339,12 +342,15 @@ async fn compute_job_uses_multiple_threads_and_reports_progress() {
     let write = write_pool(&db);
     let ctx = user_ctx();
     let actor = service_actor();
-    let max_threads = Arc::new(AtomicU32::new(0));
+    let thread_ids = Arc::new(Mutex::new(HashSet::new()));
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let hold_at_half = Arc::new(Mutex::new(Some(release_rx)));
     let reg = Registry::new();
     reg.register(
         "test.compute",
         ComputeThreads {
-            max_threads: max_threads.clone(),
+            thread_ids: thread_ids.clone(),
+            hold_at_half,
         },
     );
 
@@ -360,32 +366,41 @@ async fn compute_job_uses_multiple_threads_and_reports_progress() {
     .expect("enqueue");
     tx.commit().await.expect("commit");
 
-    let status_task = tokio::spawn({
-        let pool = db.app_pool().clone();
-        async move {
-            for _ in 0..20 {
-                if let Ok(Some(st)) = status(&pool, job_id).await
-                    && st.progress_pct >= 50
-                {
-                    return st.progress_pct;
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-            0
-        }
+    let write_for_tick = write.clone();
+    let tick_task = tokio::spawn(async move {
+        Worker::new(reg)
+            .idle(Duration::from_millis(1))
+            .tick(&write_for_tick, actor)
+            .await
     });
 
-    Worker::new(reg)
-        .idle(Duration::from_millis(1))
-        .tick(&write, actor)
-        .await
-        .expect("compute");
+    let mut mid = 0i16;
+    loop {
+        if let Ok(Some(st)) = status(db.app_pool(), job_id).await
+            && st.progress_pct >= 50
+        {
+            mid = st.progress_pct;
+            assert_eq!(
+                st.state,
+                JobState::Running,
+                "mid-run progress must persist before compute finishes"
+            );
+            assert_eq!(st.progress_note.as_deref(), Some("half"));
+            break;
+        }
+        if tick_task.is_finished() {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    let _ = release_tx.send(());
+    tick_task.await.expect("tick join").expect("compute");
 
-    let mid = status_task.await.expect("status task");
     assert!(mid >= 50, "progress should advance during compute");
+    let n_threads = thread_ids.lock().expect("thread id set").len();
     assert!(
-        max_threads.load(Ordering::SeqCst) >= 2,
-        "expected parallel threads"
+        n_threads >= 2,
+        "expected distinct compute thread ids, got {n_threads}"
     );
     let st = status(db.app_pool(), job_id)
         .await
