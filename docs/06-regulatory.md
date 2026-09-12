@@ -68,13 +68,16 @@ the procedures and specifications that are current on the manufacturing floor
 
 ### 1.3 21 CFR Part 821
 
-Part 821 is device tracking. Within 3 working days of an FDA request, before
-distribution to a patient, the manufacturer must name the holder and the
-location of the device; within 10 working days after distribution or
-implantation, it must produce UDI, lot, batch, model or serial, ship date,
+Part 821 is device tracking. Both clocks in 21 CFR 821.25(a) start at a
+request from FDA (`research/background/regulatory.md` §7.2, lines 653–654,
+quoting 821.25(a)). Within 3 working days of a request from FDA, prior to
+the distribution of a tracked device to a patient, the manufacturer must
+name the holder and the location of the device. Within 10 working days of a
+request from FDA, for tracked devices that are intended for use by a single
+patient over the life of the device, after distribution to or implantation
+in a patient, it must produce UDI, lot, batch, model or serial, ship date,
 patient identity including SSN where available, prescribing physician, and
-explant or death date (`research/background/regulatory.md` §7.2, quoting
-821.25(a)). Records are kept for the useful life of each tracked device
+explant or death date. Records are kept for the useful life of each tracked device
 (821.60). Residency is a regulation, not a preference: **"Records required to
 be kept by this part shall be kept in a centralized point for each manufacturer
 or distributor within the United States"** (`research/background/regulatory.md`
@@ -129,18 +132,20 @@ printing clause language in a customer deliverable
 
 One row per requirement `research/background/regulatory.md` §1 identified as
 unretrofittable. §1.1 numbers fifteen (the original four plus eleven more). §1.0
-adds four that fail the same test. A module can add a process. A module cannot
-add a property to history (`PLAN.md` §6a).
+adds four that fail the same test, plus the catalogue-number no-reuse caveat in
+§1.0.6. A module can add a process. A module cannot add a property to history
+(`PLAN.md` §6a).
 
 Every "where it lives" cell names a `PLAN.md` §6 invariant number, a crate in
-`PLAN.md` §5, or both. A row whose home is a Wave 2b crate or a later module is
-marked in **Status**. Those rows are not in the slice.
+`PLAN.md` §5, a Wave 2s module named in `PLAN.md` §3, or both. A row whose home
+is a Wave 2b crate or a later module is marked in **Status**. Those rows are
+not in the slice.
 
 | Requirement | Citation | Where it lives | Status |
 |---|---|---|---|
 | Append-only audit trail, written independently of the operator, per-record queryable, reason captured on the write path | `research/background/regulatory.md` §1.1 item 1, §2.3 (11.10(e); preamble comments 73, 76) | inv 3; `datum-audit` | kernel now |
 | Electronic signature as a first-class object bound to a record version | `research/background/regulatory.md` §1.1 item 2, §§2.6–2.7 (11.50, 11.70) | inv 14, 15; `datum-esign` (implements `SignatureGate`) | Wave 2b |
-| Record immutability and a reconstructible version chain | `research/background/regulatory.md` §1.1 item 3 (11.10(b)–(c)) | inv 16 (no hard delete of a record); `datum-documents` (version chain) | Wave 2b |
+| Record immutability and a reconstructible version chain | `research/background/regulatory.md` §1.1 item 3 (11.10(b)–(c)) | inv 16 (no hard delete of a record); `datum-documents` (version chain) | kernel now (inv 16); Wave 2b (version chain) |
 | Lot- or unit-aware append-only ledger with genealogy edges | `research/background/regulatory.md` §1.1 item 4 (ISO 7.5.1, 7.5.9; 820.35(c); 806.10(c)(9)–(11); 821.25(a)) | inv 1, 2, 10; `datum-ledger` | kernel now |
 | Server-side time; client clocks never stored as time of record | `research/background/regulatory.md` §1.1 item 5 (11.10(e) "computer-generated, time-stamped") | inv 4; `datum-audit`, `datum-db` | kernel now |
 | Identity lifecycle: no deletion, no identifier reuse | `research/background/regulatory.md` §1.1 item 6 (11.100(a), 11.300(a)) | inv 13; `datum-identity` | kernel now |
@@ -156,7 +161,8 @@ marked in **Status**. Those rows are not in the slice.
 | Package hierarchy (each, inner, case, pallet, contained quantity, parent link) | `research/background/regulatory.md` §1.0.2 (830.50(b) is the DI rule; the hierarchy is inventory) | inv 11; consumed by `datum-ledger` | kernel now. DI-per-package-level is module later |
 | Lot and serial identifiers constrained at generation: `[0-9A-Z-]`, at most 20 characters | `research/background/regulatory.md` §1.0.4; three sources in §4.1 below | inv 9; `datum-numbering` | kernel now |
 | Expiry stored with a precision, never a bare date | `research/background/regulatory.md` §1.0.5; `research/background/regulatory-udi-aidc.md` §E (`yymmd0`, `YYMM00`) | inv 12 | kernel now |
-| Stable UDI attachment point on lot, serial, and shipment records | `research/background/regulatory.md` §1.0.7 (820.35(c)) | inv 10 (`LotId` / `SerialId` in `datum-core`); module-populated column via `datum-customfields` | kernel now (the records); Wave 2b (custom fields); module later (UDI) |
+| Catalogue number (the identifier the UDI module derives DIs from) is no-edit and no-reuse | `research/background/regulatory.md` §1.0.6 (830.40(c)) | Item-master number (`PLAN.md` §3 Wave 2s `mod-items`). Compressed PCN is a module field. | kernel field with the item record (Wave 2s); compressed PCN is module later |
+| Stable UDI attachment point on lot, serial, and shipment records | `research/background/regulatory.md` §1.0.7 (820.35(c)) | Native nullable kernel column on lot, serial, and shipment records (`PLAN.md` §3 Wave 2s `mod-lots`; shipping later). Never `datum-customfields`. | kernel column with the record (Wave 2s); population = module later |
 
 Invariant 19 (gap-free regulated document numbers; `datum-numbering`) is not in
 the §1 list. It is a D3 obligation (`research/decisions/audit-persistence.md` §8)
@@ -270,7 +276,7 @@ on a shared work-centre tablet next to a mill turning titanium bone screws is no
 a component "designed to be used only by the individual"
 (`research/decisions/audit-persistence.md` §9; ADR 0005). Relaxing later is a
 policy flag. Tightening later, after a customer has validated the loose
-behavior, is not.
+behaviour, is not.
 
 ### 3.5 Signature/record linking
 
@@ -281,12 +287,13 @@ transferred to falsify an electronic record by ordinary means. Preamble comment
 alone are not sufficient (`research/background/regulatory.md` §2.7).
 
 The design: sign a content hash of the exact serialized record version; store the
-hash on the signature; make verification a first-class operation. `SignatureToken`
+hash on the signature; make verification a first-class operation
+(`research/decisions/audit-persistence.md` §9; ADR 0005). `SignatureToken`
 carries `record_content_hash` (SHA-256 of the canonical record bytes at
 `record.version`). `datum-esign` loads the row, confirms both identification
 components at mint, the stored hash, the live record at that version, the
 permission snapshot taken at mint, the meaning, and the single-use claim
-(ADR 0005; `research/decisions/audit-persistence.md` §9; Wave 2b). The
+(DECISION D-W1-4, `research/decisions/traits-profiles.md` Q2; Wave 2b). The
 statemachine, not the module author, calls `verify` on every `Required` edge
 and fails closed. A release build whose enabled set contains a `Required` edge
 while `NoSignatures` is bound fails at startup.
@@ -401,14 +408,17 @@ through storage and the API.
 devices. Complaint records, servicing records, correction/removal reports, MDR
 Block D, and device tracking all require UDI **alongside** lot and serial
 (`research/background/regulatory.md` §1.0.7). Lot, serial, and shipment records
-carry a stable, module-populated attachment point so the UDI module does not
-have to alter the ledger. The column is kernel now. Populating it, allocating
-DIs, submitting to GUDID, and encoding symbols are module later.
+carry a native, nullable, module-populated kernel column so the UDI module does
+not have to alter the ledger. The column is created with those records
+(`PLAN.md` §3 Wave 2s `mod-lots`; shipping later). It is never a
+`datum-customfields` field. Populating it, allocating DIs, submitting to GUDID,
+and encoding symbols are the Phase 6 UDI module, later.
 
-One catalog number the UDI module derives DIs from is not recycled. 830.40(c)
+One catalogue number the UDI module derives DIs from is not recycled. 830.40(c)
 forbids reassigning a DI (`research/background/regulatory.md` §1.0.6). HIBCC's
-compressed PCN is a module field; the source catalog number is a core field
-with a no-edit, no-reuse invariant.
+compressed PCN is a module field; the source catalogue number is a core field
+on the item master (`PLAN.md` §3 Wave 2s `mod-items`) with a no-edit, no-reuse
+invariant.
 
 HIBCC Basic UDI-DI currently has two conflicting formats on Commission servers
 (`research/background/regulatory-udi-aidc.md` §B). That question is open. This
@@ -448,7 +458,7 @@ shop this is.
   the change, who made it, when, and against what approval. The configuration
   manifest also lists every state-machine edge's `SignatureDeclaration` —
   `Required` and `NotRequired` with reasons — in both installation profiles
-  (`docs/03-module-system.md` §8; PLAN §1a).
+  (DECISION D-W1-4, `research/decisions/traits-profiles.md` Q2 (c)).
 - **Per-module validation documents.** Each first-party module ships intended
   use, requirements, and executable test protocols
   (`docs/03-module-system.md` §8). A customer validating only the modules they
@@ -486,7 +496,7 @@ review that makes tamper evidence mean something
 deployment cadence is not their validation cadence
 (`research/background/regulatory.md` §6.5).
 
-Customer-specific behavior lives in declarative configuration, never in
+Customer-specific behaviour lives in declarative configuration, never in
 bespoke code shipped to one customer (`PLAN.md` §6b inv 18;
 `research/background/regulatory.md` §1.1 item 15). Shipping custom code moves
 that installation into a stricter validation category permanently, including
