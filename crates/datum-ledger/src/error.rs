@@ -60,6 +60,9 @@ pub enum Error {
     /// Named group is missing.
     #[error("unknown posting group")]
     UnknownGroup,
+    /// `parent_group_id` does not reference an existing `ledger.posting_group` row.
+    #[error("ledger: parent_group_id must reference an existing posting group")]
+    ParentMustExist,
     /// A required registry row is missing.
     #[error("unknown registry row: {0}")]
     UnknownRegistry(String),
@@ -104,6 +107,9 @@ fn map_db(err: datum_db::Error) -> Error {
             let message = sqlx_err.to_string();
             if let Some(mapped) = map_sqlstate(&code, &message) {
                 return mapped;
+            }
+            if code == "23503" && message.contains("parent_group_id") {
+                return Error::ParentMustExist;
             }
             Error::Db(err)
         }

@@ -52,6 +52,7 @@ async fn reverse_migration_tested() {
     const DOWN: &[&str] = &[
         "DROP TRIGGER IF EXISTS consumption_group_invariants ON ledger.consumption",
         "DROP TRIGGER IF EXISTS posting_group_invariants ON ledger.posting",
+        "DROP FUNCTION IF EXISTS ledger.children_of(uuid)",
         "DROP FUNCTION IF EXISTS ledger.has_quantity_at(uuid)",
         "DROP FUNCTION IF EXISTS ledger.has_postings(uuid)",
         "DROP FUNCTION IF EXISTS ledger.enforce_group_invariants()",
@@ -118,6 +119,21 @@ async fn migrate_down_then_up() {
         "0002 must create ledger.has_postings"
     );
     assert!(query_seam_fn_exists(db.migrate_pool(), "has_quantity_at").await);
+    assert!(
+        query_seam_fn_exists(db.migrate_pool(), "children_of").await,
+        "0003 must create ledger.children_of"
+    );
+    let parent_col: bool = sqlx::query_scalar(
+        "SELECT EXISTS (
+            SELECT 1 FROM information_schema.columns
+             WHERE table_schema = 'ledger' AND table_name = 'posting_group'
+               AND column_name = 'parent_group_id'
+         )",
+    )
+    .fetch_one(db.migrate_pool())
+    .await
+    .expect("parent_group_id column");
+    assert!(parent_col, "0003 must add posting_group.parent_group_id");
     let definer: bool = sqlx::query_scalar(
         "SELECT p.prosecdef FROM pg_proc p
           JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -156,6 +172,10 @@ async fn migrate_down_then_up() {
         "0002 down must drop ledger.has_postings"
     );
     assert!(!query_seam_fn_exists(db.migrate_pool(), "has_quantity_at").await);
+    assert!(
+        !query_seam_fn_exists(db.migrate_pool(), "children_of").await,
+        "0003 down must drop ledger.children_of"
+    );
 
     migrator.run(db.migrate_pool()).await.expect("up again");
     assert!(query_seam_fn_exists(db.migrate_pool(), "has_postings").await);

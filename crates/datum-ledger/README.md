@@ -9,7 +9,7 @@ and the UoM rounding-residual home. Implements CONTRACT §6.2.
 
 - `AllocationEdge` / `Layer` / `SQL_OPEN_LAYERS` / `allocate_withdrawal` / `load_open_layers`
 - `sql_reads_consuming_value_rows` / `take_query_log` — allocator SQL probes
-- `GroupBuilder` — `PostingSink` implementation (header, contribute, finalize)
+- `GroupBuilder` — `PostingSink` implementation (header, contribute, finalize, `parent`)
 - `UOM_CONVERSION_RESIDUAL` — reason code for conversion dust
 - `CostMethod` / `Measure` — costing method and QUANTITY/VALUE measure
 - `group_kind_sql` / `group_kind_from_sql` / `group_kind_variants`
@@ -23,11 +23,11 @@ and the UoM rounding-residual home. Implements CONTRACT §6.2.
 - `bind_tx` / `post` / `commit` — bind sink to xid; insert header/postings/consumption; commit with poison check
 - `BalanceSlice` / `apply_group` / `balance_at` / `rebuild` / `verify_projection`
 - `StockItem` / `load_stock_item` / `upsert_location` / `upsert_stock_item`
-- `has_postings` / `has_quantity_at` — module-facing query seam (see table)
+- `has_postings` / `has_quantity_at` / `children_of` — module-facing query seam (see table)
 - `post_uom_conversion_residual` / `post_uom_residual_flush`
 - `reverse` — exact reversing group
 - `GroupId` — `ledger.posting_group.group_id`
-- `MIGRATOR` — `placeholder` + `0001_ledger` + `0002_query_seam`
+- `MIGRATOR` — `placeholder` + `0001_ledger` + `0002_query_seam` + `0003_parent_group_link`
 - `#[cfg(feature = "test-utils")]` `test_inject_quantity_without_contributed_mark` /
   `test_poison_is_marked`
 
@@ -37,8 +37,9 @@ and the UoM rounding-residual home. Implements CONTRACT §6.2.
 |---|---|---|
 | `has_postings` | `async fn has_postings(tx: &mut Tx<'_>, item_id: ItemId) -> Result<bool>` | `ledger.posting` via `ledger.has_postings(uuid)` |
 | `has_quantity_at` | `async fn has_quantity_at(tx: &mut Tx<'_>, location_id: LocationId) -> Result<bool>` | fold of `ledger.posting` (QUANTITY, net `> 0` per slice) via `ledger.has_quantity_at(uuid)` |
+| `children_of` | `async fn children_of(tx: &mut Tx<'_>, group_id: GroupId) -> Result<Vec<GroupId>>` | `ledger.posting_group.parent_group_id` via `ledger.children_of(uuid)` |
 
-Both SQL helpers are **invoker-rights** (not `SECURITY DEFINER`): `datum_app` already has
+All three SQL helpers are **invoker-rights** (not `SECURITY DEFINER`): `datum_app` already has
 `SELECT` on `ledger.posting`, and `audit.require_context()` refuses a no-actor call with
 SQLSTATE `42501`. `EXECUTE` is granted only to `datum_app` (`REVOKE` from `PUBLIC`).
 
@@ -50,6 +51,14 @@ SQLSTATE `42501`. `EXECUTE` is granted only to `datum_app` (`REVOKE` from `PUBLI
   `transient.balance_projection`, `transient.layer_projection` (transient)
 - `00000000000002_query_seam` — `ledger.has_postings(uuid)`, `ledger.has_quantity_at(uuid)`
   (invoker-rights; `GRANT EXECUTE` to `datum_app` only)
+- `00000000000003_parent_group_link` — `posting_group.parent_group_id` → `posting_group(group_id)`;
+  `ledger.children_of(uuid)` (invoker-rights; `GRANT EXECUTE` to `datum_app` only)
+
+`parent_group_id` is lineage metadata only. Deferred trigger `ledger.enforce_group_invariants` still
+loads the group header and folds `ledger.posting` / `ledger.consumption` for that `group_id`; it
+does not read `parent_group_id`, so P0–P4 behaviour is unchanged. `transient.balance_projection` and
+`transient.layer_projection` are rebuilt from postings and consumption edges only, so the fold is
+unchanged as well.
 
 ## Tests (`tests/`)
 
@@ -69,6 +78,8 @@ Trigger/canary: `zl000_group_has_no_header` … `zl007_layers_not_restored`,
 Query seam: `has_postings_false_then_true_after_post`,
 `has_quantity_at_false_then_true_after_receipt_then_false_after_issue`,
 `has_postings_no_actor_is_refused` (42501 on `app_pool` without `Tx::begin`).
+Parent link: `residual_group_links_to_parent`, `parent_must_exist`,
+`children_of_no_actor_is_refused`.
 Addendum: `explicit_consumption_skips_auto_allocation`, `unfinalized_*_poisons`,
 `group_builder_drop_does_not_poison_without_contributed_mark`, `poisoned_transaction_cannot_commit`,
 `standard_costing_posts_ppv`, `balance_at_is_lot_and_serial_aware`, `reverse_kind_from_target_not_sink`,

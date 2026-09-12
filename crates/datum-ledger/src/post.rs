@@ -60,6 +60,7 @@ pub async fn commit(mut tx: Tx<'_>, sinks: &[&GroupBuilder]) -> Result<()> {
 struct Snapshot {
     kind: GroupKind,
     header: datum_core::PostingGroupHeader,
+    parent_group_id: Option<Identifier>,
     quantities: Vec<(PostingHandle, QuantityPosting)>,
     values: Vec<(PostingHandle, ValuePosting)>,
     consumptions: Vec<datum_core::ConsumptionPosting>,
@@ -76,6 +77,7 @@ fn snapshot(builder: &GroupBuilder) -> Result<Snapshot> {
     Ok(Snapshot {
         kind: inner.kind,
         header: inner.header.clone(),
+        parent_group_id: inner.parent_group_id,
         quantities: inner.quantities.clone(),
         values: inner.values.clone(),
         consumptions: inner.consumptions.clone(),
@@ -98,9 +100,9 @@ async fn insert_finalized(tx: &mut Tx<'_>, builder: &GroupBuilder) -> Result<Ide
         sqlx::query(
             "INSERT INTO ledger.posting_group (
                  group_id, kind, actor_id, source_kind, source_id, work_order_id,
-                 reason_code, reverses_group_id, reverses_kind
+                 reason_code, reverses_group_id, reverses_kind, parent_group_id
              ) VALUES (
-                 $1, $2::ledger.group_kind, $3, $4, $5, $6, $7, $8, $9::ledger.group_kind
+                 $1, $2::ledger.group_kind, $3, $4, $5, $6, $7, $8, $9::ledger.group_kind, $10
              )",
         )
         .bind(group_id.as_uuid())
@@ -111,7 +113,8 @@ async fn insert_finalized(tx: &mut Tx<'_>, builder: &GroupBuilder) -> Result<Ide
         .bind(snap.header.work_order_id.map(|i| i.as_uuid()))
         .bind(snap.header.reason_code.as_deref())
         .bind(snap.header.reverses_group_id.map(|i| i.as_uuid()))
-        .bind(reverses_kind.as_deref()),
+        .bind(reverses_kind.as_deref())
+        .bind(snap.parent_group_id.map(|i| i.as_uuid())),
     )
     .await?;
 

@@ -3,12 +3,12 @@
 //! Modules write these registries through this interface, never by touching the
 //! tables directly (SPEC Owns).
 
-use datum_core::{Boundary, CurrencyId, ItemId, LocationId, Money, UnitId};
+use datum_core::{Boundary, CurrencyId, Identifier, ItemId, LocationId, Money, UnitId};
 use datum_db::Tx;
 use rust_decimal::Decimal;
 
 use crate::enums::{CostMethod, boundary_sql, cost_method_sql};
-use crate::{Error, Result};
+use crate::{Error, GroupId, Result};
 
 /// Insert or replace an item's stock measure and cost method.
 pub async fn upsert_stock_item(
@@ -102,6 +102,20 @@ pub async fn has_postings(tx: &mut Tx<'_>, item_id: ItemId) -> Result<bool> {
         .fetch_one(sqlx::query_as("SELECT ledger.has_postings($1)").bind(item_id.as_uuid()))
         .await?;
     Ok(row.0)
+}
+
+/// Child posting groups whose `parent_group_id` is `group_id` (R-2s-6).
+///
+/// Reads through `ledger.children_of(uuid)`. Requires a sealed [`Tx`]
+/// (no actor → SQLSTATE `42501`).
+pub async fn children_of(tx: &mut Tx<'_>, group_id: GroupId) -> Result<Vec<GroupId>> {
+    let rows: Vec<(uuid::Uuid,)> = tx
+        .fetch_all(sqlx::query_as("SELECT * FROM ledger.children_of($1)").bind(group_id.as_uuid()))
+        .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(id,)| Identifier::from_uuid(id))
+        .collect())
 }
 
 /// Whether any quantity slice at `location_id` currently nets above zero.

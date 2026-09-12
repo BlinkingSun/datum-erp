@@ -4,8 +4,8 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 use datum_core::{
-    GroupKind, PostingError, PostingGroupHeader, PostingHandle, PostingIntent, PostingSink,
-    QuantityPosting, ValueAccount, ValuePosting,
+    GroupKind, Identifier, PostingError, PostingGroupHeader, PostingHandle, PostingIntent,
+    PostingSink, QuantityPosting, ValueAccount, ValuePosting,
 };
 
 use crate::poison;
@@ -23,6 +23,7 @@ pub struct GroupBuilder {
 pub(crate) struct Inner {
     pub kind: GroupKind,
     pub header: PostingGroupHeader,
+    pub parent_group_id: Option<Identifier>,
     pub next: u32,
     pub quantity_handles: HashSet<u32>,
     pub quantities: Vec<(PostingHandle, QuantityPosting)>,
@@ -42,6 +43,7 @@ impl GroupBuilder {
             inner: Arc::new(Mutex::new(Inner {
                 kind,
                 header,
+                parent_group_id: None,
                 next: 0,
                 quantity_handles: HashSet::new(),
                 quantities: Vec::new(),
@@ -57,6 +59,14 @@ impl GroupBuilder {
     /// Bind to `pg_current_xact_id()` so trait-path Drop poisons the transaction.
     pub fn set_txid(&mut self, txid: String) {
         self.txid = Some(txid);
+    }
+
+    /// Link this group to an already-posted parent (R-2s-6 residual / variance groups).
+    pub fn parent(&mut self, group_id: Identifier) -> &mut Self {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.parent_group_id = Some(group_id);
+        }
+        self
     }
 
     /// True when this sink received contributions and was not finalized.

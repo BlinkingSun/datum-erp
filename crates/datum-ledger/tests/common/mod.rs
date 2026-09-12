@@ -110,6 +110,7 @@ pub fn pg_code_ledger(err: &datum_ledger::Error) -> String {
         datum_ledger::Error::ReversalNotExact => "ZL006".into(),
         datum_ledger::Error::LayersNotRestored => "ZL007".into(),
         datum_ledger::Error::AlreadyReversed => "23505".into(),
+        datum_ledger::Error::ParentMustExist => "23503".into(),
         datum_ledger::Error::Db(e) => pg_code_db(e),
         other => other.to_string(),
     }
