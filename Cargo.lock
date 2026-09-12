@@ -883,6 +883,7 @@ dependencies = [
  "datum-audit",
  "datum-core",
  "datum-db",
+ "datum-ledger",
  "datum-test",
  "proptest",
  "rust_decimal",
