@@ -66,6 +66,7 @@ Wave names and contents match `PLAN.md` v2 §3.
 | | |
 |---|---|
 | **What lands** | UI shell and tokens, item master, shop floor terminal, genealogy trace — all against the slice API, under both profiles. Tauri deferred per ADR 0009. |
+| **What it proves** | The office and shop-floor screens run under both `regulated-device` and `plain-shop` against the same Wave 2s slice API. Still not catalog Phase 3 breadth. |
 | **What a shop can do** | Touch-first shop floor and office screens for the **slice** scope only. Still not Phase 3 "run the shop on" breadth. |
 | **Gate** | Owner visual approval on mockups (`PLAN.md` §4) before interface lanes start; phase-end API test under both profiles (`PLAN.md` §1a). |
 
@@ -153,7 +154,7 @@ tie movements to money without a parallel inventory truth.
 **Proves:** Regulated record properties and quality workflows (doc control, inspection,
 NCR, CAPA, genealogy as product, calibration, training, change control, DHR/DMR) sit on
 the same database and ledger the shop already runs — the wedge commercial suites sell as
-a separate quality stack.
+a separate quality stack (`research/background/competitive-landscape.md` §7.2–§7.3).
 
 **Contains:** Catalog Phase 4 modules. Wave 2b kernel pieces (signatures, documents,
 print) are prerequisites; full Phase 4 surface is later work.
