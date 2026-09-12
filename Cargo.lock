@@ -600,6 +600,7 @@ dependencies = [
  "datum-identity",
  "datum-ledger",
  "datum-module",
+ "datum-statemachine",
  "datum-test",
  "datum-uom",
  "proptest",
