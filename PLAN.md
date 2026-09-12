@@ -581,6 +581,8 @@ Conventions every lane must follow:
   GitHub-shaped (a `postgres:17` service) and cannot run on nodes without docker. GitHub
   Actions stay **off** on every repository until those recipes are green on the MacBook, the
   NUC and the shop PC; the orchestrator enables them after a three-node green round.
+  **Enabled on the public repository 2026-09-12** after the first three-node green round
+  (main 0c945e6, batch 2.1). The private mirror keeps Actions off.
 
 ## 12. Repository and publication
 
