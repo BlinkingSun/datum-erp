@@ -294,14 +294,54 @@ async fn open_pool(url: &str) -> Result<PgPool, Error> {
         .await?)
 }
 
+fn is_sqlstate_55006(err: &sqlx::Error) -> bool {
+    err.as_database_error()
+        .and_then(|d| d.code())
+        .is_some_and(|c| c == "55006")
+}
+
 async fn create_database(bootstrap_url: &str, database: &str, template: &str) -> Result<(), Error> {
     let mut conn = connect_bootstrap(bootstrap_url).await?;
     let sql = format!("CREATE DATABASE {database} OWNER datum_owner TEMPLATE {template}");
-    sqlx::raw_sql(AssertSqlSafe(sql))
-        .execute(&mut conn)
-        .await
-        .map_err(|e| Error::Unavailable(format!("CREATE DATABASE {database}: {e}")))?;
-    Ok(())
+    const RETRY_CEILING: Duration = Duration::from_secs(5);
+    let mut slept = Duration::ZERO;
+    let mut backoff = Duration::from_millis(100);
+    let mut original_55006: Option<sqlx::Error> = None;
+
+    loop {
+        match sqlx::raw_sql(AssertSqlSafe(sql.clone()))
+            .execute(&mut conn)
+            .await
+        {
+            Ok(_) => return Ok(()),
+            Err(e) if is_sqlstate_55006(&e) => {
+                if original_55006.is_none() {
+                    original_55006 = Some(e);
+                }
+                if slept >= RETRY_CEILING {
+                    let e = original_55006.expect("55006 retry without stored error");
+                    return Err(Error::Unavailable(format!(
+                        "CREATE DATABASE {database}: {e}"
+                    )));
+                }
+                let wait = backoff.min(RETRY_CEILING.saturating_sub(slept));
+                if wait.is_zero() {
+                    let e = original_55006.expect("55006 retry without stored error");
+                    return Err(Error::Unavailable(format!(
+                        "CREATE DATABASE {database}: {e}"
+                    )));
+                }
+                tokio::time::sleep(wait).await;
+                slept += wait;
+                backoff = backoff.saturating_mul(2);
+            }
+            Err(e) => {
+                return Err(Error::Unavailable(format!(
+                    "CREATE DATABASE {database}: {e}"
+                )));
+            }
+        }
+    }
 }
 
 async fn drop_database(bootstrap_url: &str, database: &str) -> Result<(), Error> {
@@ -429,6 +469,35 @@ mod tests {
             "expected Unavailable, got {err}"
         );
         assert!(postgres_available().is_err());
+    }
+
+    #[tokio::test]
+    async fn clone_retries_while_template_is_in_use() {
+        if std::env::var("DATUM_REQUIRE_PG").ok().as_deref() == Some("1") {
+            require_postgres();
+        } else if let Err(_reason) = postgres_available() {
+            return;
+        }
+
+        let template = std::env::var("DATUM_TEST_TEMPLATE").expect("DATUM_TEST_TEMPLATE");
+        assert_safe_ident(&template).expect("template ident");
+        let migrate_url = required_url("DATUM_MIGRATE_DATABASE_URL").expect("migrate url");
+        let template_url = rewrite_database(&migrate_url, &template).expect("template url");
+
+        let hold = tokio::spawn(async move {
+            let conn = PgConnection::connect(&template_url)
+                .await
+                .expect("connect to template");
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            drop(conn);
+        });
+
+        let db = TestDb::case("clone_retry_hold")
+            .await
+            .expect("clone while template session is held");
+        hold.await.expect("hold task");
+
+        db.finish().await.expect("finish");
     }
 
     #[tokio::test]
