@@ -18,6 +18,7 @@ members = [
   "crates/datum-print",
   "crates/datum-module",
   "crates/datum-server",
+  "modules/*",
 ]
 
 [workspace.package]

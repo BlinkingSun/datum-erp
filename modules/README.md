@@ -1,0 +1,1 @@
+Wave 2s domain modules live here as one crate per directory under `modules/<name>/`. A module joins the workspace by existing at that path with its own `Cargo.toml`; no manual edit to the root `[workspace] members` list is required.
