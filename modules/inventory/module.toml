@@ -1,0 +1,104 @@
+[module]
+id = "mod-inventory"
+version = "0.1.0"
+name = "Inventory"
+description = "Receipts, issues, moves, adjustments, and cycle counts over the ledger"
+
+[dependencies]
+kernel = "^0.1"
+mod-items = "^0.1"
+mod-locations = "^0.1"
+mod-lots = "^0.1"
+
+[permissions]
+"inventory.view" = "View inventory documents and projections"
+"inventory.receive" = "Receive stock"
+"inventory.issue" = "Issue stock to a work order"
+"inventory.move" = "Move stock between locations"
+"inventory.adjust" = "Adjust stock with a reason code"
+"inventory.count" = "Post a cycle count"
+
+[capabilities]
+requires-signature = []
+regulated = false
+
+[[routes]]
+path = "/api/v1/inventory/receipts"
+permission = "inventory.receive"
+
+[[routes]]
+path = "/api/v1/inventory/issues"
+permission = "inventory.issue"
+
+[[routes]]
+path = "/api/v1/inventory/moves"
+permission = "inventory.move"
+
+[[routes]]
+path = "/api/v1/inventory/adjustments"
+permission = "inventory.adjust"
+
+[[routes]]
+path = "/api/v1/inventory/counts"
+permission = "inventory.count"
+
+[[routes]]
+path = "/api/v1/inventory/on-hand"
+permission = "inventory.view"
+
+[[routes]]
+path = "/api/v1/inventory/documents/{id}"
+permission = "inventory.view"
+
+[[machines]]
+doc_type = "inventory"
+regulated = false
+states = ["draft", "posted", "voided"]
+
+[[machines.edges]]
+from = "draft"
+to = "posted"
+name = "receive"
+permission = "inventory.receive"
+required = false
+reason = "inventory posting is not a regulated signature point in v1"
+
+[[machines.edges]]
+from = "draft"
+to = "posted"
+name = "issue"
+permission = "inventory.issue"
+required = false
+reason = "inventory posting is not a regulated signature point in v1"
+
+[[machines.edges]]
+from = "draft"
+to = "posted"
+name = "move"
+permission = "inventory.move"
+required = false
+reason = "inventory posting is not a regulated signature point in v1"
+
+[[machines.edges]]
+from = "draft"
+to = "posted"
+name = "adjust"
+permission = "inventory.adjust"
+required = false
+reason = "inventory posting is not a regulated signature point in v1"
+
+[[machines.edges]]
+from = "draft"
+to = "posted"
+name = "count"
+permission = "inventory.count"
+required = false
+reason = "inventory posting is not a regulated signature point in v1"
+
+[[machines.edges]]
+from = "posted"
+to = "voided"
+name = "void"
+permission = "inventory.adjust"
+required = false
+reason = "inventory posting is not a regulated signature point in v1"
