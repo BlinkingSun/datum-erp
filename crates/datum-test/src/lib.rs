@@ -4,6 +4,8 @@
 //! afterwards. Deferred constraint triggers fire at commit, which is the point:
 //! a rolled-back wrapper transaction would never arm them.
 
+#![allow(clippy::disallowed_methods, clippy::disallowed_macros)] // test harness: creates and drops databases and probes sessions with raw SQL; never ships in the binary; CONTRACT section 5a exemption
+
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
