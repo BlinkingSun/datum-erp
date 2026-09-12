@@ -54,6 +54,16 @@ pub enum Error {
         /// Missing field.
         field: String,
     },
+    /// Payload includes a field the schema does not declare.
+    #[error("payload for {name}.v{version} has unexpected field {field}")]
+    UnexpectedField {
+        /// Event name.
+        name: String,
+        /// Schema version.
+        version: i16,
+        /// Extra field.
+        field: String,
+    },
     /// A subscriber handler returned a failure.
     #[error("handler {subscriber} failed on {event_id}: {message}")]
     Handler {

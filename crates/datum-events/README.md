@@ -12,7 +12,7 @@ once, outside the originating transaction, as a named service principal
 - `Error` / `Result`
 - `Event` / `EventBuilder` / `EventKind` — typed payload; builder validates against schema
 - `publish` — insert `app.event` in the caller's `tx`
-- `EventSchema` / `Field` / `SchemaRegistry` — append-only payload contracts
+- `EventSchema` / `Field` / `SchemaRegistry` — append-only payload contracts (`SchemaRegistry::standard` seeds the table below from `fixtures/`)
 - `EventHandler` / `HandlerFuture` / `Registry` — in-process `(name, subscriber) -> handler`
 - `enable_subscription` — persist an enabled `app.subscription` row in `tx`
 - `MIGRATOR` — `placeholder` + `0001_events`
@@ -33,7 +33,22 @@ once, outside the originating transaction, as a named service principal
 - `migration_is_reversible`
 
 Lib: `builder_refuses_unknown_schema`, `builder_refuses_missing_required_field`,
-`schema_registry_rejects_removed_field`.
+`schema_registry_rejects_removed_field`,
+`standard_registry_has_inventory_receipt_posted_v1`,
+`receipt_posted_rejects_lot_id`, `adjusted_round_trip`.
+
+## Standard registry (`SchemaRegistry::standard`, `fixtures/`)
+
+Payload contracts are append-only within a version. `lot_id` stays required on
+`inventory.lot_received` v1; lot-less receipts use `inventory.receipt_posted` v1
+(R-2s-4). Additional fields may be added as optional; they are never removed.
+
+| Event | v | Required | Optional | Fixture |
+|---|---|---|---|---|
+| `inventory.lot_received` | 1 | `lot_id`, `item_id` | `qty` | `fixtures/inventory.lot_received.v1.json` |
+| `inventory.receipt_posted` | 1 | `item_id`, `location_id`, `qty`, `uom`, `posting_group_id` | — | `fixtures/inventory.receipt_posted.v1.json` |
+| `inventory.adjusted` | 1 | `item_id`, `qty`, `reason_code` | — | `fixtures/inventory.adjusted.v1.json` |
+| `test.ping` | 1 | — | — | `fixtures/test.ping.v1.json` |
 
 ## Frozen / seams
 

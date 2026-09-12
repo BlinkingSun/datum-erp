@@ -1,0 +1,11 @@
+{
+  "name": "inventory.receipt_posted",
+  "version": 1,
+  "fields": [
+    { "name": "item_id", "required": true },
+    { "name": "location_id", "required": true },
+    { "name": "qty", "required": true },
+    { "name": "uom", "required": true },
+    { "name": "posting_group_id", "required": true }
+  ]
+}

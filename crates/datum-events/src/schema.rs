@@ -3,12 +3,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{LazyLock, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
+use serde::Deserialize;
 use serde_json::Value;
 
 use crate::error::{Error, Result};
 
 /// One field in a payload contract.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize)]
 pub struct Field {
     /// JSON object key.
     pub name: String,
@@ -35,7 +36,7 @@ impl Field {
 }
 
 /// Payload contract for one `(name, version)`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct EventSchema {
     /// Event name (`inventory.lot_received`).
     pub name: String,
@@ -57,23 +58,19 @@ impl SchemaRegistry {
         Self::default()
     }
 
-    /// Kernel-known example schemas, including `inventory.lot_received.v1`.
+    /// Kernel-known schemas: `inventory.lot_received.v1` (lot-only),
+    /// `inventory.receipt_posted.v1` (lot-less receipts, R-2s-4),
+    /// `inventory.adjusted.v1`, and `test.ping.v1`.
     pub fn standard() -> Self {
         let mut reg = Self::new();
-        let _ = reg.register(EventSchema {
-            name: "inventory.lot_received".into(),
-            version: 1,
-            fields: vec![
-                Field::required("lot_id"),
-                Field::required("item_id"),
-                Field::optional("qty"),
-            ],
-        });
-        let _ = reg.register(EventSchema {
-            name: "test.ping".into(),
-            version: 1,
-            fields: vec![],
-        });
+        for json in [
+            include_str!("../fixtures/inventory.lot_received.v1.json"),
+            include_str!("../fixtures/inventory.receipt_posted.v1.json"),
+            include_str!("../fixtures/inventory.adjusted.v1.json"),
+            include_str!("../fixtures/test.ping.v1.json"),
+        ] {
+            let _ = reg.register(schema_from_fixture(json));
+        }
         reg
     }
 
@@ -81,6 +78,14 @@ impl SchemaRegistry {
     /// `schema_registry_rejects_removed_field` test fails if one of these is dropped.
     pub const INVENTORY_LOT_RECEIVED_V1_FIELDS: &'static [&'static str] =
         &["lot_id", "item_id", "qty"];
+
+    /// Frozen field names for `inventory.receipt_posted.v1` (no `lot_id`).
+    pub const INVENTORY_RECEIPT_POSTED_V1_FIELDS: &'static [&'static str] =
+        &["item_id", "location_id", "qty", "uom", "posting_group_id"];
+
+    /// Frozen field names for `inventory.adjusted.v1`.
+    pub const INVENTORY_ADJUSTED_V1_FIELDS: &'static [&'static str] =
+        &["item_id", "qty", "reason_code"];
 
     /// Register a contract. A second call for the same key must be a superset of the field names.
     pub fn register(&mut self, schema: EventSchema) -> Result<()> {
@@ -110,7 +115,8 @@ impl SchemaRegistry {
         self.inner.values()
     }
 
-    /// Refuse a payload that is not an object or that omits a required field.
+    /// Refuse a payload that is not an object, omits a required field, or
+    /// includes a field the contract does not declare.
     pub fn validate(&self, name: &str, version: i16, payload: &Value) -> Result<()> {
         let schema = self
             .get(name, version)
@@ -131,7 +137,24 @@ impl SchemaRegistry {
                 });
             }
         }
+        let allowed: BTreeSet<&str> = schema.fields.iter().map(|f| f.name.as_str()).collect();
+        for key in obj.keys() {
+            if !allowed.contains(key.as_str()) {
+                return Err(Error::UnexpectedField {
+                    name: name.to_string(),
+                    version,
+                    field: key.clone(),
+                });
+            }
+        }
         Ok(())
+    }
+}
+
+fn schema_from_fixture(json: &str) -> EventSchema {
+    match serde_json::from_str(json) {
+        Ok(schema) => schema,
+        Err(err) => panic!("standard event fixture is invalid: {err}"),
     }
 }
 

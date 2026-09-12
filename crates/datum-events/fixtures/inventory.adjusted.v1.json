@@ -1,0 +1,9 @@
+{
+  "name": "inventory.adjusted",
+  "version": 1,
+  "fields": [
+    { "name": "item_id", "required": true },
+    { "name": "qty", "required": true },
+    { "name": "reason_code", "required": true }
+  ]
+}

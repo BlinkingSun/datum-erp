@@ -1,0 +1,9 @@
+{
+  "name": "inventory.lot_received",
+  "version": 1,
+  "fields": [
+    { "name": "lot_id", "required": true },
+    { "name": "item_id", "required": true },
+    { "name": "qty", "required": false }
+  ]
+}

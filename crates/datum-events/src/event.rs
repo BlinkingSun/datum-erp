@@ -46,7 +46,8 @@ pub struct Event {
 }
 
 impl Event {
-    /// Start a builder. [`EventBuilder::build`] refuses payloads that do not match the registry.
+    /// Start a builder. [`EventBuilder::build`] refuses payloads that do not match the registry
+    /// (unknown schema, missing required field, or undeclared field).
     pub fn builder() -> EventBuilder {
         EventBuilder::default()
     }
