@@ -80,7 +80,7 @@ pub fn require_postgres() {
 }
 
 impl TestDb {
-    /// `CREATE DATABASE datum_t_<name>_<random> TEMPLATE $DATUM_TEST_TEMPLATE`
+    /// `CREATE DATABASE datum_t_<name>_<random> OWNER datum_owner TEMPLATE $DATUM_TEST_TEMPLATE`
     /// via `DATUM_BOOTSTRAP_URL`, then open migrate (`datum_migrate`) and app
     /// (`datum_app`) pools with the D3 §2.2 hooks.
     pub async fn case(name: &str) -> Result<Self, Error> {
@@ -296,7 +296,7 @@ async fn open_pool(url: &str) -> Result<PgPool, Error> {
 
 async fn create_database(bootstrap_url: &str, database: &str, template: &str) -> Result<(), Error> {
     let mut conn = connect_bootstrap(bootstrap_url).await?;
-    let sql = format!("CREATE DATABASE {database} TEMPLATE {template}");
+    let sql = format!("CREATE DATABASE {database} OWNER datum_owner TEMPLATE {template}");
     sqlx::raw_sql(AssertSqlSafe(sql))
         .execute(&mut conn)
         .await
@@ -429,6 +429,31 @@ mod tests {
             "expected Unavailable, got {err}"
         );
         assert!(postgres_available().is_err());
+    }
+
+    #[tokio::test]
+    async fn case_database_is_owned_by_datum_owner() {
+        let db = db_case!("owned_by_datum_owner");
+        let owner: String = sqlx::query_scalar(
+            "SELECT pg_catalog.pg_get_userbyid(datdba)
+             FROM pg_catalog.pg_database
+             WHERE datname = current_database()",
+        )
+        .fetch_one(db.migrate_pool())
+        .await
+        .expect("pg_database.datdba");
+        assert_eq!(owner, "datum_owner");
+        db.finish().await.expect("finish");
+    }
+
+    #[tokio::test]
+    async fn migrate_role_can_create_schema_in_case_database() {
+        let db = db_case!("migrate_create_schema");
+        sqlx::query("CREATE SCHEMA migrate_probe")
+            .execute(db.migrate_pool())
+            .await
+            .expect("CREATE SCHEMA as datum_migrate with no prior GRANT");
+        db.finish().await.expect("finish");
     }
 
     #[tokio::test]

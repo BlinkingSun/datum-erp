@@ -28,3 +28,4 @@ datum-test.workspace = true
 tokio.workspace = true
 proptest.workspace = true
 sqlx.workspace = true
+trybuild.workspace = true

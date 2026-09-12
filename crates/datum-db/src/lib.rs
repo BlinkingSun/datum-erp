@@ -1,37 +1,52 @@
 //! Kernel persistence: pool, sealed write transaction, migrations.
 //!
-//! Raw SQL is legal in this crate (D3 §11). The audit trigger and DDL stay unimplemented.
+//! Raw SQL is legal in this crate (D3 §11). The audit trigger and DDL attach stay
+//! unimplemented until `datum-audit`.
 
 #![allow(clippy::disallowed_methods, clippy::disallowed_macros)] // D3 §11: this crate owns set_config / pool SQL.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
-use datum_core::{Actor, ActorKind};
+use datum_core::Actor;
 use serde::{Deserialize, Serialize};
-use sqlx::postgres::PgPoolOptions;
-use sqlx::{Postgres, Transaction};
+use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+
+mod error;
+mod tx;
+
+pub mod ddl;
+pub mod migrate;
+pub mod security;
+
+pub use error::{Error, Result, SqlState};
+pub use tx::{Tx, retry_serializable};
 
 /// Connection pool. Thin alias so other crates can name it.
 pub type Pool = sqlx::PgPool;
 
-/// Embedded placeholder migrator.
+/// Embedded migrator (`placeholder` + `0001_datum_schema`).
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
-/// Persistence error.
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum Error {
-    /// Not implemented (DDL, audit trigger).
-    #[error("unimplemented")]
-    Unimplemented,
-    /// Core error.
-    #[error(transparent)]
-    Core(#[from] datum_core::Error),
-    /// SQLx error.
-    #[error(transparent)]
-    Sqlx(#[from] sqlx::Error),
-}
-
-/// Crate result alias.
-pub type Result<T> = core::result::Result<T, Error>;
+/// Every `datum.*` setting [`Tx::begin`] binds (D3 §2.1 plus invariant 17).
+pub const DATUM_SETTINGS: &[&str] = &[
+    "datum.actor_id",
+    "datum.actor_kind",
+    "datum.actor_display",
+    "datum.acting_for",
+    "datum.session_id",
+    "datum.request_id",
+    "datum.source_kind",
+    "datum.source_device",
+    "datum.source_ip",
+    "datum.client_app",
+    "datum.action",
+    "datum.reason",
+    "datum.doc_type",
+    "datum.doc_id",
+    "datum.esign_id",
+    "datum.txid",
+    "datum.app_version",
+    "datum.config_version",
+];
 
 /// Write pool. No `Deref`, no `as_pool`, no `into_inner` (D3 §2.1).
 #[derive(Debug, Clone)]
@@ -41,6 +56,16 @@ impl WritePool {
     /// Wrap a pool created by [`connect`].
     pub fn new(pool: Pool) -> Self {
         Self(pool)
+    }
+
+    /// Open a write pool with D3 §2.2 hooks.
+    pub async fn connect(url: &str) -> Result<Self> {
+        Ok(Self(connect(url).await?))
+    }
+
+    /// Open a write pool with caller [`PgPoolOptions`] plus D3 §2.2 hooks.
+    pub async fn connect_with(url: &str, options: PgPoolOptions) -> Result<Self> {
+        Ok(Self(connect_with(url, options).await?))
     }
 }
 
@@ -52,6 +77,11 @@ impl ReadPool {
     /// Wrap a pool created by [`connect`].
     pub fn new(pool: Pool) -> Self {
         Self(pool)
+    }
+
+    /// Open a read pool with D3 §2.2 hooks.
+    pub async fn connect(url: &str) -> Result<Self> {
+        Ok(Self(connect(url).await?))
     }
 
     /// Idle connections currently in the pool.
@@ -91,6 +121,8 @@ pub struct WriteContext {
     pub doc_id: Option<String>,
     /// Electronic signature id.
     pub esign_id: Option<String>,
+    /// Configuration version (invariant 17). Empty until `datum-module` exists.
+    pub config_version: Option<String>,
 }
 
 impl WriteContext {
@@ -111,6 +143,7 @@ impl WriteContext {
             doc_type: None,
             doc_id: None,
             esign_id: None,
+            config_version: None,
         }
     }
 }
@@ -127,107 +160,40 @@ impl SessionCtx for WriteContext {
     }
 }
 
-/// Sealed write transaction. Actor is transaction-local (D3 §2.1).
-pub struct Tx<'c> {
-    inner: Transaction<'c, Postgres>,
+/// Crate version compiled in, plus `git describe` when the build script provides one.
+pub fn app_version() -> String {
+    match option_env!("DATUM_GIT_DESCRIBE") {
+        Some(d) if !d.is_empty() => format!("{} ({d})", env!("CARGO_PKG_VERSION")),
+        _ => env!("CARGO_PKG_VERSION").to_string(),
+    }
 }
 
-impl<'c> Tx<'c> {
-    /// Begin a write transaction and bind actor context in one `set_config` statement.
-    ///
-    /// `is_local` is always true. `datum.txid` is `pg_current_xact_id()` of this transaction.
-    pub async fn begin(pool: &'c WritePool, ctx: &WriteContext) -> Result<Tx<'c>> {
-        let mut inner = pool.0.begin().await?;
-        let actor_id = ctx.actor.id.as_uuid().to_string();
-        let actor_kind = match ctx.actor.kind {
-            ActorKind::User => "User",
-            ActorKind::ServicePrincipal => "ServicePrincipal",
-            _ => "User",
-        };
-        sqlx::query(
-            r#"SELECT pg_catalog.set_config('datum.actor_id',      $1, true),
-                      pg_catalog.set_config('datum.actor_kind',    $2, true),
-                      pg_catalog.set_config('datum.actor_display', $3, true),
-                      pg_catalog.set_config('datum.acting_for',    $4, true),
-                      pg_catalog.set_config('datum.session_id',    $5, true),
-                      pg_catalog.set_config('datum.request_id',    $6, true),
-                      pg_catalog.set_config('datum.source_kind',   $7, true),
-                      pg_catalog.set_config('datum.source_device', $8, true),
-                      pg_catalog.set_config('datum.source_ip',     $9, true),
-                      pg_catalog.set_config('datum.client_app',   $10, true),
-                      pg_catalog.set_config('datum.action',       $11, true),
-                      pg_catalog.set_config('datum.reason',       $12, true),
-                      pg_catalog.set_config('datum.doc_type',     $13, true),
-                      pg_catalog.set_config('datum.doc_id',       $14, true),
-                      pg_catalog.set_config('datum.esign_id',     $15, true),
-                      pg_catalog.set_config('datum.txid',
-                          pg_catalog.pg_current_xact_id()::text,      true)"#,
-        )
-        .bind(&actor_id)
-        .bind(actor_kind)
-        .bind(ctx.actor_display.as_deref())
-        .bind(ctx.acting_for.as_deref())
-        .bind(ctx.session_id.as_deref())
-        .bind(ctx.request_id.as_deref())
-        .bind(&ctx.source_kind)
-        .bind(ctx.source_device.as_deref())
-        .bind(ctx.source_ip.as_deref())
-        .bind(ctx.client_app.as_deref())
-        .bind(&ctx.action)
-        .bind(ctx.reason.as_deref())
-        .bind(ctx.doc_type.as_deref())
-        .bind(ctx.doc_id.as_deref())
-        .bind(ctx.esign_id.as_deref())
-        .execute(&mut *inner)
-        .await?;
-        Ok(Tx { inner })
-    }
-
-    /// Read a transaction-local GUC (`current_setting(name, true)`).
-    pub async fn setting(&mut self, name: &str) -> Result<String> {
-        let row: (String,) = sqlx::query_as("SELECT pg_catalog.current_setting($1, true)")
-            .bind(name)
-            .fetch_one(&mut *self.inner)
-            .await?;
-        Ok(row.0)
-    }
-
-    /// Current PostgreSQL transaction id (`pg_current_xact_id()::text`).
-    pub async fn pg_txid(&mut self) -> Result<String> {
-        let row: (String,) = sqlx::query_as("SELECT pg_catalog.pg_current_xact_id()::text")
-            .fetch_one(&mut *self.inner)
-            .await?;
-        Ok(row.0)
-    }
-
-    /// Commit.
-    pub async fn commit(self) -> Result<()> {
-        self.inner.commit().await?;
-        Ok(())
-    }
-
-    /// Roll back.
-    pub async fn rollback(self) -> Result<()> {
-        self.inner.rollback().await?;
-        Ok(())
-    }
+pub(crate) fn guc(value: &Option<String>) -> &str {
+    value.as_deref().unwrap_or("")
 }
 
 /// Open a pool with D3 §2.2 `after_connect` / `after_release` hooks.
 pub async fn connect(url: &str) -> Result<Pool> {
-    let pool = PgPoolOptions::new()
-        .after_connect(|c, _| {
-            Box::pin(async move {
-                sqlx::raw_sql(
-                    "SET timezone = 'UTC'; \
-                     SET application_name = 'datum'; \
-                     SET idle_in_transaction_session_timeout = '15s'",
-                )
-                .execute(&mut *c)
-                .await?;
-                Ok(())
-            })
-        })
+    connect_with(url, PgPoolOptions::new()).await
+}
+
+/// Startup parameters applied to every pooled connection (D3 §2.2 / addendum 3).
+///
+/// PostgreSQL treats these as session defaults, so `RESET ALL` in `after_release`
+/// restores them instead of reverting to cluster defaults.
+fn connection_startup_options(url: &str) -> Result<PgConnectOptions> {
+    let opts: PgConnectOptions = url.parse().map_err(Error::from)?;
+    Ok(opts.options([
+        ("TimeZone", "UTC"),
+        ("application_name", "datum"),
+        ("idle_in_transaction_session_timeout", "15s"),
+    ]))
+}
+
+/// Open a pool with caller options plus D3 §2.2 hooks (hooks always win).
+pub async fn connect_with(url: &str, options: PgPoolOptions) -> Result<Pool> {
+    let connect_opts = connection_startup_options(url)?;
+    let pool = options
         .after_release(|c, _| {
             Box::pin(async move {
                 match sqlx::raw_sql("RESET ALL").execute(&mut *c).await {
@@ -236,17 +202,17 @@ pub async fn connect(url: &str) -> Result<Pool> {
                 }
             })
         })
-        .connect(url)
+        .connect_with(connect_opts)
         .await?;
     Ok(pool)
 }
 
-/// DDL remains unimplemented in Wave 1.
+/// DDL remains unimplemented in this crate (event-trigger attach is `datum-audit`).
 pub async fn apply_ddl(_tx: &mut Tx<'_>) -> Result<()> {
     Err(Error::Unimplemented)
 }
 
-/// Audit trigger attachment remains unimplemented in Wave 1.
+/// Audit trigger attachment remains unimplemented (`datum-audit`).
 pub async fn attach_audit_trigger(_tx: &mut Tx<'_>) -> Result<()> {
     Err(Error::Unimplemented)
 }
@@ -262,6 +228,7 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
     use tokio as _;
+    use trybuild as _;
 
     #[test]
     fn unimplemented_formats() {
@@ -276,6 +243,31 @@ mod tests {
     #[test]
     fn postgres_helper_is_callable() {
         let _ = datum_test::postgres_available();
+    }
+
+    #[test]
+    fn datum_settings_are_the_eighteen() {
+        assert_eq!(DATUM_SETTINGS.len(), 18);
+        assert_eq!(DATUM_SETTINGS[0], "datum.actor_id");
+        assert_eq!(DATUM_SETTINGS[15], "datum.txid");
+        assert_eq!(DATUM_SETTINGS[16], "datum.app_version");
+        assert_eq!(DATUM_SETTINGS[17], "datum.config_version");
+    }
+
+    /// Documented Linux CI form: percent-encoded socket directory as the host.
+    #[test]
+    fn percent_encoded_unix_socket_bootstrap_url_parses() {
+        use sqlx::postgres::PgConnectOptions;
+        let url =
+            "postgres://datum_bootstrap:s3cret@%2Fvar%2Frun%2Fpostgresql/postgres?sslmode=disable";
+        let opts: PgConnectOptions = url.parse().expect("parse");
+        assert_eq!(opts.get_username(), "datum_bootstrap");
+        assert_eq!(opts.get_database(), Some("postgres"));
+        let socket = opts
+            .get_socket()
+            .expect("percent-encoded host must be a unix socket directory");
+        let path = socket.to_string_lossy();
+        assert_eq!(path.trim_end_matches('/'), "/var/run/postgresql");
     }
 
     proptest! {

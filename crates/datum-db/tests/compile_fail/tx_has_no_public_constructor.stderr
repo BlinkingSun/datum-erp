@@ -1,0 +1,16 @@
+warning: unreachable expression
+ --> tests/compile_fail/tx_has_no_public_constructor.rs:2:15
+  |
+2 |     let _tx = datum_db::Tx { inner: panic!() };
+  |               ^^^^^^^^^^^^^^^^^^^^^^--------^^
+  |               |                     |
+  |               |                     any code following this expression is unreachable
+  |               unreachable expression
+  |
+  = note: `#[warn(unreachable_code)]` (part of `#[warn(unused)]`) on by default
+
+error[E0451]: field `inner` of struct `Tx` is private
+ --> tests/compile_fail/tx_has_no_public_constructor.rs:2:30
+  |
+2 |     let _tx = datum_db::Tx { inner: panic!() };
+  |                              ^^^^^ private field
