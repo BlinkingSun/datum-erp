@@ -7,8 +7,8 @@ use datum_ledger::upsert_location;
 use serde_json::json;
 
 use crate::domain::{
-    BOUNDARY_VARIANTS, CreateLocation, Location, LocationKind, LocationStatus, LocationTreeNode,
-    UpdateLocation, boundary_code, validate_code,
+    BOUNDARY_VARIANTS, CreateLocation, ListFilter, Location, LocationKind, LocationStatus,
+    LocationTreeNode, UpdateLocation, boundary_code, validate_code,
 };
 use crate::events;
 use crate::{Error, Result};
@@ -158,7 +158,7 @@ pub async fn get(tx: &mut Tx<'_>, id: LocationId) -> Result<Location> {
         .ok_or_else(|| Error::NotFound(id.to_string()))
 }
 
-/// Flat list ordered by code.
+/// Flat list ordered by code (tree builder; not the HTTP collection).
 pub async fn list_flat(tx: &mut Tx<'_>) -> Result<Vec<Location>> {
     let rows: Vec<LocationRow> = tx
         .fetch_all(sqlx::query_as(
@@ -169,6 +169,47 @@ pub async fn list_flat(tx: &mut Tx<'_>) -> Result<Vec<Location>> {
         ))
         .await?;
     rows.into_iter().map(row_to_location).collect()
+}
+
+const DEFAULT_LIST_LIMIT: u32 = 50;
+const MAX_LIST_LIMIT: u32 = 200;
+
+/// Cursor-paginated list. Default sort is `id` ascending (UUID v7 create order).
+pub async fn list(
+    tx: &mut Tx<'_>,
+    filter: ListFilter,
+) -> Result<(Vec<Location>, Option<String>, bool)> {
+    let limit = filter.limit.unwrap_or(DEFAULT_LIST_LIMIT);
+    if !(1..=MAX_LIST_LIMIT).contains(&limit) {
+        return Err(Error::Validation("limit".into()));
+    }
+    let fetch = i64::from(limit) + 1;
+    let rows: Vec<LocationRow> = tx
+        .fetch_all(
+            sqlx::query_as(
+                "SELECT id, code, name, site_id, parent_id, kind, boundary_class::text,
+                        status, work_order_id, version
+                   FROM locations.location
+                  WHERE ($1::uuid IS NULL OR id > $1)
+                  ORDER BY id
+                  LIMIT $2",
+            )
+            .bind(filter.cursor.map(|c| c.as_uuid()))
+            .bind(fetch),
+        )
+        .await?;
+    let has_more = rows.len() as u32 > limit;
+    let data: Vec<Location> = rows
+        .into_iter()
+        .take(limit as usize)
+        .map(row_to_location)
+        .collect::<Result<Vec<_>>>()?;
+    let next_cursor = if has_more {
+        data.last().map(|loc| loc.id.to_string())
+    } else {
+        None
+    };
+    Ok((data, next_cursor, has_more))
 }
 
 /// Build a forest of active locations.

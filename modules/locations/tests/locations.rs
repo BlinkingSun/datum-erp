@@ -16,8 +16,9 @@ use datum_db::Tx;
 use datum_events::SchemaRegistry;
 use datum_ledger::{CostMethod, GroupBuilder, boundary_sql, upsert_location, upsert_stock_item};
 use datum_mod_locations::{
-    CreateLocation, Error, Location, LocationKind, LocationStatus, UpdateLocation, boundary_code,
-    ensure_wip, install, migrate, register_schemas, seed_install, store,
+    CreateLocation, Error, ListFilter, Location, LocationKind, LocationStatus, UpdateLocation,
+    boundary_code, ensure_wip, install, list, list_locations, migrate, register_schemas,
+    seed_install, store,
 };
 use datum_test::db_case;
 use rust_decimal::Decimal;
@@ -439,5 +440,43 @@ async fn writes_go_through_tx() {
     .await
     .unwrap_err();
     assert_eq!(pg_code(&err), "42501");
+    db.finish().await.unwrap();
+}
+
+#[tokio::test]
+async fn list_paginates_by_cursor() {
+    let db = db_case!("loc_cursor");
+    migrate_kernel(&db).await;
+    let pool = write_pool(&db);
+    let mut tx = Tx::begin(&pool, &write_ctx("locations.list"))
+        .await
+        .unwrap();
+    seed_install(&mut tx).await.unwrap();
+    tx.commit().await.unwrap();
+
+    let mut tx = Tx::begin(&pool, &write_ctx("locations.list_page"))
+        .await
+        .unwrap();
+    let page1 = list_locations(&mut tx, Some(3), None).await.unwrap();
+    assert_eq!(page1.data.len(), 3);
+    assert!(page1.has_more);
+    assert!(page1.next_cursor.is_some());
+    let page2 = list_locations(&mut tx, Some(3), page1.next_cursor.as_deref())
+        .await
+        .unwrap();
+    assert!(!page2.data.is_empty());
+    let ids1: Vec<_> = page1.data.iter().map(|l| l.id).collect();
+    let ids2: Vec<_> = page2.data.iter().map(|l| l.id).collect();
+    assert!(ids1.iter().all(|id| !ids2.contains(id)));
+    let err = list(
+        &mut tx,
+        ListFilter {
+            limit: Some(0),
+            cursor: None,
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, Error::Validation(ref m) if m == "limit"));
     db.finish().await.unwrap();
 }

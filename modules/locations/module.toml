@@ -20,5 +20,13 @@ path = "/api/v1/locations"
 permission = "locations.view"
 
 [[routes]]
+path = "/api/v1/locations/{id}"
+permission = "locations.view"
+
+[[routes]]
 path = "/api/v1/locations/tree"
 permission = "locations.view"
+
+[[routes]]
+path = "/api/v1/locations/{id}/deactivate"
+permission = "locations.edit"

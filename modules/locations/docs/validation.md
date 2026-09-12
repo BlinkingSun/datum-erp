@@ -10,5 +10,7 @@ Executable tests (commit mode, `DATUM_REQUIRE_PG=1`):
 - `registry_row_matches_location`
 - `every_locations_table_is_audited_and_owned_by_datum_owner`
 - `writes_go_through_tx`
+- `http_manifest_binds_view_and_edit`
+- `list_paginates_by_cursor`
 
 Run: `cargo test -p datum-mod-locations`
