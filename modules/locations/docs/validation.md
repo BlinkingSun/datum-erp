@@ -14,5 +14,6 @@ Executable tests (commit mode, `DATUM_REQUIRE_PG=1`):
 - `list_paginates_by_cursor`
 - `list_tree_filters_inactive_by_default`
 - `deactivate_after_plain_install`
+- `generated_and_seeded_ids_are_uuid_v7`
 
 Run: `cargo test -p datum-mod-locations`

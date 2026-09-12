@@ -64,30 +64,54 @@ async fn fetch_row(tx: &mut Tx<'_>, id: LocationId) -> Result<Option<Location>> 
     row.map(row_to_location).transpose()
 }
 
-/// Default site id (stable v5).
-pub fn default_site_id() -> Identifier {
-    Identifier::from_uuid(uuid::Uuid::from_bytes([
-        0x6b, 0xa7, 0xb8, 0x10, 0x9d, 0xad, 0x11, 0xd1, 0x80, 0xb4, 0x00, 0xc0, 0x4f, 0xd4, 0x30,
-        0xc8,
-    ]))
+/// Default site code seeded at install (looked up; ids are minted UUID v7).
+pub const DEFAULT_SITE_CODE: &str = "MAIN";
+
+/// Load the seeded default site by code.
+pub async fn default_site_id(tx: &mut Tx<'_>) -> Result<Identifier> {
+    site_id_by_code(tx, DEFAULT_SITE_CODE).await
+}
+
+/// Load a site id by unique code.
+pub async fn site_id_by_code(tx: &mut Tx<'_>, code: &str) -> Result<Identifier> {
+    let row: Option<(uuid::Uuid,)> = tx
+        .fetch_optional(sqlx::query_as("SELECT id FROM locations.site WHERE code = $1").bind(code))
+        .await?;
+    row.map(|(id,)| Identifier::from_uuid(id))
+        .ok_or_else(|| Error::NotFound(code.into()))
+}
+
+/// Load a location id by unique code.
+pub async fn location_id_by_code(tx: &mut Tx<'_>, code: &str) -> Result<LocationId> {
+    let row: Option<(uuid::Uuid,)> = tx
+        .fetch_optional(
+            sqlx::query_as("SELECT id FROM locations.location WHERE code = $1").bind(code),
+        )
+        .await?;
+    row.map(|(id,)| LocationId::from_uuid(id))
+        .ok_or_else(|| Error::NotFound(code.into()))
 }
 
 /// Idempotent install seed: default site and seven virtual boundary locations.
+///
+/// SPEC-common does not mandate stable seed ids, so rows are minted as UUID v7
+/// and subsequently looked up by code.
 pub async fn seed_install(tx: &mut Tx<'_>) -> Result<()> {
-    let site = default_site_id();
+    let minted_site = Identifier::generate();
     tx.execute(
         sqlx::query(
             "INSERT INTO locations.site (id, code, name, version)
              VALUES ($1, 'MAIN', 'Main site', 1)
-             ON CONFLICT (id) DO NOTHING",
+             ON CONFLICT (code) DO NOTHING",
         )
-        .bind(site.as_uuid()),
+        .bind(minted_site.as_uuid()),
     )
     .await?;
+    let site = default_site_id(tx).await?;
     for boundary in BOUNDARY_VARIANTS {
         let code = boundary_code(boundary);
         let name = format!("Virtual {code}");
-        let id = boundary_location_id(boundary);
+        let minted = LocationId::generate();
         tx.execute(
             sqlx::query(
                 "INSERT INTO locations.location
@@ -95,31 +119,22 @@ pub async fn seed_install(tx: &mut Tx<'_>) -> Result<()> {
                  VALUES ($1, $2, $3, $4, NULL, 'virtual', $5::ledger.boundary, 'active', 1)
                  ON CONFLICT (boundary_class) WHERE boundary_class IS NOT NULL DO NOTHING",
             )
-            .bind(id.as_uuid())
+            .bind(minted.as_uuid())
             .bind(code)
             .bind(name)
             .bind(site.as_uuid())
             .bind(datum_ledger::boundary_sql(boundary)?),
         )
         .await?;
+        let id = location_id_by_code(tx, code).await?;
         upsert_location(tx, id, Some(boundary)).await?;
     }
     Ok(())
 }
 
-/// Stable id for a seeded virtual boundary row.
-pub fn boundary_location_id(boundary: Boundary) -> LocationId {
-    let bytes: [u8; 16] = match boundary {
-        Boundary::Supplier => [0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01],
-        Boundary::Customer => [0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x02],
-        Boundary::Scrap => [0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x03],
-        Boundary::Adjustment => [0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x04],
-        Boundary::Rounding => [0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x05],
-        Boundary::Consumed => [0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x06],
-        Boundary::Produced => [0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x07],
-        _ => [0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x08],
-    };
-    LocationId::from_uuid(uuid::Uuid::from_bytes(bytes))
+/// Seeded virtual boundary location, looked up by code after install.
+pub async fn boundary_location_id(tx: &mut Tx<'_>, boundary: Boundary) -> Result<LocationId> {
+    location_id_by_code(tx, boundary_code(boundary)).await
 }
 
 /// Create a real location and sync the ledger registry.
@@ -356,7 +371,7 @@ pub async fn ensure_wip(tx: &mut Tx<'_>, work_order_id: Identifier) -> Result<Lo
     if let Some((id,)) = existing {
         return Ok(LocationId::from_uuid(id));
     }
-    let site = default_site_id();
+    let site = default_site_id(tx).await?;
     let id = LocationId::generate();
     let raw = work_order_id.as_uuid().simple().to_string();
     let code = format!("WIP-{}", raw[..12].to_uppercase());

@@ -69,12 +69,13 @@ async fn boundary_class_is_immutable() {
         .await
         .unwrap();
     seed_install(&mut tx).await.unwrap();
+    let site = store::default_site_id(&mut tx).await.unwrap();
     let bin = store::create(
         &mut tx,
         CreateLocation {
             code: "BIN-A".into(),
             name: "Bin A".into(),
-            site_id: store::default_site_id(),
+            site_id: site,
             parent_id: None,
             kind: LocationKind::Bin,
         },
@@ -98,7 +99,9 @@ async fn boundary_class_is_immutable() {
     .await
     .unwrap();
     assert!(updated.boundary_class.is_none());
-    let supplier_id = store::boundary_location_id(Boundary::Supplier);
+    let supplier_id = store::boundary_location_id(&mut tx, Boundary::Supplier)
+        .await
+        .unwrap();
     let supplier = store::get(&mut tx, supplier_id).await.unwrap();
     assert_eq!(supplier.boundary_class, Some(Boundary::Supplier));
     let err = store::update(
@@ -122,11 +125,11 @@ async fn tree_has_no_cycles() {
     let db = db_case!("loc_cycle");
     migrate_kernel(&db).await;
     let pool = write_pool(&db);
-    let site = datum_mod_locations::store::default_site_id();
     let mut tx = Tx::begin(&pool, &write_ctx("locations.tree"))
         .await
         .unwrap();
     seed_install(&mut tx).await.unwrap();
+    let site = store::default_site_id(&mut tx).await.unwrap();
     let a = store::create(
         &mut tx,
         CreateLocation {
@@ -190,12 +193,13 @@ async fn deactivate_refused_while_on_hand() {
         .await
         .unwrap();
     seed_install(&mut tx).await.unwrap();
+    let site = store::default_site_id(&mut tx).await.unwrap();
     let loc = store::create(
         &mut tx,
         CreateLocation {
             code: "STOCK-1".into(),
             name: "Stock".into(),
-            site_id: datum_mod_locations::store::default_site_id(),
+            site_id: site,
             parent_id: None,
             kind: LocationKind::Bin,
         },
@@ -215,7 +219,9 @@ async fn deactivate_refused_while_on_hand() {
     .await
     .unwrap();
     upsert_location(&mut tx, loc.id, None).await.unwrap();
-    let supplier = store::boundary_location_id(Boundary::Supplier);
+    let supplier = store::boundary_location_id(&mut tx, Boundary::Supplier)
+        .await
+        .unwrap();
     let mut header = PostingGroupHeader {
         source_kind: "test".into(),
         source_id: None,
@@ -340,7 +346,7 @@ async fn registry_row_matches_location() {
     seed_install(&mut tx).await.unwrap();
 
     for b in datum_mod_locations::BOUNDARY_VARIANTS {
-        let id = store::boundary_location_id(b);
+        let id = store::boundary_location_id(&mut tx, b).await.unwrap();
         let seeded = store::get(&mut tx, id).await.unwrap();
         assert_eq!(seeded.kind, LocationKind::Virtual);
         assert_eq!(seeded.status, LocationStatus::Active);
@@ -349,12 +355,13 @@ async fn registry_row_matches_location() {
         assert_registry_row_matches(&mut tx, &seeded).await;
     }
 
+    let site = store::default_site_id(&mut tx).await.unwrap();
     let warehouse = store::create(
         &mut tx,
         CreateLocation {
             code: "REG-1".into(),
             name: "Reg".into(),
-            site_id: store::default_site_id(),
+            site_id: site,
             parent_id: None,
             kind: LocationKind::Warehouse,
         },
@@ -372,7 +379,7 @@ async fn registry_row_matches_location() {
         CreateLocation {
             code: "REG-1-A".into(),
             name: "Reg area".into(),
-            site_id: store::default_site_id(),
+            site_id: site,
             parent_id: Some(warehouse.id),
             kind: LocationKind::Area,
         },
@@ -499,12 +506,13 @@ async fn list_tree_filters_inactive_by_default() {
         .await
         .unwrap();
     install(&mut tx, true).await.unwrap();
+    let site = store::default_site_id(&mut tx).await.unwrap();
     let bin = store::create(
         &mut tx,
         CreateLocation {
             code: "BIN-A".into(),
             name: "Bin A".into(),
-            site_id: store::default_site_id(),
+            site_id: site,
             parent_id: None,
             kind: LocationKind::Bin,
         },
@@ -557,12 +565,13 @@ async fn deactivate_after_plain_install() {
         .await
         .unwrap();
     install(&mut tx, true).await.unwrap();
+    let site = store::default_site_id(&mut tx).await.unwrap();
     let bin = store::create(
         &mut tx,
         CreateLocation {
             code: "BIN-PLAIN".into(),
             name: "Plain bin".into(),
-            site_id: store::default_site_id(),
+            site_id: site,
             parent_id: None,
             kind: LocationKind::Bin,
         },
@@ -578,6 +587,48 @@ async fn deactivate_after_plain_install() {
         .await
         .unwrap();
     assert_eq!(done.status, LocationStatus::Inactive);
+    tx.commit().await.unwrap();
+    db.finish().await.unwrap();
+}
+
+fn assert_uuid_v7(id: uuid::Uuid, label: &str) {
+    assert_eq!(
+        id.get_version_num(),
+        7,
+        "{label} expected UUID v7 version nibble, got {id}"
+    );
+}
+
+#[tokio::test]
+async fn generated_and_seeded_ids_are_uuid_v7() {
+    let db = db_case!("loc_uuidv7");
+    migrate_kernel(&db).await;
+    let pool = write_pool(&db);
+    let mut tx = Tx::begin(&pool, &write_ctx("locations.uuidv7"))
+        .await
+        .unwrap();
+    seed_install(&mut tx).await.unwrap();
+    let site = store::default_site_id(&mut tx).await.unwrap();
+    assert_uuid_v7(site.as_uuid(), "site MAIN");
+    for b in datum_mod_locations::BOUNDARY_VARIANTS {
+        let id = store::boundary_location_id(&mut tx, b).await.unwrap();
+        assert_uuid_v7(id.as_uuid(), boundary_code(b));
+    }
+    let created = store::create(
+        &mut tx,
+        CreateLocation {
+            code: "WH-V7".into(),
+            name: "v7 warehouse".into(),
+            site_id: site,
+            parent_id: None,
+            kind: LocationKind::Warehouse,
+        },
+    )
+    .await
+    .unwrap();
+    assert_uuid_v7(created.id.as_uuid(), "created warehouse");
+    let wip = ensure_wip(&mut tx, Identifier::generate()).await.unwrap();
+    assert_uuid_v7(wip.as_uuid(), "ensure_wip");
     tx.commit().await.unwrap();
     db.finish().await.unwrap();
 }
