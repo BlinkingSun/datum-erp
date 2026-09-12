@@ -69,6 +69,52 @@ lint-sql:
       done; \
     done; \
     if [ "$fail" -ne 0 ]; then exit 1; fi
+    REPO_ROOT="{{root}}" bash "{{root}}/scripts/lint-sql-migrations.sh"
+
+# Plant bad migrations and assert lint-sql-migrations fails (then remove them).
+lint-sql-selftest:
+    command -v rg >/dev/null 2>&1 || { echo 'lint-sql-selftest: ripgrep (rg) is required' >&2; exit 1; }
+    root="{{root}}"; \
+    plant_cross="$root/crates/datum-server/migrations/99999999999999_lint_sql_selftest_cross.up.sql"; \
+    plant_session="$root/modules/items/migrations/99999999999999_lint_sql_selftest_session.up.sql"; \
+    plant_create="$root/crates/datum-server/migrations/99999999999998_lint_sql_selftest_definer_create.up.sql"; \
+    plant_drop="$root/crates/datum-server/migrations/99999999999999_lint_sql_selftest_definer_drop.up.sql"; \
+    plant_orphan="$root/crates/datum-server/migrations/99999999999999_lint_sql_selftest_definer_orphan.up.sql"; \
+    cleanup() { rm -f "$plant_cross" "$plant_session" "$plant_create" "$plant_drop" "$plant_orphan"; }; \
+    trap cleanup EXIT; \
+    run_lint() { REPO_ROOT="$root" bash "$root/scripts/lint-sql-migrations.sh" 2>/dev/null; }; \
+    printf '%s\n' '-- lint-sql-selftest: must be rejected (cross-schema DML)' \
+      'UPDATE sm.machine SET name = name WHERE false;' > "$plant_cross"; \
+    if run_lint; then \
+      echo 'lint-sql-selftest: expected migration lint to fail on planted cross-schema SQL' >&2; \
+      exit 1; \
+    fi; \
+    echo 'lint-sql-selftest: planted cross-schema migration correctly rejected'; \
+    rm -f "$plant_cross"; \
+    printf '%s\n' '-- lint-sql-selftest: must be rejected (session-protocol bypass)' \
+      "SELECT set_config('datum.actor', 'lint-selftest', true);" > "$plant_session"; \
+    if run_lint; then \
+      echo 'lint-sql-selftest: expected migration lint to fail on planted set_config(datum.*)' >&2; \
+      exit 1; \
+    fi; \
+    echo 'lint-sql-selftest: planted session-protocol migration correctly rejected'; \
+    rm -f "$plant_session"; \
+    printf '%s\n' '-- lint-sql-selftest: paired SECURITY DEFINER must pass net-effect' \
+      'CREATE FUNCTION server.lint_sql_selftest_definer_pair() RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $$ BEGIN NULL; END $$;' > "$plant_create"; \
+    printf '%s\n' 'DROP FUNCTION IF EXISTS server.lint_sql_selftest_definer_pair();' > "$plant_drop"; \
+    if ! run_lint; then \
+      echo 'lint-sql-selftest: expected create-then-drop SECURITY DEFINER to pass' >&2; \
+      exit 1; \
+    fi; \
+    echo 'lint-sql-selftest: create-then-drop SECURITY DEFINER correctly allowed'; \
+    rm -f "$plant_create" "$plant_drop"; \
+    printf '%s\n' '-- lint-sql-selftest: unpaired SECURITY DEFINER must fail' \
+      'CREATE FUNCTION server.lint_sql_selftest_definer_orphan() RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $$ BEGIN NULL; END $$;' > "$plant_orphan"; \
+    if run_lint; then \
+      echo 'lint-sql-selftest: expected migration lint to fail on unpaired SECURITY DEFINER' >&2; \
+      exit 1; \
+    fi; \
+    echo 'lint-sql-selftest: unpaired SECURITY DEFINER correctly rejected'
 
 # All tests, including integration.
 test:
