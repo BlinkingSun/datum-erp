@@ -14,6 +14,7 @@ use datum_ledger::{rebuild, upsert_location, verify_projection};
 use datum_mod_items::{Kind, NewItem, create};
 use datum_mod_locations::{
     CreateLocation, LocationKind, boundary_location_id, create as create_location, default_site_id,
+    seed_install,
 };
 use datum_mod_lots::{CreateLot, DOC_TYPE as LOT_DOC, LotStatus, create_lot};
 use datum_statemachine::{DocRef, Veto};
@@ -102,19 +103,29 @@ fn lot_receipt(
 async fn compose_once(db: datum_test::TestDb, profile: Profile, label: &str) {
     migrate_and_install(&db).await;
 
-    let supplier = boundary_location_id(Boundary::Supplier);
+    let write_boot = datum_db::WritePool::new(db.app_pool().clone());
+    let mut tx = Tx::begin(&write_boot, &boot_ctx()).await.expect("seed tx");
+    seed_install(&mut tx).await.expect("location boundaries");
+    tx.commit().await.expect("seed commit");
+
     let stock = LocationId::generate();
     let item_slot: Arc<Mutex<Option<ItemId>>> = Arc::new(Mutex::new(None));
+    let supplier_slot: Arc<Mutex<Option<LocationId>>> = Arc::new(Mutex::new(None));
 
     let mut builder = Kernel::builder(db.app_pool().clone(), profile.clone());
     register_wave_2s1(&mut builder, &profile);
     builder.register_hook("mod-lots", LOT_DOC, "release", {
         let item_slot = Arc::clone(&item_slot);
+        let supplier_slot = Arc::clone(&supplier_slot);
         move |view, sink| {
             let item = item_slot
                 .lock()
                 .expect("item slot")
                 .expect("item set before transition");
+            let supplier = supplier_slot
+                .lock()
+                .expect("supplier slot")
+                .expect("supplier set before transition");
             let lot = LotId::from_uuid(view.doc_id.as_uuid());
             lot_receipt(sink, item, lot, stock, supplier)
         }
@@ -129,7 +140,8 @@ async fn compose_once(db: datum_test::TestDb, profile: Profile, label: &str) {
             "items.release",
             "locations.edit",
             "lots.create",
-            "lots.status",
+            "lots.edit",
+            "lots.release",
         ],
     )
     .await;
@@ -137,6 +149,10 @@ async fn compose_once(db: datum_test::TestDb, profile: Profile, label: &str) {
     let mut boot = boot_ctx();
     boot.config_version = Some(profile.spec_version.clone());
     let mut tx = Tx::begin(&write, &boot).await.expect("boot tx");
+    let supplier = boundary_location_id(&mut tx, Boundary::Supplier)
+        .await
+        .expect("supplier boundary");
+    *supplier_slot.lock().expect("supplier slot") = Some(supplier);
     upsert_location(&mut tx, stock, None)
         .await
         .expect("stock ledger");
@@ -171,12 +187,13 @@ async fn compose_once(db: datum_test::TestDb, profile: Profile, label: &str) {
     let mut ctx = datum_db::WriteContext::new(actor, "locations.create", "ui");
     ctx.config_version = Some(profile.spec_version.clone());
     let mut tx = Tx::begin(&write, &ctx).await.expect("loc tx");
+    let site = default_site_id(&mut tx).await.expect("default site");
     let _wh = create_location(
         &mut tx,
         CreateLocation {
             code: "WH-A".into(),
             name: "Warehouse A".into(),
-            site_id: default_site_id(),
+            site_id: site,
             parent_id: None,
             kind: LocationKind::Warehouse,
         },
@@ -188,7 +205,7 @@ async fn compose_once(db: datum_test::TestDb, profile: Profile, label: &str) {
         CreateLocation {
             code: "BIN-01".into(),
             name: "Bin 01".into(),
-            site_id: default_site_id(),
+            site_id: site,
             parent_id: None,
             kind: LocationKind::Bin,
         },
@@ -202,6 +219,8 @@ async fn compose_once(db: datum_test::TestDb, profile: Profile, label: &str) {
     let mut tx = Tx::begin(&write, &ctx).await.expect("lot tx");
     let lot = create_lot(
         &mut tx,
+        &kernel,
+        &ctx,
         CreateLot {
             item: item.id,
             number: Some("LOT-BAR-24-4412".into()),
@@ -220,13 +239,6 @@ async fn compose_once(db: datum_test::TestDb, profile: Profile, label: &str) {
     let mut rel_ctx = kernel.transition_context(actor, &doc, "release");
     rel_ctx.actor_display = Some("Operator".into());
     rel_ctx.reason = Some("2s1-compose".into());
-
-    let mut tx = Tx::begin(&write, &rel_ctx).await.expect("spawn lot");
-    kernel
-        .spawn(&mut tx, &doc, "quarantine")
-        .await
-        .expect("spawn lot");
-    tx.commit().await.expect("commit spawn");
 
     if lots_release_is_required(&profile) {
         let mut tx = Tx::begin(&write, &rel_ctx).await.expect("regulated tr");

@@ -6,18 +6,18 @@ mod common;
 
 use datum_core::{PermissionKey, SignatureMeaning, SignatureRequirement};
 use datum_db::Tx;
+use datum_mod_lots::{
+    CreateLot, DOC_TYPE, Error, Lot, LotStatus, StatusTarget, create_lot, load_lot, manifest,
+    register_schemas, set_status,
+};
 use datum_module::{Kernel, Profile};
 use datum_statemachine::{EdgeBuilder, Engine, Machine};
-use lots::{
-    CreateLot, LotStatus, StatusTarget, create_lot, load_lot, manifest, set_status,
-    states::DOC_TYPE,
-};
 
 use crate::common::{
     actor_with_lots_perms, boot_kernel, edge_ctx, sm_instance_count, write_ctx, write_pool,
 };
 
-async fn lot_in_quarantine(db: &datum_test::TestDb, kernel: &Kernel) -> lots::Lot {
+async fn lot_in_quarantine(db: &datum_test::TestDb, kernel: &Kernel) -> Lot {
     let write = write_pool(db);
     let ctx = write_ctx("lots.edit");
     let mut tx = Tx::begin(&write, &ctx).await.unwrap();
@@ -41,10 +41,10 @@ async fn lot_in_quarantine(db: &datum_test::TestDb, kernel: &Kernel) -> lots::Lo
 async fn transition(
     db: &datum_test::TestDb,
     kernel: &Kernel,
-    lot: lots::Lot,
+    lot: Lot,
     edge: &str,
     to: LotStatus,
-) -> lots::Lot {
+) -> Lot {
     let write = write_pool(db);
     let actor = actor_with_lots_perms(&write).await;
     let ctx = edge_ctx(kernel, actor, lot.id, edge);
@@ -174,11 +174,8 @@ async fn lot_illegal_jump_quarantine_to_hold_is_refused() {
     .await
     .unwrap_err();
     assert!(
-        matches!(err, lots::Error::InvalidTransition { .. })
-            || matches!(
-                err,
-                lots::Error::Module(datum_module::Error::Statemachine(_))
-            ),
+        matches!(err, Error::InvalidTransition { .. })
+            || matches!(err, Error::Module(datum_module::Error::Statemachine(_))),
         "got {err:?}"
     );
     tx.rollback().await.unwrap();
@@ -256,7 +253,7 @@ async fn lot_release_regulated_profile_refuses_under_no_signatures() {
         )),
         "regulated profile lists Required release"
     );
-    lots::register_schemas().expect("schemas");
+    register_schemas().expect("schemas");
     let mut builder = Kernel::builder(db.app_pool().clone(), profile);
     builder
         .register_machine(
@@ -343,12 +340,12 @@ async fn lot_release_regulated_profile_refuses_under_no_signatures() {
     assert!(
         matches!(
             err,
-            lots::Error::Module(datum_module::Error::Statemachine(
+            Error::Module(datum_module::Error::Statemachine(
                 datum_statemachine::Error::Signature(datum_core::SignatureError::NoProvider)
             ))
         ) || matches!(
             err,
-            lots::Error::Module(datum_module::Error::Statemachine(
+            Error::Module(datum_module::Error::Statemachine(
                 datum_statemachine::Error::Signature(datum_core::SignatureError::Invalid(_))
             ))
         ),

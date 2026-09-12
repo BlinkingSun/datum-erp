@@ -4,9 +4,9 @@ use datum_core::{Actor, ActorKind, Identifier, ItemId, LotId};
 use datum_db::{Tx, WriteContext, WritePool};
 use datum_identity::rbac::{RoleBundle, assign_role, seed_bundles};
 use datum_identity::{PrincipalKind, SYSTEM_ID, create_principal};
+use datum_mod_lots::DOC_TYPE;
 use datum_module::{Kernel, Profile};
 use datum_statemachine::DocRef;
-use lots::states::DOC_TYPE;
 use sqlx::{PgPool, query_scalar as sql_query_scalar};
 
 pub async fn actor_with_lots_perms(write: &WritePool) -> Actor {
@@ -96,7 +96,7 @@ pub async fn migrate(db: &datum_test::TestDb) {
 pub async fn boot_kernel(db: &datum_test::TestDb) -> Kernel {
     migrate_kernel(db).await;
     let mut builder = Kernel::builder(db.app_pool().clone(), Profile::plain_shop().unwrap());
-    lots::apply(&mut builder).expect("apply lots");
+    datum_mod_lots::register(&mut builder, &Profile::plain_shop().unwrap()).expect("register lots");
     builder.build().await.expect("kernel build")
 }
 

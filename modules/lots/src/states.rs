@@ -2,7 +2,9 @@
 //! [`datum_module::KernelBuilder`]. This module never posts; the inventory module
 //! posts the quarantine/available movement.
 
-use datum_core::{Identifier, LotId, PermissionKey, SerialId, SignatureMeaning, SignatureRequirement};
+use datum_core::{
+    Identifier, LotId, PermissionKey, SerialId, SignatureMeaning, SignatureRequirement,
+};
 use datum_module::Profile;
 use datum_statemachine::{DocRef, EdgeBuilder, Machine};
 
@@ -27,16 +29,14 @@ pub fn lot_machine(profile: &Profile) -> Result<Machine> {
     for s in STATES {
         b = b.state(s.as_str());
     }
-    let release = EdgeBuilder::new("quarantine", "available", "release", "lots.status");
+    let release = EdgeBuilder::new("quarantine", "available", "release", "lots.release");
     b = if regulated {
         b.edge(release.required(SignatureRequirement {
             meaning: SignatureMeaning("Lot released".into()),
-            permission: PermissionKey("lots.status".into()),
+            permission: PermissionKey("lots.release".into()),
         }))
     } else {
-        b.edge(
-            release.not_required("lot status is a business record; inventory posts the movement"),
-        )
+        b.edge(release.not_required("lot release is not a regulated signature point in Wave 2s.1"))
     };
     for (from, to, name) in [
         ("available", "hold", "hold"),
@@ -46,7 +46,7 @@ pub fn lot_machine(profile: &Profile) -> Result<Machine> {
         ("hold", "rejected", "reject_from_hold"),
     ] {
         b = b.edge(
-            EdgeBuilder::new(from, to, name, "lots.status")
+            EdgeBuilder::new(from, to, name, "lots.edit")
                 .not_required("lot status is a business record; inventory posts the movement"),
         );
     }

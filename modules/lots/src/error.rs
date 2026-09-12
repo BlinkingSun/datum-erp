@@ -58,9 +58,6 @@ pub enum Error {
     /// JSON / serde failure.
     #[error(transparent)]
     Json(#[from] serde_json::Error),
-    /// State-machine error.
-    #[error(transparent)]
-    Statemachine(#[from] datum_statemachine::Error),
     /// Status cannot move along this edge.
     #[error("invalid transition {edge} from status {status}")]
     InvalidTransition {
