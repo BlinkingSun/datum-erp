@@ -20,12 +20,18 @@ wrong, and finding that out before thirteen crates were built on them was the en
 
 | | |
 |---|---|
-| Phase | Planning complete. Execution not started. |
-| Code | None. |
-| Plan audit | Returned REVISE, 28 gaps. All blocking items resolved. |
-| Decisions | 9 records. 0003 Accepted as amended. 0006 open. The rest Proposed. |
-| Blocked on | Two calls from the project owner. See section 5. |
-| Repository | Local only, branch `main`, two commits, no remote. |
+| Phase | **Wave 1 integrated (2026-09-12).** Wave 2 batch 2.1 (`datum-db`) is next. |
+| Code | Workspace of 17 crates; `datum-core` complete (44+ tests); `datum-test` harness (8 tests, commit mode, canary); `datum-db` real transaction and pool parts; 14 compiling stubs. `just ci` and `just ci-db` green on `main`. |
+| Plan audit | Cycle 2 of 2: APPROVE after closure check. |
+| Decisions | 9 ADRs (0003 and 0006 Accepted) + five build decisions D-W1-1..5 in `research/decisions/`. |
+| Blocked on | The visual approval gate (section 5). Nothing backend waits on it. |
+| Repository | Public `github.com/BlinkingSun/datum-erp`, `main` only, Actions off until the three-node local CI round. Private mirror `datum-dev`. |
+
+**How Wave 1 was built (for whoever resumes):** `PLAN.md` §0 lists what changed from v1; the integration
+contract is `docs/09-workspace-contract.md`; the Wave 2 specs for batches 2.1 and 2.2 are written
+(`_team/specs/SPEC-datum-db.md`, `SPEC-audit.md`) and the next batch spec is always written one batch ahead.
+Tooling and process lessons of this run are in the ledger annotations (`_team/reports/AGENTS.md`) and in
+`CLOSURES.md`, which is the honest record of every failed slot, including the two the orchestrator caused.
 
 ## 3. Read these in this order
 
@@ -86,8 +92,9 @@ product. The genealogy trace is the right idea and the text in its side panel is
 generation artifact rather than a design. The item master is clean but far too sparse for a
 real office screen and should be pushed harder before anyone builds it.
 
-**The license** (`docs/adr/0006-license.md`). This is the one genuinely irreversible
-decision and it must be settled before the first public commit, because relicensing later
+**The license** — settled 2026-09-12: AGPL-3.0-or-later with a Developer Certificate of Origin (ADR 0006
+Accepted). Kept below for the reasoning. It was the one genuinely irreversible decision and had to be settled
+before the first public commit, because relicensing later
 needs consent from every contributor and that is sometimes impossible to obtain.
 
 Recommendation: AGPL-3.0, with a developer certificate of origin rather than a contributor
