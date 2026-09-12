@@ -1,0 +1,24 @@
+[module]
+id = "mod-locations"
+version = "0.1.0"
+name = "Locations"
+description = "Warehouses, areas, bins, and ledger virtual locations"
+
+[dependencies]
+kernel = "^0.1"
+
+[permissions]
+"locations.view" = "View locations"
+"locations.edit" = "Create and update locations"
+
+[capabilities]
+requires-signature = []
+regulated = false
+
+[[routes]]
+path = "/api/v1/locations"
+permission = "locations.view"
+
+[[routes]]
+path = "/api/v1/locations/tree"
+permission = "locations.view"

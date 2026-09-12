@@ -1,0 +1,84 @@
+[module]
+id = "lots"
+version = "0.1.0"
+name = "Lots"
+description = "Lot and serial identity, package hierarchy, expiry precision, and UDI attachment"
+
+[dependencies]
+kernel = "^0.1"
+
+[permissions]
+"lots.view" = "View lots, serials, and packages"
+"lots.create" = "Create lots, serials, and packages"
+"lots.status" = "Change lot or serial status"
+
+[capabilities]
+requires-signature = []
+regulated = false
+
+[[machines]]
+doc_type = "lot"
+regulated = false
+states = ["quarantine", "available", "hold", "rejected"]
+
+[[machines.edges]]
+from = "quarantine"
+to = "available"
+name = "release"
+permission = "lots.status"
+reason = "lot status is a business record; inventory posts the movement"
+
+[[machines.edges]]
+from = "available"
+to = "hold"
+name = "hold"
+permission = "lots.status"
+reason = "lot status is a business record; inventory posts the movement"
+
+[[machines.edges]]
+from = "hold"
+to = "available"
+name = "unhold"
+permission = "lots.status"
+reason = "lot status is a business record; inventory posts the movement"
+
+[[machines.edges]]
+from = "quarantine"
+to = "rejected"
+name = "reject_from_quarantine"
+permission = "lots.status"
+reason = "lot status is a business record; inventory posts the movement"
+
+[[machines.edges]]
+from = "available"
+to = "rejected"
+name = "reject"
+permission = "lots.status"
+reason = "lot status is a business record; inventory posts the movement"
+
+[[machines.edges]]
+from = "hold"
+to = "rejected"
+name = "reject_from_hold"
+permission = "lots.status"
+reason = "lot status is a business record; inventory posts the movement"
+
+[[routes]]
+path = "/api/v1/lots"
+permission = "lots.view"
+
+[[routes]]
+path = "/api/v1/lots/{id}"
+permission = "lots.view"
+
+[[routes]]
+path = "/api/v1/lots/{id}/serials"
+permission = "lots.view"
+
+[[routes]]
+path = "/api/v1/lots/{id}/status"
+permission = "lots.status"
+
+[[routes]]
+path = "/api/v1/lots/{id}/packages"
+permission = "lots.view"

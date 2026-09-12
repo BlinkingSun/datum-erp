@@ -1,0 +1,50 @@
+[module]
+id = "items"
+version = "0.1.0"
+name = "Items"
+description = "Part master: number, revision, description, type, stocking unit, lifecycle status."
+
+[dependencies]
+kernel = "^0.1"
+
+[permissions]
+"items.view" = "View items"
+"items.edit" = "Create and update items"
+"items.release" = "Release or obsolete an item"
+
+[capabilities]
+requires-signature = []
+regulated = false
+
+[[routes]]
+path = "/api/v1/items"
+permission = "items.view"
+
+[[routes]]
+path = "/api/v1/items/{id}"
+permission = "items.view"
+
+[[routes]]
+path = "/api/v1/items/{id}/release"
+permission = "items.release"
+
+[[machines]]
+doc_type = "items"
+regulated = false
+states = ["draft", "released", "obsolete"]
+
+[[machines.edges]]
+from = "draft"
+to = "released"
+name = "release"
+permission = "items.release"
+required = false
+reason = "item release is not a regulated signature point in v1"
+
+[[machines.edges]]
+from = "released"
+to = "obsolete"
+name = "obsolete"
+permission = "items.release"
+required = false
+reason = "item release is not a regulated signature point in v1"
