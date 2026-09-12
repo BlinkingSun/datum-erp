@@ -245,7 +245,7 @@ architecture and it is the screen that demonstrates the product.
 |---|---|
 | `mod-items` | Part master: number, revision, description, type, stocking unit, lifecycle status. |
 | `mod-locations` | Warehouses, areas, bins, and the ledger's virtual locations (supplier, customer, scrap, adjustment, WIP). |
-| `mod-lots` | Lot and serial identity with the generation constraint (invariant 9), tracked-entity indirection (10), package hierarchy (11), expiry with precision (12). |
+| `mod-lots` | Lot and serial identity with the generation constraint (invariant 9), tracked-entity indirection (10), package hierarchy (11), expiry with precision (12), and the **UDI attachment point**: a nullable, module-populated kernel column on lot and serial records (and on shipment records when shipping lands), populated by the Phase 6 UDI module and never a custom field (`research/background/regulatory.md` §1.0.7). |
 | `mod-inventory` | Receipts, issues, moves, adjustments over the ledger; on-hand / allocated / available as rebuildable projections; status (available, quarantined, rejected, hold). |
 | `mod-production-min` | Work order: create, release, issue material, complete, receive finished lot. A `TRANSFORMATION` group with allocation edges. **Not** the Phase 3 `production` module; a minimal surface the full module later subsumes. |
 | `mod-genealogy` | Forward and backward trace over the ledger's consumption edges. Read-only. Returns the tree the mockup draws. |
