@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "State machines and transitions (stub API)."
+description = "Declarative states, transitions, hooks, and signature obligation."
 build = "build.rs"
 
 [lints]
@@ -16,16 +16,21 @@ default = []
 test-utils = []
 
 [dependencies]
+chrono.workspace = true
+datum-audit.workspace = true
 datum-core.workspace = true
 datum-db.workspace = true
-datum-audit.workspace = true
 datum-identity.workspace = true
+serde.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
-serde.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 datum-test.workspace = true
-tokio.workspace = true
 proptest.workspace = true
-
+rust_decimal.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+trybuild.workspace = true
+uuid.workspace = true

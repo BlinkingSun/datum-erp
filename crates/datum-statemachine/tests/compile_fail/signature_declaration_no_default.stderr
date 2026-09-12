@@ -1,0 +1,5 @@
+error[E0599]: no variant, associated function, or constant named `default` found for enum `SignatureDeclaration` in the current scope
+ --> tests/compile_fail/signature_declaration_no_default.rs:2:55
+  |
+2 |     let _ = datum_statemachine::SignatureDeclaration::default();
+  |                                                       ^^^^^^^ variant, associated function, or constant not found in `SignatureDeclaration`
