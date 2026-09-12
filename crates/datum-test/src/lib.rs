@@ -6,6 +6,8 @@
 
 #![allow(clippy::disallowed_methods, clippy::disallowed_macros)] // test harness: creates and drops databases and probes sessions with raw SQL; never ships in the binary; CONTRACT section 5a exemption
 
+#[cfg(test)]
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -300,6 +302,9 @@ fn is_sqlstate_55006(err: &sqlx::Error) -> bool {
         .is_some_and(|c| c == "55006")
 }
 
+#[cfg(test)]
+static CREATE_DATABASE_55006_RETRIES: AtomicUsize = AtomicUsize::new(0);
+
 async fn create_database(bootstrap_url: &str, database: &str, template: &str) -> Result<(), Error> {
     let mut conn = connect_bootstrap(bootstrap_url).await?;
     let sql = format!("CREATE DATABASE {database} OWNER datum_owner TEMPLATE {template}");
@@ -315,6 +320,8 @@ async fn create_database(bootstrap_url: &str, database: &str, template: &str) ->
         {
             Ok(_) => return Ok(()),
             Err(e) if is_sqlstate_55006(&e) => {
+                #[cfg(test)]
+                CREATE_DATABASE_55006_RETRIES.fetch_add(1, Ordering::SeqCst);
                 if original_55006.is_none() {
                     original_55006 = Some(e);
                 }
@@ -471,6 +478,35 @@ mod tests {
         assert!(postgres_available().is_err());
     }
 
+    /// PostgreSQL's `CountOtherDBBackends` waits up to 5 s before CREATE DATABASE
+    /// returns 55006. The hold task runs `pg_sleep(0.8)` then keeps that
+    /// connection open so the wait expires as 55006 instead of succeeding.
+    async fn wait_until_template_pg_sleep(bootstrap_url: &str, template: &str) {
+        let mut probe = connect_bootstrap(bootstrap_url)
+            .await
+            .expect("pg_stat_activity probe");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let n: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM pg_stat_activity \
+                 WHERE datname = $1 AND pid <> pg_backend_pid() \
+                   AND query ILIKE '%pg_sleep%'",
+            )
+            .bind(template)
+            .fetch_one(&mut probe)
+            .await
+            .expect("pg_stat_activity");
+            if n > 0 {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "pg_sleep never appeared in pg_stat_activity for {template}"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
     #[tokio::test]
     async fn clone_retries_while_template_is_in_use() {
         if std::env::var("DATUM_REQUIRE_PG").ok().as_deref() == Some("1") {
@@ -479,24 +515,62 @@ mod tests {
             return;
         }
 
+        CREATE_DATABASE_55006_RETRIES.store(0, Ordering::SeqCst);
+
         let template = std::env::var("DATUM_TEST_TEMPLATE").expect("DATUM_TEST_TEMPLATE");
         assert_safe_ident(&template).expect("template ident");
-        let migrate_url = required_url("DATUM_MIGRATE_DATABASE_URL").expect("migrate url");
-        let template_url = rewrite_database(&migrate_url, &template).expect("template url");
+        let bootstrap_url = required_url("DATUM_BOOTSTRAP_URL").expect("bootstrap url");
+        let template_url = rewrite_database(&bootstrap_url, &template).expect("template url");
+        let opts = bootstrap_options(&template_url).expect("template bootstrap opts");
+        let mut hold_conn = PgConnection::connect_with(&opts)
+            .await
+            .expect("connect to template");
 
+        let (armed, wait_armed) = tokio::sync::oneshot::channel();
         let hold = tokio::spawn(async move {
-            let conn = PgConnection::connect(&template_url)
+            let _ = armed.send(());
+            sqlx::query("SELECT pg_sleep(0.8)")
+                .execute(&mut hold_conn)
                 .await
-                .expect("connect to template");
-            tokio::time::sleep(Duration::from_millis(300)).await;
-            drop(conn);
+                .expect("pg_sleep on template");
+            // Keep the backend until the clone task records 55006 and aborts us.
+            // A short sleep is swallowed by CountOtherDBBackends (5 s wait).
+            let _hold_conn = hold_conn;
+            std::future::pending::<()>().await;
         });
 
-        let db = TestDb::case("clone_retry_hold")
-            .await
-            .expect("clone while template session is held");
-        hold.await.expect("hold task");
+        wait_armed.await.expect("hold reached pg_sleep");
+        wait_until_template_pg_sleep(&bootstrap_url, &template).await;
 
+        let clone = tokio::spawn(async { TestDb::case("clone_retry_hold").await });
+
+        let deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            if CREATE_DATABASE_55006_RETRIES.load(Ordering::SeqCst) >= 1 {
+                break;
+            }
+            if clone.is_finished() {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for CREATE DATABASE 55006 while template was held"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+
+        hold.abort();
+        let _ = hold.await;
+
+        let db = clone
+            .await
+            .expect("clone task")
+            .expect("clone while template session is held");
+        let retries = CREATE_DATABASE_55006_RETRIES.load(Ordering::SeqCst);
+        assert!(
+            retries >= 1,
+            "expected at least one 55006 retry, got {retries}"
+        );
         db.finish().await.expect("finish");
     }
 
