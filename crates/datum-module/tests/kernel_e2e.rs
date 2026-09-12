@@ -1,0 +1,673 @@
+//! Finding 2: composed kernel path as `datum-module` would drive it.
+
+#![allow(clippy::unwrap_used, clippy::expect_used, unused_crate_dependencies)]
+
+mod common;
+
+use datum_core::{
+    AnyQuantity, Boundary, ConversionContext, CostElement, CountDim, CurrencyId, DimensionKind,
+    Identifier, ItemId, LocationId, Money, PermissionKey, PostingIntent, PostingSink, Quantity,
+    QuantityPosting, SignatureError, SignatureId, SignatureMeaning, SignatureRequirement,
+    SignatureToken, UnitId, UnitRef, ValueAccount, ValuePosting,
+};
+use datum_db::Tx;
+use datum_ledger::{CostMethod, rebuild, upsert_location, upsert_stock_item, verify_projection};
+use datum_statemachine::{DocRef, EdgeBuilder, Machine, Veto};
+use datum_test::db_case;
+use rust_decimal::Decimal;
+use serde_json::json;
+use sqlx::query_scalar;
+
+use datum_module::{KERNEL_ORDER, Kernel, Profile, SignatureEdge};
+
+use common::{actor_with_perms, boot_ctx, has_zz_audit, migrate_and_install, pg_code};
+
+const DOC_TYPE: &str = "e2e.doc";
+const RECEIVE: &str = "receive";
+const ISSUE: &str = "issue";
+const APPROVE: &str = "approve";
+const EA: UnitId = UnitId(1);
+
+fn qty_ea(n: i64) -> AnyQuantity {
+    AnyQuantity {
+        amount: Decimal::from(n),
+        unit: EA,
+        dimension: DimensionKind::Count,
+    }
+}
+
+fn usd(n: i64) -> Money {
+    Money::new(Decimal::from(n), CurrencyId(840)).expect("usd")
+}
+
+fn q_post(
+    item: ItemId,
+    qty: AnyQuantity,
+    location: LocationId,
+    boundary: Option<Boundary>,
+) -> QuantityPosting {
+    QuantityPosting {
+        item,
+        quantity: qty,
+        location,
+        boundary,
+        lot: None,
+        serial: None,
+        entered: None,
+    }
+}
+
+fn veto_of(err: datum_core::PostingError) -> Veto {
+    Veto {
+        module: "mod-inventory".into(),
+        reason: err.to_string(),
+    }
+}
+
+fn contribute_receipt(
+    sink: &mut dyn PostingSink,
+    item: ItemId,
+    stock: LocationId,
+    supplier: LocationId,
+) -> core::result::Result<(), Veto> {
+    let recv = sink
+        .contribute(PostingIntent::Quantity(q_post(
+            item,
+            qty_ea(1),
+            stock,
+            None,
+        )))
+        .map_err(veto_of)?;
+    sink.contribute(PostingIntent::Quantity(q_post(
+        item,
+        qty_ea(-1),
+        supplier,
+        Some(Boundary::Supplier),
+    )))
+    .map_err(veto_of)?;
+    sink.contribute(PostingIntent::Value(ValuePosting {
+        account: ValueAccount::Inventory,
+        cost_element: CostElement::Material,
+        cost_object: None,
+        amount: usd(10),
+        values: Some(recv),
+    }))
+    .map_err(veto_of)?;
+    sink.contribute(PostingIntent::Value(ValuePosting {
+        account: ValueAccount::ApAccrual,
+        cost_element: CostElement::Material,
+        cost_object: None,
+        amount: usd(-10),
+        values: None,
+    }))
+    .map_err(veto_of)?;
+    Ok(())
+}
+
+fn contribute_issue(
+    sink: &mut dyn PostingSink,
+    item: ItemId,
+    stock: LocationId,
+    customer: LocationId,
+) -> core::result::Result<(), Veto> {
+    let out = sink
+        .contribute(PostingIntent::Quantity(q_post(
+            item,
+            qty_ea(-1),
+            stock,
+            None,
+        )))
+        .map_err(veto_of)?;
+    sink.contribute(PostingIntent::Quantity(q_post(
+        item,
+        qty_ea(1),
+        customer,
+        Some(Boundary::Customer),
+    )))
+    .map_err(veto_of)?;
+    sink.contribute(PostingIntent::Value(ValuePosting {
+        account: ValueAccount::Inventory,
+        cost_element: CostElement::Material,
+        cost_object: None,
+        amount: usd(-10),
+        values: Some(out),
+    }))
+    .map_err(veto_of)?;
+    sink.contribute(PostingIntent::Value(ValuePosting {
+        account: ValueAccount::Cogs,
+        cost_element: CostElement::Material,
+        cost_object: None,
+        amount: usd(10),
+        values: None,
+    }))
+    .map_err(veto_of)?;
+    Ok(())
+}
+
+/// One regulated machine: total `SignatureDeclaration` on every edge; one Required,
+/// two sequential NotRequired (receipt then issue). A single plain edge cannot
+/// sequence two postings under `NoSignatures`.
+fn e2e_machine() -> Machine {
+    Machine::builder(DOC_TYPE)
+        .regulated(true)
+        .state("Open")
+        .state("Received")
+        .state("Issued")
+        .state("Closed")
+        .edge(
+            EdgeBuilder::new("Open", "Received", RECEIVE, "wo.release")
+                .not_required("lot-less receipt; unsigned under NoSignatures"),
+        )
+        .edge(
+            EdgeBuilder::new("Received", "Issued", ISSUE, "wo.release")
+                .not_required("lot-less issue; unsigned under NoSignatures"),
+        )
+        .edge(
+            EdgeBuilder::new("Open", "Closed", APPROVE, "calibration.approve").required(
+                SignatureRequirement {
+                    meaning: SignatureMeaning("Approved".into()),
+                    permission: PermissionKey("calibration.approve".into()),
+                },
+            ),
+        )
+        .build()
+        .unwrap()
+}
+
+fn dummy_token(doc: &DocRef, version: i64, actor: datum_core::Actor) -> SignatureToken {
+    SignatureToken {
+        signature: SignatureId::generate(),
+        signer: actor,
+        meaning: SignatureMeaning("Approved".into()),
+        record: datum_core::RecordRef {
+            table: "sm.instance".into(),
+            id: doc.doc_id,
+            version,
+        },
+        record_content_hash: [0; 32],
+    }
+}
+
+async fn assert_migrators_and_history(db: &datum_test::TestDb) {
+    assert!(
+        has_zz_audit(db.migrate_pool(), "datum", "schema_history").await,
+        "schema_history attached after migrate_suffix"
+    );
+    let crates: Vec<String> = sqlx::query_scalar("SELECT DISTINCT crate FROM datum.schema_history")
+        .fetch_all(db.app_pool())
+        .await
+        .expect("schema_history");
+    for name in KERNEL_ORDER
+        .iter()
+        .copied()
+        .chain(std::iter::once("datum-module"))
+    {
+        assert!(
+            crates.iter().any(|c| c == name),
+            "schema_history missing {name}, have {crates:?}"
+        );
+    }
+}
+
+async fn assert_builtins(db: &datum_test::TestDb) {
+    let n: i64 = query_scalar(
+        "SELECT count(*) FROM identity.principal WHERE username IN ('system', 'migration')",
+    )
+    .fetch_one(db.app_pool())
+    .await
+    .expect("builtins");
+    assert_eq!(n, 2, "Kernel::build seeds identity builtins");
+}
+
+async fn seed_item_world(
+    write: &datum_db::WritePool,
+    item: ItemId,
+    stock: LocationId,
+    supplier: LocationId,
+    customer: LocationId,
+) {
+    let mut tx = Tx::begin(write, &boot_ctx()).await.expect("seed world");
+    upsert_stock_item(&mut tx, item, EA, 0, Decimal::ZERO, CostMethod::Fifo, None)
+        .await
+        .expect("stock item");
+    tx.execute(
+        sqlx::query(
+            "INSERT INTO uom.item_stock (item_id, stock_unit_id, stock_scale)
+             VALUES ($1, $2, $3)",
+        )
+        .bind(item.as_uuid())
+        .bind(EA.0)
+        .bind(0_i16),
+    )
+    .await
+    .expect("uom.item_stock");
+    upsert_location(&mut tx, stock, None)
+        .await
+        .expect("stock loc");
+    upsert_location(&mut tx, supplier, Some(Boundary::Supplier))
+        .await
+        .expect("supplier");
+    upsert_location(&mut tx, customer, Some(Boundary::Customer))
+        .await
+        .expect("customer");
+    tx.commit().await.expect("commit seed");
+}
+
+async fn count_audit(pool: &sqlx::PgPool, actor: Identifier, table: &str, op: &str) -> i64 {
+    query_scalar(
+        "SELECT count(*) FROM audit.event
+          WHERE actor_id = $1 AND table_name = $2 AND op = $3",
+    )
+    .bind(actor.as_uuid())
+    .bind(table)
+    .bind(op)
+    .fetch_one(pool)
+    .await
+    .expect("audit count")
+}
+
+async fn assert_conservation(pool: &sqlx::PgPool) {
+    let bad_qty: i64 = query_scalar(
+        "SELECT count(*) FROM (
+            SELECT group_id, item_id, uom_id
+              FROM ledger.posting
+             WHERE measure = 'QUANTITY'
+             GROUP BY group_id, item_id, uom_id
+            HAVING SUM(quantity) <> 0
+         ) t",
+    )
+    .fetch_one(pool)
+    .await
+    .expect("p1");
+    assert_eq!(
+        bad_qty, 0,
+        "per-slice quantity conservation (group, item, uom)"
+    );
+    let bad_val: i64 = query_scalar(
+        "SELECT count(*) FROM (
+            SELECT group_id
+              FROM ledger.posting
+             WHERE measure = 'VALUE'
+             GROUP BY group_id
+            HAVING SUM(amount) <> 0
+         ) t",
+    )
+    .fetch_one(pool)
+    .await
+    .expect("p2");
+    assert_eq!(bad_val, 0, "per-group value conservation");
+}
+
+async fn assert_actor_audit(pool: &sqlx::PgPool, actor: Identifier, spec_version: &str) {
+    assert_eq!(count_audit(pool, actor, "instance", "INSERT").await, 2);
+    assert_eq!(count_audit(pool, actor, "instance", "UPDATE").await, 2);
+    assert_eq!(count_audit(pool, actor, "posting_group", "INSERT").await, 2);
+    assert_eq!(count_audit(pool, actor, "posting", "INSERT").await, 8);
+    assert_eq!(count_audit(pool, actor, "consumption", "INSERT").await, 1);
+    assert_eq!(count_audit(pool, actor, "event", "INSERT").await, 1);
+    let unstamped: i64 = query_scalar(
+        "SELECT count(*) FROM audit.event
+          WHERE actor_id = $1
+            AND (app_version IS NULL OR app_version = ''
+                 OR config_version IS DISTINCT FROM $2)",
+    )
+    .bind(actor.as_uuid())
+    .bind(spec_version)
+    .fetch_one(pool)
+    .await
+    .expect("stamps");
+    assert_eq!(
+        unstamped, 0,
+        "invariants 3/5/17: actor audit rows carry app_version and config_version"
+    );
+}
+
+async fn instance_state(pool: &sqlx::PgPool, doc: &DocRef) -> String {
+    query_scalar("SELECT state FROM sm.instance WHERE doc_type = $1 AND doc_id = $2")
+        .bind(&doc.doc_type)
+        .bind(doc.doc_id.as_uuid())
+        .fetch_one(pool)
+        .await
+        .expect("instance state")
+}
+
+async fn instance_row_count(pool: &sqlx::PgPool, doc: &DocRef) -> i64 {
+    query_scalar("SELECT count(*) FROM sm.instance WHERE doc_type = $1 AND doc_id = $2")
+        .bind(&doc.doc_type)
+        .bind(doc.doc_id.as_uuid())
+        .fetch_one(pool)
+        .await
+        .expect("instance exists")
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LedgerSnap {
+    posting: i64,
+    posting_group: i64,
+    consumption: i64,
+    instance_state: String,
+}
+
+async fn ledger_snap(pool: &sqlx::PgPool, doc: &DocRef) -> LedgerSnap {
+    let posting: i64 = query_scalar("SELECT count(*) FROM ledger.posting")
+        .fetch_one(pool)
+        .await
+        .expect("posting count");
+    let posting_group: i64 = query_scalar("SELECT count(*) FROM ledger.posting_group")
+        .fetch_one(pool)
+        .await
+        .expect("posting_group count");
+    let consumption: i64 = query_scalar("SELECT count(*) FROM ledger.consumption")
+        .fetch_one(pool)
+        .await
+        .expect("consumption count");
+    LedgerSnap {
+        posting,
+        posting_group,
+        consumption,
+        instance_state: instance_state(pool, doc).await,
+    }
+}
+
+async fn composed_path(db: &datum_test::TestDb, profile: Profile, rebuild_projections: bool) {
+    assert_migrators_and_history(db).await;
+
+    let item = ItemId::generate();
+    let stock = LocationId::generate();
+    let supplier = LocationId::generate();
+    let customer = LocationId::generate();
+
+    let mut builder = Kernel::builder(db.app_pool().clone(), profile);
+    builder.register_machine(e2e_machine()).unwrap();
+    builder.register_hook("mod-inventory", DOC_TYPE, RECEIVE, move |_v, sink| {
+        contribute_receipt(sink, item, stock, supplier)
+    });
+    builder.register_hook("mod-inventory", DOC_TYPE, ISSUE, move |_v, sink| {
+        contribute_issue(sink, item, stock, customer)
+    });
+    let mut kernel = builder.build().await.expect("Kernel::build");
+    assert_builtins(db).await;
+
+    let late = Machine::builder("late.e2e")
+        .edge(EdgeBuilder::new("X", "Y", "n", "wo.release"))
+        .build()
+        .unwrap();
+    let frozen = kernel.engine.register_machine(late).expect_err("frozen");
+    assert!(
+        matches!(frozen, datum_statemachine::Error::Frozen),
+        "got {frozen:?}"
+    );
+
+    let stored = datum_module::export_manifest(db.app_pool())
+        .await
+        .expect("manifest");
+    assert!(
+        kernel.profile.required_edges().iter().any(|e| matches!(
+            e,
+            SignatureEdge::Required { edge, module, .. }
+                if edge == APPROVE && module == DOC_TYPE
+        )),
+        "live Required set lists {DOC_TYPE}.{APPROVE}"
+    );
+    assert!(
+        stored.signature_edges.iter().any(|e| e.is_required()
+            && matches!(
+                e,
+                SignatureEdge::Required { edge, module, .. }
+                    if edge == APPROVE && module == DOC_TYPE
+            )),
+        "must-assert 7: manifest lists the Required edge"
+    );
+
+    let write = kernel.write_pool();
+    seed_item_world(&write, item, stock, supplier, customer).await;
+
+    let actor = actor_with_perms(&write, &["wo.release", "calibration.approve"]).await;
+    let flow = DocRef {
+        doc_type: DOC_TYPE.into(),
+        doc_id: Identifier::generate(),
+    };
+    let mut recv_ctx = Kernel::transition_context(actor, &flow, RECEIVE);
+    recv_ctx.actor_display = Some("Operator".into());
+    recv_ctx.reason = Some("kernel-e2e".into());
+    recv_ctx.config_version = Some(kernel.profile.spec_version.clone());
+
+    let pool = db.app_pool();
+    let mut tx = Tx::begin(&write, &recv_ctx).await.expect("spawn flow");
+    kernel
+        .spawn(&mut tx, &flow, "Open")
+        .await
+        .expect("spawn flow");
+    tx.commit().await.expect("commit spawn flow");
+
+    assert_eq!(
+        instance_row_count(pool, &flow).await,
+        1,
+        "spawned instance row"
+    );
+    assert_eq!(
+        instance_state(pool, &flow).await,
+        "Open",
+        "spawned instance is Open"
+    );
+    let spawn_inserts = count_audit(pool, actor.id, "instance", "INSERT").await;
+    assert_eq!(
+        spawn_inserts, 1,
+        "actor instance INSERT rows immediately after spawn, got {spawn_inserts}"
+    );
+
+    let mut tx = Tx::begin(&write, &recv_ctx).await.expect("receive tx");
+    let inst = kernel
+        .transition(&mut tx, &flow, RECEIVE, None, &recv_ctx)
+        .await
+        .expect("plain receive");
+    assert_eq!(inst.state.0, "Received");
+    tx.commit().await.expect("commit receive");
+
+    assert_eq!(
+        instance_state(pool, &flow).await,
+        "Received",
+        "receive committed state"
+    );
+    let recv_group: sqlx::types::Uuid =
+        query_scalar("SELECT group_id FROM ledger.posting_group WHERE source_id = $1")
+            .bind(flow.doc_id.as_uuid())
+            .fetch_one(pool)
+            .await
+            .expect("receive group id");
+    let recv_postings: i64 =
+        query_scalar("SELECT count(*) FROM ledger.posting WHERE group_id = $1")
+            .bind(recv_group)
+            .fetch_one(pool)
+            .await
+            .expect("receive postings");
+    assert_eq!(recv_postings, 4, "receive group {recv_group} posting count");
+
+    let mut tx = Tx::begin(&write, &recv_ctx).await.expect("uom/event tx");
+    let catalog = datum_uom::load_catalog(&mut tx).await.expect("catalog");
+    let ea = UnitRef::<CountDim>::checked(EA, DimensionKind::Count).unwrap();
+    let entered = AnyQuantity::from(Quantity::new(Decimal::from(1), ea).unwrap());
+    let conv = kernel
+        .to_stock::<CountDim>(
+            &mut tx,
+            &catalog,
+            item,
+            entered,
+            &ConversionContext { item, lot: None },
+        )
+        .await
+        .expect("to_stock after receive commit");
+    assert_eq!(conv.canonical.amount(), Decimal::ONE);
+    assert_eq!(conv.factor, Decimal::ONE);
+
+    let event = datum_events::Event::builder()
+        .name("inventory.lot_received")
+        .version(1)
+        .payload(json!({
+            "item_id": item.as_uuid().to_string(),
+            "lot_id": Identifier::generate().as_uuid().to_string(),
+        }))
+        .build_with(&kernel.event_schemas)
+        .expect("event");
+    kernel
+        .publish_event(&mut tx, event)
+        .await
+        .expect("publish after receive commit");
+    tx.commit().await.expect("commit uom/event");
+
+    let event_rows: i64 = query_scalar("SELECT count(*) FROM app.event WHERE actor_id = $1")
+        .bind(actor.id.as_uuid())
+        .fetch_one(pool)
+        .await
+        .expect("app.event");
+    assert_eq!(event_rows, 1, "one app.event for the actor");
+    assert_eq!(count_audit(pool, actor.id, "event", "INSERT").await, 1);
+
+    let dispatched = kernel
+        .dispatch_tick(Kernel::service_actor())
+        .await
+        .expect("dispatch");
+    assert!(dispatched >= 1, "genealogy bridge ran, got {dispatched}");
+    let ran = kernel
+        .worker_tick(Kernel::service_actor())
+        .await
+        .expect("worker");
+    assert_eq!(ran, 1, "one job through datum-jobs");
+    let done: i64 =
+        query_scalar("SELECT count(*) FROM transient.job WHERE kind = $1 AND state = 'succeeded'")
+            .bind(datum_jobs::events::bridge_job_kind())
+            .fetch_one(pool)
+            .await
+            .expect("job done");
+    assert_eq!(done, 1, "one genealogy.refresh succeeded");
+
+    let mut issue_ctx = Kernel::transition_context(actor, &flow, ISSUE);
+    issue_ctx.actor_display = Some("Operator".into());
+    issue_ctx.reason = Some("kernel-e2e".into());
+    issue_ctx.config_version = Some(kernel.profile.spec_version.clone());
+    let mut tx = Tx::begin(&write, &issue_ctx).await.expect("issue tx");
+    let inst = kernel
+        .transition(&mut tx, &flow, ISSUE, None, &issue_ctx)
+        .await
+        .expect("plain issue");
+    assert_eq!(inst.state.0, "Issued");
+    tx.commit().await.expect("commit issue");
+
+    assert_eq!(
+        instance_state(pool, &flow).await,
+        "Issued",
+        "issue committed state"
+    );
+    let cons: i64 = query_scalar("SELECT count(*) FROM ledger.consumption")
+        .fetch_one(pool)
+        .await
+        .expect("consumption");
+    assert_eq!(cons, 1, "issue wrote one ledger.consumption");
+
+    assert_conservation(pool).await;
+
+    let sig = DocRef {
+        doc_type: DOC_TYPE.into(),
+        doc_id: Identifier::generate(),
+    };
+    let mut appr_ctx = Kernel::transition_context(actor, &sig, APPROVE);
+    appr_ctx.actor_display = Some("Operator".into());
+    appr_ctx.reason = Some("kernel-e2e".into());
+    appr_ctx.config_version = Some(kernel.profile.spec_version.clone());
+    let mut tx = Tx::begin(&write, &appr_ctx).await.expect("spawn sig");
+    kernel
+        .spawn(&mut tx, &sig, "Open")
+        .await
+        .expect("spawn sig");
+    tx.commit().await.expect("commit spawn sig");
+
+    assert_actor_audit(pool, actor.id, &kernel.profile.spec_version).await;
+
+    let before = ledger_snap(pool, &sig).await;
+    let token = dummy_token(&sig, 1, actor);
+    let mut tx = Tx::begin(&write, &appr_ctx).await.expect("approve tx");
+    let err = kernel
+        .transition(&mut tx, &sig, APPROVE, Some(&token), &appr_ctx)
+        .await
+        .expect_err("Required must refuse under NoSignatures");
+    assert!(
+        matches!(
+            err,
+            datum_module::Error::Statemachine(datum_statemachine::Error::Signature(
+                SignatureError::NoProvider
+            ))
+        ),
+        "must-assert 7 typed error, got {err:?}"
+    );
+    tx.rollback().await.ok();
+    let after = ledger_snap(pool, &sig).await;
+    assert_eq!(
+        before, after,
+        "Required refusal left posting/posting_group/consumption and instance state unchanged"
+    );
+
+    if rebuild_projections {
+        let mut tx = Tx::begin(&write, &boot_ctx()).await.expect("rebuild tx");
+        verify_projection(&mut tx)
+            .await
+            .expect("live projection equals fold");
+        rebuild(&mut tx).await.expect("rebuild from scratch");
+        verify_projection(&mut tx)
+            .await
+            .expect("rebuilt projection equals fold");
+        tx.commit().await.expect("commit rebuild");
+    }
+}
+
+#[tokio::test]
+async fn kernel_e2e_plain_shop() {
+    let db = db_case!("e2e_ps");
+    migrate_and_install(&db).await;
+    composed_path(&db, Profile::plain_shop().unwrap(), false).await;
+    db.finish().await.expect("finish");
+}
+
+#[tokio::test]
+async fn kernel_e2e_regulated_device() {
+    let db = db_case!("e2e_rd");
+    migrate_and_install(&db).await;
+    composed_path(&db, Profile::regulated_device().unwrap(), false).await;
+    db.finish().await.expect("finish");
+}
+
+#[tokio::test]
+async fn kernel_e2e_no_actor_aborts() {
+    let db = db_case!("e2e_na");
+    migrate_and_install(&db).await;
+    let kernel = Kernel::build(db.app_pool(), Profile::plain_shop().unwrap())
+        .await
+        .expect("build");
+    let _ = kernel;
+    let before: i64 = query_scalar("SELECT count(*) FROM ledger.location")
+        .fetch_one(db.app_pool())
+        .await
+        .expect("before");
+    let err = sqlx::query(
+        "INSERT INTO ledger.location (location_id, boundary_class)
+         VALUES ($1, NULL)",
+    )
+    .bind(Identifier::generate().as_uuid())
+    .execute(db.app_pool())
+    .await
+    .expect_err("raw write must fail");
+    assert_eq!(pg_code(&err), "42501", "must-assert 6 err={err}");
+    let after: i64 = query_scalar("SELECT count(*) FROM ledger.location")
+        .fetch_one(db.app_pool())
+        .await
+        .expect("after");
+    assert_eq!(before, after, "write with no actor left nothing behind");
+    db.finish().await.expect("finish");
+}
+
+#[tokio::test]
+async fn kernel_e2e_projection_rebuild_equals_fold() {
+    let db = db_case!("e2e_pr");
+    migrate_and_install(&db).await;
+    composed_path(&db, Profile::plain_shop().unwrap(), true).await;
+    db.finish().await.expect("finish");
+}

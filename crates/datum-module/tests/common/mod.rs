@@ -132,6 +132,16 @@ pub async fn actor_with_perm(
     doc: &DocRef,
     edge: &str,
 ) -> (Actor, WriteContext) {
+    let actor = actor_with_perms(write, &[permission]).await;
+    let mut ctx = WriteContext::new(actor, "pending", "ui");
+    ctx.actor_display = Some("Operator".into());
+    ctx.reason = Some("module-glue-test".into());
+    let ctx = with_action(ctx, doc, edge);
+    (actor, ctx)
+}
+
+/// Principal holding every listed permission (no bound action).
+pub async fn actor_with_perms(write: &WritePool, permissions: &[&str]) -> Actor {
     let slug = Identifier::generate().to_string();
     let short: String = slug
         .chars()
@@ -151,25 +161,20 @@ pub async fn actor_with_perm(
         &mut tx,
         &[RoleBundle {
             name: format!("r{short}"),
-            permissions: vec![permission.to_owned()],
+            permissions: permissions.iter().map(|s| (*s).to_owned()).collect(),
         }],
     )
     .await
     .expect("role");
     assign_role(&mut tx, p.id, roles[0]).await.expect("assign");
     tx.commit().await.expect("commit actor");
-    let actor = Actor {
+    Actor {
         id: p.id.0,
         kind: ActorKind::User,
-    };
-    let mut ctx = WriteContext::new(actor, "pending", "ui");
-    ctx.actor_display = Some("Operator".into());
-    ctx.reason = Some("module-glue-test".into());
-    let ctx = with_action(ctx, doc, edge);
-    (actor, ctx)
+    }
 }
 
-fn boot_ctx() -> WriteContext {
+pub fn boot_ctx() -> WriteContext {
     let mut ctx = WriteContext::new(
         Actor {
             id: Identifier::from_uuid(datum_identity::SYSTEM_ID),
