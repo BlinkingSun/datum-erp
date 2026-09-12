@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "Document numbering sequences (stub API)."
+description = "Gap-free document numbers and kernel lot/serial identifiers."
 build = "build.rs"
 
 [lints]
@@ -23,7 +23,8 @@ thiserror.workspace = true
 serde.workspace = true
 
 [dev-dependencies]
+datum-audit.workspace = true
 datum-test.workspace = true
 tokio.workspace = true
 proptest.workspace = true
-
+sqlx.workspace = true
