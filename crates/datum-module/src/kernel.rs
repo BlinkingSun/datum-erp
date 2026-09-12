@@ -1,14 +1,15 @@
 //! `Kernel::build`: wiring, seeds, freeze, startup guard.
 
 use datum_core::{
-    Actor, ActorKind, GroupKind, Identifier, NoSignatures, PostingGroupHeader, PostingSink,
-    SignatureGate,
+    Actor, ActorKind, GroupKind, Identifier, NoSignatures, PermissionKey, PostingGroupHeader,
+    PostingSink, SignatureGate, SignatureMeaning, SignatureRequirement,
 };
 use datum_db::{Pool, Tx, WriteContext, WritePool};
 use datum_identity::{SYSTEM_ID, seed_builtins};
 use datum_ledger::GroupBuilder;
-use datum_statemachine::{Engine, ManifestEdge};
+use datum_statemachine::{EdgeBuilder, Engine, Machine, ManifestEdge};
 
+use crate::config::persist_kernel_defaults;
 use crate::manifest::{ModuleManifest, compiled_in, compiled_in_graph, hex};
 use crate::order::{ModuleNode, topological_order};
 use crate::profile::{GateBinding, Profile, ProfileId, SignatureEdge};
@@ -27,7 +28,8 @@ pub struct Kernel {
     pub event_schemas: datum_events::SchemaRegistry,
     /// Job-kind registry.
     pub jobs: datum_jobs::Registry,
-    gate: NoSignatures,
+    /// Bound from the profile TOML `gate` field (SPEC-profiles key 4).
+    gate: Box<dyn SignatureGate + Send + Sync>,
     catalog: Vec<ModuleManifest>,
 }
 
@@ -48,15 +50,17 @@ impl Kernel {
         let graph: Vec<datum_statemachine::ModuleNode> =
             compiled_in_graph()?.into_iter().map(Into::into).collect();
         engine.set_module_graph(graph)?;
+        register_enabled_machines(&mut engine, &profile)?;
         engine.freeze()?;
 
+        let gate = bind_signature_gate(profile.signature_gate_binding);
         let mut kernel = Self {
             profile,
             engine,
             events: datum_events::Registry::new(),
             event_schemas: datum_events::SchemaRegistry::standard(),
             jobs: datum_jobs::Registry::new(),
-            gate: NoSignatures,
+            gate,
             catalog,
         };
         datum_jobs::register_maintenance(&kernel.jobs);
@@ -83,9 +87,22 @@ impl Kernel {
         GroupBuilder::new(kind, header)
     }
 
-    /// Bound signature gate (`NoSignatures` until `datum-esign`).
+    /// Bound signature gate, selected by the profile TOML `gate` field.
     pub fn signature_gate(&self) -> &dyn SignatureGate {
-        &self.gate
+        &*self.gate
+    }
+
+    /// SPEC deliverable 4: register an in-process events subscription.
+    pub async fn register_events_subscription(
+        &self,
+        tx: &mut Tx<'_>,
+        name: &str,
+        subscriber: &str,
+        handler: impl datum_events::EventHandler + 'static,
+    ) -> Result<()> {
+        self.events.subscribe(name, subscriber, handler);
+        datum_events::enable_subscription(tx, name, subscriber).await?;
+        Ok(())
     }
 
     /// Whether the bound gate is [`NoSignatures`].
@@ -216,15 +233,62 @@ async fn seed_profile(
     }
     for p in &profile.modules {
         if p.enabled {
-            registry::enable(tx, &p.id, catalog).await?;
+            registry::enable(tx, &p.id, catalog, profile).await?;
         }
     }
-    let _ = (
-        &profile.seeded_permissions.base_currency,
-        &profile.seeded_permissions.stock_uom_system,
-        &profile.seeded_permissions.display_timezone,
-    );
+    persist_kernel_defaults(tx, profile).await?;
     Ok(())
+}
+
+/// Bind the `SignatureGate` named by the profile TOML `gate` field.
+///
+/// SPEC-profiles key 4: "`NoSignatures` pre-Wave-2b and in tests only, `datum-esign`
+/// from 2b". CONTRACT §6.3: "Core ships `NoSignatures`, which refuses every token"
+/// (`verify -> Err(NoProvider)`). Until Wave 2b both TOML values resolve to that
+/// verify-only gate; the regulated profile does not get it by ignoring the field.
+pub fn bind_signature_gate(binding: GateBinding) -> Box<dyn SignatureGate + Send + Sync> {
+    match binding {
+        GateBinding::NoSignatures => Box::new(NoSignatures),
+        GateBinding::DatumEsign => Box::new(NoSignatures),
+    }
+}
+
+fn register_enabled_machines(engine: &mut Engine, profile: &Profile) -> Result<()> {
+    for m in profile.modules.iter().filter(|m| m.enabled) {
+        match m.id.as_str() {
+            "mod-calibration" => engine.register_machine(calibration_machine()?)?,
+            "mod-production-min" => engine.register_machine(wo_machine()?)?,
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn calibration_machine() -> Result<Machine> {
+    let req = SignatureRequirement {
+        meaning: SignatureMeaning("Approved".into()),
+        permission: PermissionKey("calibration.approve".into()),
+    };
+    Ok(Machine::builder("calibration.certificate")
+        .regulated(true)
+        .state("Open")
+        .state("Approved")
+        .edge(EdgeBuilder::new("Open", "Approved", "approve", "calibration.approve").required(req))
+        .build()?)
+}
+
+fn wo_machine() -> Result<Machine> {
+    Ok(Machine::builder("wo")
+        .regulated(false)
+        .state("Draft")
+        .state("Released")
+        .edge(EdgeBuilder::new(
+            "Draft",
+            "Released",
+            "release",
+            "wo.release",
+        ))
+        .build()?)
 }
 
 fn hold_wave2b_edges() {

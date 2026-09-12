@@ -96,7 +96,7 @@ impl SignatureEdge {
 }
 
 /// Which [`datum_core::SignatureGate`] the composition root binds (key 4).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GateBinding {
     /// `NoSignatures` (pre-Wave-2b and tests).
     NoSignatures,
@@ -389,7 +389,7 @@ impl Profile {
         );
         map.insert(
             "signature_gate_binding".into(),
-            serde_json::to_value(&self.signature_gate_binding)?,
+            serde_json::to_value(self.signature_gate_binding)?,
         );
         map.insert(
             "validation_manifest".into(),

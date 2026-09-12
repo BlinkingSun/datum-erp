@@ -39,6 +39,11 @@ pub struct ModuleManifest {
     pub requires_signature: Vec<String>,
     /// `regulated = true` in `[capabilities]` (must be present).
     pub regulated: bool,
+    /// SQL applied inside [`crate::install`]'s transaction (`docs/03` §6).
+    ///
+    /// Compiled-in Wave 2s modules have none; tests supply `'static` statements.
+    #[serde(default, skip)]
+    pub migrations: Vec<&'static str>,
 }
 
 impl ModuleManifest {
@@ -74,9 +79,16 @@ impl ModuleManifest {
             permissions,
             requires_signature,
             regulated,
+            migrations: Vec::new(),
         };
         parsed.validate()?;
         Ok(parsed)
+    }
+
+    /// Attach SQL that [`crate::install`] runs inside the install transaction.
+    pub fn with_migrations(mut self, migrations: Vec<&'static str>) -> Self {
+        self.migrations = migrations;
+        self
     }
 
     /// Semver / permission / range checks.
@@ -289,6 +301,24 @@ mod-production-min = "^0.1"
 requires-signature = []
 regulated = false
 "#;
+    const CALIBRATION: &str = r#"
+[module]
+id = "mod-calibration"
+version = "0.1.0"
+name = "Gage Calibration"
+description = "Calibration schedules and certificate approval"
+
+[dependencies]
+kernel = "^0.1"
+
+[permissions]
+"calibration.view" = "View calibration records"
+"calibration.approve" = "Approve a calibration certificate"
+
+[capabilities]
+requires-signature = ["calibration.approve"]
+regulated = true
+"#;
     Ok(vec![
         ModuleManifest::parse(ITEMS)?,
         ModuleManifest::parse(LOCATIONS)?,
@@ -296,6 +326,7 @@ regulated = false
         ModuleManifest::parse(INVENTORY)?,
         ModuleManifest::parse(PRODUCTION)?,
         ModuleManifest::parse(GENEALOGY)?,
+        ModuleManifest::parse(CALIBRATION)?,
     ])
 }
 

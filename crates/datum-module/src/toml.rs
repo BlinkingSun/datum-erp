@@ -99,6 +99,10 @@ pub(crate) fn parse(input: &str) -> Result<BTreeMap<String, Value>> {
             return Err(err(line_no, "expected key = value"));
         };
         let key = key.trim();
+        let key = key
+            .strip_prefix('"')
+            .and_then(|s| s.strip_suffix('"'))
+            .unwrap_or(key);
         if key.is_empty() {
             return Err(err(line_no, "empty key"));
         }

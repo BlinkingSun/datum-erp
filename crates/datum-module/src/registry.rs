@@ -6,13 +6,17 @@ use datum_db::Tx;
 use datum_identity::rbac::{RoleBundle, seed_bundles};
 
 use crate::manifest::ModuleManifest;
+use crate::profile::{Profile, ProfileId};
 use crate::{Error, Result};
 
-/// Record a module inside `tx` (migrations already applied as `datum_migrate`).
+/// Record a module inside `tx`. Module SQL runs in this same transaction
+/// (`docs/03` §6: install runs the module's migrations inside a transaction).
 ///
 /// Also writes `module.install_log` so the install transaction has two rows
-/// that commit or roll back together.
+/// that commit or roll back together. A failing migration leaves nothing
+/// persisted once the caller rolls the `Tx` back.
 pub async fn install(tx: &mut Tx<'_>, manifest: &ModuleManifest, enabled: bool) -> Result<()> {
+    apply_module_migrations(tx, manifest).await?;
     let hash = manifest.manifest_hash(enabled)?;
     tx.execute(
         sqlx::query(
@@ -53,11 +57,23 @@ pub async fn install(tx: &mut Tx<'_>, manifest: &ModuleManifest, enabled: bool) 
 }
 
 /// Enable `id` and every dependency (closure rule).
-pub async fn enable(tx: &mut Tx<'_>, id: &str, catalog: &[ModuleManifest]) -> Result<Vec<String>> {
+///
+/// Refuses with [`Error::EnableRefused`] when the profile disallows the module
+/// (a `regulated = true` module on `plain-shop`, or a module not listed on
+/// the profile).
+pub async fn enable(
+    tx: &mut Tx<'_>,
+    id: &str,
+    catalog: &[ModuleManifest],
+    profile: &Profile,
+) -> Result<Vec<String>> {
     let by_id: BTreeMap<&str, &ModuleManifest> =
         catalog.iter().map(|m| (m.id.as_str(), m)).collect();
     let mut needed = BTreeSet::new();
     collect_deps(id, &by_id, &mut needed)?;
+    for mid in &needed {
+        profile_permits_enable(profile, mid, catalog)?;
+    }
     let mut enabled = Vec::new();
     for mid in needed {
         set_enabled(tx, &mid, true, catalog).await?;
@@ -262,4 +278,47 @@ pub async fn record_profile(
             Ok(true)
         }
     }
+}
+
+/// Apply each of `manifest.migrations` on `tx` (single statements; DML only).
+async fn apply_module_migrations(tx: &mut Tx<'_>, manifest: &ModuleManifest) -> Result<()> {
+    for sql in &manifest.migrations {
+        if sql_is_noop(sql) {
+            continue;
+        }
+        tx.execute(sqlx::query(*sql)).await?;
+    }
+    Ok(())
+}
+
+fn sql_is_noop(sql: &str) -> bool {
+    sql.lines().all(|line| {
+        let t = line.trim();
+        t.is_empty() || t.starts_with("--")
+    })
+}
+
+/// Profile enablement lever: `plain-shop` cannot turn on a regulated module,
+/// and a module absent from the profile's compiled-in list is refused.
+pub fn profile_permits_enable(
+    profile: &Profile,
+    id: &str,
+    catalog: &[ModuleManifest],
+) -> Result<()> {
+    let Some(manifest) = catalog.iter().find(|m| m.id == id) else {
+        return Err(Error::UnknownModule(id.to_string()));
+    };
+    if !profile.modules.iter().any(|m| m.id == id) {
+        return Err(Error::EnableRefused {
+            id: id.to_string(),
+            reason: format!("{id} is not in profile {}", profile.id.as_str()),
+        });
+    }
+    if manifest.regulated && profile.id == ProfileId::PlainShop {
+        return Err(Error::EnableRefused {
+            id: id.to_string(),
+            reason: "plain-shop cannot enable a regulated = true module".into(),
+        });
+    }
+    Ok(())
 }

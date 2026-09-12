@@ -61,6 +61,13 @@ regulated = false
 installed = true
 enabled = true
 
+[[modules]]
+id = "mod-calibration"
+version = "0.1.0"
+regulated = true
+installed = true
+enabled = true
+
 [signature_gate_binding]
 gate = "NoSignatures"
 
@@ -81,6 +88,7 @@ visible = [
   "inventory",
   "production",
   "genealogy",
+  "calibration",
   "validation",
   "iq",
 ]

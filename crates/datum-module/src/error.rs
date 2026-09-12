@@ -60,6 +60,14 @@ pub enum Error {
         /// Dependents that are still enabled, named.
         dependents: String,
     },
+    /// Enabling a module the active profile disallows.
+    #[error("cannot enable {id}: {reason}")]
+    EnableRefused {
+        /// Module that was requested to enable.
+        id: String,
+        /// Why the profile refuses this enablement.
+        reason: String,
+    },
     /// Uninstall is not offered in regulated mode (`docs/03` §6).
     #[error("uninstall is not offered in regulated mode")]
     UninstallForbidden,

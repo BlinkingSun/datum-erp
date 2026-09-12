@@ -5,24 +5,25 @@
 mod common;
 
 use datum_core::{
-    Actor, ActorKind, GroupKind, Identifier, PermissionKey, PostingGroupHeader, SignatureMeaning,
-    SignatureRequirement,
+    Actor, ActorKind, GroupKind, Identifier, PermissionKey, PostingGroupHeader, RecordRef,
+    SignatureError, SignatureId, SignatureMeaning, SignatureRequirement, SignatureToken,
 };
 use datum_db::{Tx, WriteContext};
+use datum_events::EventHandler;
 use datum_statemachine::{EdgeBuilder, Engine, HookPhase, Machine, ModuleNode};
 use datum_test::db_case;
 
 use datum_module::{
-    CONTRACT_KERNEL_EDGES, ConfigurationManifest, DELTA_ALLOWED, KERNEL_ORDER, Kernel, Profile,
-    ProfileId, compiled_in, delta_keys, disable, edges_from_registry, enable, export_manifest,
-    install, is_topological_sort, list_installed, module_nodes, posting_sink,
-    profile_does_not_rewrite_edges, startup_fails_if_required_meets_no_signatures,
-    topological_order, verify,
+    CONTRACT_KERNEL_EDGES, ConfigurationManifest, DELTA_ALLOWED, GateBinding, KERNEL_ORDER, Kernel,
+    Profile, ProfileId, bind_signature_gate, compiled_in, delta_keys, disable, edges_from_registry,
+    enable, export_manifest, install, is_topological_sort, list_installed, load_kernel_defaults,
+    module_nodes, posting_sink, profile_does_not_rewrite_edges,
+    startup_fails_if_required_meets_no_signatures, topological_order, verify,
 };
 
 use common::{
     has_zz_audit, migrate_and_install, module_enabled, module_hash, pg_code, table_count,
-    toy_manifest, write_pool,
+    toy_manifest, toy_manifest_regulated, write_pool,
 };
 
 fn boot_ctx() -> WriteContext {
@@ -63,6 +64,22 @@ fn both_profiles_carry_eleven_keys_and_load() {
         .find(|m| m.id == "mod-genealogy")
         .unwrap();
     assert!(!genealogy.regulated);
+    let calibration = compiled_in()
+        .unwrap()
+        .into_iter()
+        .find(|m| m.id == "mod-calibration")
+        .unwrap();
+    assert!(calibration.regulated);
+    assert!(
+        a.modules
+            .iter()
+            .any(|m| m.id == "mod-calibration" && m.enabled)
+    );
+    assert!(
+        b.modules
+            .iter()
+            .any(|m| m.id == "mod-calibration" && !m.enabled)
+    );
 }
 
 #[test]
@@ -269,16 +286,36 @@ async fn install_runs_migrations_in_one_transaction_and_records() {
     let db = db_case!("mod_inst");
     migrate_and_install(&db).await;
     let write = write_pool(&db);
-    let a = toy_manifest("toy-a", &[]);
-    let b = toy_manifest("toy-b", &[("toy-a", "^0.1")]);
+    let a = toy_manifest("toy-a", &[]).with_migrations(vec![
+        "INSERT INTO module.configuration (id, profile_id, spec_version, body, content_hash) VALUES ('mig:toy-a', 'test', '0', '{}'::jsonb, '00')",
+    ]);
+    let b = toy_manifest("toy-b", &[("toy-a", "^0.1")]).with_migrations(vec!["SELECT 1 / 0"]);
     let mut tx = Tx::begin(&write, &boot_ctx()).await.expect("begin");
     install(&mut tx, &a, true).await.expect("install a");
     tx.commit().await.expect("commit a");
     let mut tx = Tx::begin(&write, &boot_ctx()).await.expect("begin b");
-    install(&mut tx, &b, true).await.expect("install b");
+    let fail = install(&mut tx, &b, true)
+        .await
+        .expect_err("failing migration");
+    assert!(
+        fail.to_string().contains("division") || fail.to_string().contains("db"),
+        "got {fail}"
+    );
     tx.rollback().await.expect("rollback b");
     assert_eq!(module_enabled(db.app_pool(), "toy-a").await, Some(true));
     assert_eq!(module_enabled(db.app_pool(), "toy-b").await, None);
+    let marker: i64 = table_count(
+        db.app_pool(),
+        "SELECT count(*) FROM module.configuration WHERE id = 'mig:toy-a'",
+    )
+    .await;
+    assert_eq!(marker, 1, "successful module migration must persist");
+    let fail_marker: i64 = table_count(
+        db.app_pool(),
+        "SELECT count(*) FROM module.installed WHERE id = 'toy-b'",
+    )
+    .await;
+    assert_eq!(fail_marker, 0, "failing migration must persist nothing");
     let log: i64 = table_count(
         db.app_pool(),
         "SELECT count(*) FROM module.install_log WHERE module_id = 'toy-a'",
@@ -304,9 +341,14 @@ async fn enable_closes_over_dependencies() {
     for m in &catalog {
         install(&mut tx, m, false).await.expect("install");
     }
-    enable(&mut tx, "mod-genealogy", &catalog)
-        .await
-        .expect("enable genealogy");
+    enable(
+        &mut tx,
+        "mod-genealogy",
+        &catalog,
+        &Profile::plain_shop().unwrap(),
+    )
+    .await
+    .expect("enable genealogy");
     tx.commit().await.expect("commit");
     for id in [
         "mod-genealogy",
@@ -456,5 +498,239 @@ async fn list_installed_after_kernel_build() {
     let rows = list_installed(&mut tx).await.expect("list");
     tx.commit().await.expect("commit");
     assert!(rows.len() >= 6);
+    db.finish().await.expect("finish");
+}
+
+fn sample_token() -> (SignatureToken, SignatureRequirement, RecordRef) {
+    let record = RecordRef {
+        table: "calibration.certificate".into(),
+        id: Identifier::generate(),
+        version: 1,
+    };
+    let token = SignatureToken {
+        signature: SignatureId::generate(),
+        signer: Actor {
+            id: Identifier::generate(),
+            kind: ActorKind::User,
+        },
+        meaning: SignatureMeaning("Approved".into()),
+        record: record.clone(),
+        record_content_hash: [0; 32],
+    };
+    let required = SignatureRequirement {
+        meaning: SignatureMeaning("Approved".into()),
+        permission: PermissionKey("calibration.approve".into()),
+    };
+    (token, required, record)
+}
+
+struct DummySubscriber;
+
+impl EventHandler for DummySubscriber {
+    fn handle<'a, 'p: 'a>(
+        &'a self,
+        _tx: &'a mut Tx<'p>,
+        _event: &'a datum_events::Event,
+    ) -> datum_events::HandlerFuture<'a> {
+        Box::pin(async { Ok(()) })
+    }
+}
+
+#[test]
+fn signature_gate_comes_from_profile_toml_gate_field() {
+    let regulated = Profile::regulated_device().unwrap();
+    let plain = Profile::plain_shop().unwrap();
+    assert_eq!(regulated.signature_gate_binding, GateBinding::NoSignatures);
+    assert_eq!(plain.signature_gate_binding, GateBinding::NoSignatures);
+    let (token, required, record) = sample_token();
+    for profile in [&regulated, &plain] {
+        let gate = bind_signature_gate(profile.signature_gate_binding);
+        assert!(
+            matches!(
+                datum_core::SignatureGate::verify(&*gate, &token, &required, &record),
+                Err(SignatureError::NoProvider)
+            ),
+            "verify-only gate named by SPEC-profiles key 4 / CONTRACT §6.3"
+        );
+    }
+}
+
+#[tokio::test]
+async fn regulated_required_set_from_registered_machine() {
+    let db = db_case!("mod_reqd");
+    migrate_and_install(&db).await;
+    let kernel = Kernel::build(db.app_pool(), Profile::regulated_device().unwrap())
+        .await
+        .expect("build regulated");
+    assert_eq!(
+        kernel.profile.signature_gate_binding,
+        GateBinding::NoSignatures,
+        "gate field comes from the profile TOML"
+    );
+    assert!(
+        !kernel.profile.required_edges().is_empty(),
+        "regulated-device must resolve a non-empty Required set"
+    );
+    assert!(
+        kernel.profile.signature_edges.iter().any(
+            |e| matches!(e, datum_module::SignatureEdge::Required { edge, .. } if edge == "approve")
+        ),
+        "calibration.certificate.approve must be listed"
+    );
+    let (token, required, record) = sample_token();
+    assert!(matches!(
+        datum_core::SignatureGate::verify(kernel.signature_gate(), &token, &required, &record),
+        Err(SignatureError::NoProvider)
+    ));
+    startup_fails_if_required_meets_no_signatures(&kernel.engine, true, true)
+        .expect_err("§6.3 startup guard must trip on the live Required set");
+    let stored = export_manifest(db.app_pool()).await.expect("export");
+    stored.verify_self().expect("hashed");
+    assert!(
+        stored.signature_edges.iter().any(|e| e.is_required()),
+        "manifest must list Required edges"
+    );
+    db.finish().await.expect("finish");
+}
+
+#[tokio::test]
+async fn enable_module_the_profile_disallows_is_refused() {
+    let catalog = compiled_in().unwrap();
+
+    let db = db_case!("mod_enpl");
+    migrate_and_install(&db).await;
+    Kernel::build(db.app_pool(), Profile::plain_shop().unwrap())
+        .await
+        .expect("plain boot");
+    let write = write_pool(&db);
+    let mut tx = Tx::begin(&write, &boot_ctx()).await.expect("begin");
+    let err = enable(
+        &mut tx,
+        "mod-calibration",
+        &catalog,
+        &Profile::plain_shop().unwrap(),
+    )
+    .await
+    .expect_err("plain-shop runtime enable");
+    assert!(
+        matches!(err, datum_module::Error::EnableRefused { .. }),
+        "typed error, got {err}"
+    );
+    tx.rollback().await.ok();
+    assert_eq!(
+        module_enabled(db.app_pool(), "mod-calibration").await,
+        Some(false)
+    );
+    db.finish().await.expect("finish");
+
+    let db = db_case!("mod_enrg");
+    migrate_and_install(&db).await;
+    Kernel::build(db.app_pool(), Profile::regulated_device().unwrap())
+        .await
+        .expect("regulated boot");
+    let extra = toy_manifest_regulated("mod-not-listed");
+    let mut catalog = compiled_in().unwrap();
+    catalog.push(extra);
+    let write = write_pool(&db);
+    let mut tx = Tx::begin(&write, &boot_ctx()).await.expect("begin");
+    let err = enable(
+        &mut tx,
+        "mod-not-listed",
+        &catalog,
+        &Profile::regulated_device().unwrap(),
+    )
+    .await
+    .expect_err("regulated refuses a module the profile does not list");
+    assert!(
+        matches!(err, datum_module::Error::EnableRefused { .. }),
+        "typed error, got {err}"
+    );
+    tx.rollback().await.ok();
+    db.finish().await.expect("finish");
+}
+
+#[tokio::test]
+async fn profile_key10_defaults_persist_and_read_back() {
+    let db = db_case!("mod_k10");
+    migrate_and_install(&db).await;
+    let profile = Profile::regulated_device().unwrap();
+    Kernel::build(db.app_pool(), profile.clone())
+        .await
+        .expect("build");
+    let loaded = load_kernel_defaults(db.app_pool()).await.expect("load");
+    assert_eq!(
+        loaded.base_currency,
+        profile.seeded_permissions.base_currency
+    );
+    assert_eq!(
+        loaded.stock_uom_system,
+        profile.seeded_permissions.stock_uom_system
+    );
+    assert_eq!(
+        loaded.display_timezone,
+        profile.seeded_permissions.display_timezone
+    );
+    db.finish().await.expect("finish");
+}
+
+#[tokio::test]
+async fn configuration_manifest_refuses_before_edges_or_completes_hashed() {
+    let db = db_case!("mod_exp");
+    migrate_and_install(&db).await;
+    let err = export_manifest(db.app_pool())
+        .await
+        .expect_err("edges not generated");
+    assert!(
+        err.to_string().contains("no effective-profile"),
+        "got {err}"
+    );
+    let kernel = Kernel::build(db.app_pool(), Profile::regulated_device().unwrap())
+        .await
+        .expect("build");
+    let stored = export_manifest(db.app_pool()).await.expect("export");
+    stored.verify_self().expect("hash");
+    assert_eq!(stored.content_hash.len(), 64);
+    assert!(stored.modules.len() >= 7);
+    assert!(
+        stored.signature_edges.iter().any(|e| e.is_required()),
+        "complete: Required edges present after generate"
+    );
+    let live = ConfigurationManifest::assemble(
+        kernel.profile.id.as_str(),
+        &kernel.profile.spec_version,
+        stored.modules.clone(),
+        kernel.profile.signature_edges.clone(),
+    )
+    .expect("assemble");
+    verify(&stored, &live).expect("verify");
+    db.finish().await.expect("finish");
+}
+
+#[tokio::test]
+async fn register_events_subscription_hook_accepts_dummy_subscriber() {
+    let db = db_case!("mod_evts");
+    migrate_and_install(&db).await;
+    let kernel = Kernel::build(db.app_pool(), Profile::plain_shop().unwrap())
+        .await
+        .expect("build");
+    let write = write_pool(&db);
+    let mut tx = Tx::begin(&write, &boot_ctx()).await.expect("begin");
+    kernel
+        .register_events_subscription(
+            &mut tx,
+            "inventory.lot_received",
+            "dummy-subscriber",
+            DummySubscriber,
+        )
+        .await
+        .expect("register");
+    tx.commit().await.expect("commit");
+    let n: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM app.subscription WHERE subscriber = 'dummy-subscriber'",
+    )
+    .fetch_one(db.app_pool())
+    .await
+    .expect("count");
+    assert_eq!(n, 1);
     db.finish().await.expect("finish");
 }

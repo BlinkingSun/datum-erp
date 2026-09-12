@@ -60,6 +60,13 @@ regulated = false
 installed = true
 enabled = true
 
+[[modules]]
+id = "mod-calibration"
+version = "0.1.0"
+regulated = true
+installed = true
+enabled = false
+
 [signature_gate_binding]
 gate = "NoSignatures"
 
@@ -81,7 +88,7 @@ visible = [
   "production",
   "genealogy",
 ]
-hidden = ["validation", "iq"]
+hidden = ["validation", "iq", "calibration"]
 
 [numbering.wo]
 format = "WO-{0000}"

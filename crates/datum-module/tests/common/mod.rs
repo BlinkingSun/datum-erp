@@ -96,3 +96,27 @@ regulated = false
     );
     datum_module::ModuleManifest::parse(&src).expect("toy manifest")
 }
+
+pub fn toy_manifest_regulated(id: &str) -> datum_module::ModuleManifest {
+    let src = format!(
+        r#"
+[module]
+id = "{id}"
+version = "0.1.0"
+name = "{id}"
+description = "regulated toy"
+
+[dependencies]
+kernel = "^0.1"
+
+[permissions]
+"{id}.view" = "View {id}"
+"{id}.approve" = "Approve {id}"
+
+[capabilities]
+requires-signature = ["{id}.approve"]
+regulated = true
+"#
+    );
+    datum_module::ModuleManifest::parse(&src).expect("regulated toy")
+}

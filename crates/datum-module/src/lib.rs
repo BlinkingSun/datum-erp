@@ -21,10 +21,13 @@ mod registry;
 mod semver;
 mod toml;
 
-pub use config::{ConfigurationManifest, ManifestModule, export as export_manifest, verify};
+pub use config::{
+    ConfigurationManifest, KERNEL_DEFAULTS_ID, KernelDefaults, ManifestModule,
+    export as export_manifest, load_kernel_defaults, verify,
+};
 pub use error::{Error, Result};
 pub use kernel::{
-    Kernel, edges_from_registry, module_nodes, posting_sink,
+    Kernel, bind_signature_gate, edges_from_registry, module_nodes, posting_sink,
     startup_fails_if_required_meets_no_signatures,
 };
 pub use manifest::{ModuleManifest, compiled_in, compiled_in_graph};
@@ -37,7 +40,10 @@ pub use profile::{
     DELTA_ALLOWED, GateBinding, Profile, ProfileId, ProfileModule, SignatureEdge, delta_keys,
     profile_does_not_rewrite_edges,
 };
-pub use registry::{InstalledRow, disable, enable, install, list_installed, uninstall, upgrade};
+pub use registry::{
+    InstalledRow, disable, enable, install, list_installed, profile_permits_enable, uninstall,
+    upgrade,
+};
 pub use semver::{Range, Version};
 
 /// Configuration-manifest functions (`docs/03` §8).
