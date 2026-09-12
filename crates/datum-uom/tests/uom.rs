@@ -417,41 +417,43 @@ async fn seeded_units_have_right_dimensions() {
 #[tokio::test]
 async fn stock_unit_immutable_while_postings_exist() {
     let db = datum_test::db_case!("stock_immut");
-    common::migrate(&db).await;
-    let def: String = sqlx::query_scalar(
-        "SELECT pg_get_functiondef('uom.item_has_postings(uuid)'::regprocedure)",
-    )
-    .fetch_one(db.migrate_pool())
-    .await
-    .unwrap();
+    common::migrate_with_ledger(&db).await;
+    let shim_gone: bool =
+        sqlx::query_scalar("SELECT to_regprocedure('uom.item_has_postings(uuid)') IS NULL")
+            .fetch_one(db.migrate_pool())
+            .await
+            .unwrap();
     assert!(
-        def.contains("ledger.posting"),
-        "item_has_postings must consult ledger.posting"
+        shim_gone,
+        "uom must not publish a ledger-reading item_has_postings shim"
     );
-    assert!(
-        !def.contains("posting_stub"),
-        "posting_stub must not remain as a second ledger"
-    );
+
     let pool = WritePool::new(db.app_pool().clone());
     let ctx = common::write_ctx("uom.stock");
     let item = ItemId::generate();
     let mut tx = datum_db::Tx::begin(&pool, &ctx).await.unwrap();
     common::insert_item_stock(&mut tx, item, UnitId(4), 4).await;
-    let has: bool = sqlx::query_scalar("SELECT uom.item_has_postings($1)")
-        .bind(item.as_uuid())
-        .fetch_one(db.migrate_pool())
-        .await
-        .unwrap();
+    common::post_one_quantity_for_item(&mut tx, item, UnitId(4)).await;
     assert!(
-        !has,
-        "crate-local migrate has no ledger.posting, so no postings exist"
+        datum_ledger::has_postings(&mut tx, item).await.unwrap(),
+        "datum_ledger::has_postings must see the posting before update_item_stock refuses"
     );
-    tx.execute(
-        sqlx::query("UPDATE uom.item_stock SET stock_scale = 2 WHERE item_id = $1")
-            .bind(item.as_uuid()),
+
+    let err = datum_uom::update_item_stock(
+        &mut tx,
+        item,
+        datum_uom::ItemStockMeasure {
+            stock_unit: UnitId(4),
+            stock_scale: 2,
+            residual_tolerance: Decimal::ZERO,
+        },
     )
     .await
-    .unwrap();
+    .expect_err("immutable while postings exist");
+    assert!(
+        matches!(err, datum_uom::Error::StockMeasureImmutable),
+        "got {err:?}"
+    );
     tx.rollback().await.unwrap();
     db.finish().await.unwrap();
 }

@@ -28,6 +28,7 @@ uuid.workspace = true
 
 [dev-dependencies]
 datum-test.workspace = true
+datum-ledger.workspace = true
 tokio.workspace = true
 proptest.workspace = true
 trybuild.workspace = true

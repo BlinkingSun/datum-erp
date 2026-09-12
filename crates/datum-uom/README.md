@@ -15,7 +15,10 @@ boundary helper `to_stock`. Factors may be global, item-scoped, or lot-pinned.
 - `to_stock` — convert entered qty to the item stock unit in `tx`
 - `convert` — `UnitConverter::convert` against a loaded catalog
 - `load_unit` — load a `UnitId` from `uom.unit` on a read pool
-- `MIGRATOR` — `placeholder` + `0001_uom`
+- `ItemStockMeasure` / `update_item_stock` — write `uom.item_stock` with R5
+  immutability via `ledger.has_postings` on the same `tx` (equivalent to
+  `datum_ledger::has_postings`; no `datum-ledger` crate dependency per CONTRACT §4)
+- `MIGRATOR` — `placeholder` + `0001_uom` + `0002_drop_uom_ledger_shim`
 - Re-exports from `datum-core`: `ConversionContext`, `Converted`, `DimensionKind`,
   `Rounding`, `UnitCatalog`, `UnitConverter`, `UnitId`
 
@@ -26,7 +29,11 @@ boundary helper `to_stock`. Factors may be global, item-scoped, or lot-pinned.
 
 - `00000000000000_placeholder` — no-op
 - `00000000000001_uom` — schema `uom` (app): `uom.unit`, `uom.item_stock`,
-  `uom.factor`, `uom.rounding_policy` (all app)
+  `uom.factor`, `uom.rounding_policy` (all app); legacy `uom.item_has_postings`
+  shim removed by `0002`
+- `00000000000002_drop_uom_ledger_shim` — drops `uom.item_has_postings`, the
+  stock-immutability trigger that called it, and revokes the `ledger.posting`
+  column grant the shim required; down does not recreate ledger-reading SQL (R-2s-3)
 
 ## Tests (`tests/`)
 
@@ -38,13 +45,14 @@ boundary helper `to_stock`. Factors may be global, item-scoped, or lot-pinned.
 - `every_uom_table_is_audited` / `writes_go_through_tx`
 - `round_trip_ab_a_within_one_ulp_at_stock_scale_8` / `round_half_even_at_stock_scale`
 - `cross_dimension_is_unrepresentable` (trybuild)
-- `reversible_migration_drops_btree_gist`
+- `reversible_migration_drops_btree_gist` / `migrate_down_then_up`
 
 ## Frozen / seams
 
 Frozen: `to_stock` signature (held through ledger landing) and `UnitConverter`
-(CONTRACT §4, §6 convert traits). Ledger is landed: `ledger.posting` is the
-source of truth for `uom.item_has_postings` when present; the function returns
-false when that relation is absent. The unused catalog parameter on `to_stock`
-is kept until a later cleanup. `as_of` is still transaction_timestamp, not an
-explicit argument.
+(CONTRACT §4, §6 convert traits). Postings presence for R5 immutability is read
+only through the ledger query seam (`ledger.has_postings` inside
+`update_item_stock`; no `uom.item_has_postings` and no direct `ledger.posting`
+reads
+in this crate's SQL). The unused catalog parameter on `to_stock` is kept until a
+later cleanup. `as_of` is still transaction_timestamp, not an explicit argument.

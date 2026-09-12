@@ -63,3 +63,49 @@ async fn reversible_migration_drops_btree_gist() {
 
     db.finish().await.expect("finish");
 }
+
+#[tokio::test]
+async fn migrate_down_then_up() {
+    let db = db_case!("uom_down_up");
+    datum_db::migrate::run(
+        db.migrate_pool(),
+        &[
+            ("datum-db", &datum_db::MIGRATOR),
+            ("datum-audit", &datum_audit::MIGRATOR),
+        ],
+    )
+    .await
+    .expect("db+audit");
+
+    let migrator = uom_migrator();
+    migrator.run(db.migrate_pool()).await.expect("uom up");
+    let shim_gone: bool =
+        query_scalar("SELECT to_regprocedure('uom.item_has_postings(uuid)') IS NULL")
+            .fetch_one(db.migrate_pool())
+            .await
+            .expect("shim probe");
+    assert!(shim_gone, "0002 must drop uom.item_has_postings");
+
+    migrator
+        .undo(db.migrate_pool(), 0)
+        .await
+        .expect("down to placeholder");
+    let gone: bool = query_scalar("SELECT to_regclass('uom.unit') IS NULL")
+        .fetch_one(db.migrate_pool())
+        .await
+        .expect("uom dropped");
+    assert!(gone, "0001 down must drop uom.unit");
+
+    migrator.run(db.migrate_pool()).await.expect("up again");
+    let shim_still_gone: bool =
+        query_scalar("SELECT to_regprocedure('uom.item_has_postings(uuid)') IS NULL")
+            .fetch_one(db.migrate_pool())
+            .await
+            .expect("shim probe again");
+    assert!(
+        shim_still_gone,
+        "0002 must still drop the shim after down-then-up"
+    );
+
+    db.finish().await.expect("finish");
+}

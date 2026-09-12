@@ -7,12 +7,14 @@ use serde as _;
 
 mod catalog;
 mod error;
+mod item_stock;
 mod pin;
 mod policy;
 mod stock;
 
 pub use catalog::{UomCatalog, load_catalog, split_with_policy};
 pub use error::{Error, Result};
+pub use item_stock::{ItemStockMeasure, update_item_stock};
 pub use pin::pin_lot_factor;
 pub use policy::{Operation, apply_rounding_policy};
 pub use stock::{StockConversion, to_stock};
