@@ -91,6 +91,31 @@ pub struct StockItem {
     pub standard: Option<Money>,
 }
 
+/// Whether `item_id` has any row in `ledger.posting`.
+///
+/// D2 R5: stock unit / scale / tolerance are immutable while this is true.
+/// Reads through the ledger-schema SQL helper so a module never selects
+/// `ledger.posting` itself. Requires a sealed [`Tx`] (no actor → SQLSTATE
+/// `42501`).
+pub async fn has_postings(tx: &mut Tx<'_>, item_id: ItemId) -> Result<bool> {
+    let row: (bool,) = tx
+        .fetch_one(sqlx::query_as("SELECT ledger.has_postings($1)").bind(item_id.as_uuid()))
+        .await?;
+    Ok(row.0)
+}
+
+/// Whether any quantity slice at `location_id` currently nets above zero.
+///
+/// Folds `ledger.posting` (the ledger-owned source of truth), not a module
+/// read of `transient.balance_projection`. Requires a sealed [`Tx`]
+/// (no actor → SQLSTATE `42501`).
+pub async fn has_quantity_at(tx: &mut Tx<'_>, location_id: LocationId) -> Result<bool> {
+    let row: (bool,) = tx
+        .fetch_one(sqlx::query_as("SELECT ledger.has_quantity_at($1)").bind(location_id.as_uuid()))
+        .await?;
+    Ok(row.0)
+}
+
 /// Load a stock-item registry row.
 pub async fn load_stock_item(tx: &mut Tx<'_>, item: ItemId) -> Result<StockItem> {
     type StockRow = (i64, i16, Decimal, String, Option<Decimal>, Option<i16>);

@@ -11,8 +11,31 @@ use datum_ledger::{
     GroupBuilder, boundary_variants, cost_element_variants, group_kind_variants, measure_variants,
     post, value_account_variants,
 };
+use sqlx::migrate::Migrator;
 
 use common::*;
+
+fn reversible_ledger_migrator() -> Migrator {
+    let mut migrator = Migrator::with_migrations(datum_ledger::MIGRATOR.iter().cloned().collect());
+    // schema `ledger` is app-class; a version table there cannot be INSERTed
+    // without Tx::begin. `transient` is skipped by audit_attach.
+    migrator.dangerous_set_table_name("transient._sqlx_migrations_ledger");
+    migrator
+}
+
+async fn query_seam_fn_exists(pool: &sqlx::PgPool, name: &str) -> bool {
+    sqlx::query_scalar(
+        "SELECT EXISTS (
+            SELECT 1 FROM pg_proc p
+            JOIN pg_namespace n ON n.oid = p.pronamespace
+            WHERE n.nspname = 'ledger' AND p.proname = $1
+         )",
+    )
+    .bind(name)
+    .fetch_one(pool)
+    .await
+    .expect("fn exists")
+}
 
 #[tokio::test]
 async fn reverse_migration_tested() {
@@ -29,6 +52,8 @@ async fn reverse_migration_tested() {
     const DOWN: &[&str] = &[
         "DROP TRIGGER IF EXISTS consumption_group_invariants ON ledger.consumption",
         "DROP TRIGGER IF EXISTS posting_group_invariants ON ledger.posting",
+        "DROP FUNCTION IF EXISTS ledger.has_quantity_at(uuid)",
+        "DROP FUNCTION IF EXISTS ledger.has_postings(uuid)",
         "DROP FUNCTION IF EXISTS ledger.enforce_group_invariants()",
         "DROP TABLE IF EXISTS ledger.consumption",
         "DROP TABLE IF EXISTS ledger.posting",
@@ -66,6 +91,85 @@ async fn reverse_migration_tested() {
     )
     .await
     .expect("up again");
+    db.finish().await.unwrap();
+}
+
+#[tokio::test]
+async fn migrate_down_then_up() {
+    let db = datum_test::db_case!("led_down_up");
+    datum_db::migrate::run(
+        db.migrate_pool(),
+        &[
+            ("datum-db", &datum_db::MIGRATOR),
+            ("datum-audit", &datum_audit::MIGRATOR),
+        ],
+    )
+    .await
+    .expect("db+audit");
+    // Do not install_privileged here: `audit_attach` fires on CREATE TABLE
+    // before ALTER OWNER, and ledger's default privileges do not grant
+    // TRIGGER to datum_owner for tables created by datum_migrate. The
+    // creating migration attaches explicitly after OWNER TO datum_owner.
+
+    let migrator = reversible_ledger_migrator();
+    migrator.run(db.migrate_pool()).await.expect("ledger up");
+    assert!(
+        query_seam_fn_exists(db.migrate_pool(), "has_postings").await,
+        "0002 must create ledger.has_postings"
+    );
+    assert!(query_seam_fn_exists(db.migrate_pool(), "has_quantity_at").await);
+    let definer: bool = sqlx::query_scalar(
+        "SELECT p.prosecdef FROM pg_proc p
+          JOIN pg_namespace n ON n.oid = p.pronamespace
+         WHERE n.nspname = 'ledger' AND p.proname = 'has_postings'",
+    )
+    .fetch_one(db.migrate_pool())
+    .await
+    .expect("prosecdef");
+    assert!(!definer, "has_postings must be invoker-rights");
+    let app_exec: bool = sqlx::query_scalar(
+        "SELECT has_function_privilege('datum_app', 'ledger.has_postings(uuid)', 'EXECUTE')",
+    )
+    .fetch_one(db.migrate_pool())
+    .await
+    .expect("app execute");
+    assert!(app_exec, "EXECUTE granted to datum_app");
+    let public_exec: bool = sqlx::query_scalar(
+        "SELECT has_function_privilege('public', 'ledger.has_postings(uuid)', 'EXECUTE')",
+    )
+    .fetch_one(db.migrate_pool())
+    .await
+    .expect("public execute");
+    assert!(!public_exec, "EXECUTE revoked from PUBLIC");
+
+    migrator
+        .undo(db.migrate_pool(), 0)
+        .await
+        .expect("down to placeholder");
+    let posting_gone: bool = sqlx::query_scalar("SELECT to_regclass('ledger.posting') IS NULL")
+        .fetch_one(db.migrate_pool())
+        .await
+        .expect("posting gone");
+    assert!(posting_gone, "0001 down must drop ledger.posting");
+    assert!(
+        !query_seam_fn_exists(db.migrate_pool(), "has_postings").await,
+        "0002 down must drop ledger.has_postings"
+    );
+    assert!(!query_seam_fn_exists(db.migrate_pool(), "has_quantity_at").await);
+
+    migrator.run(db.migrate_pool()).await.expect("up again");
+    assert!(query_seam_fn_exists(db.migrate_pool(), "has_postings").await);
+    assert!(query_seam_fn_exists(db.migrate_pool(), "has_quantity_at").await);
+    let definer_after: bool = sqlx::query_scalar(
+        "SELECT p.prosecdef FROM pg_proc p
+          JOIN pg_namespace n ON n.oid = p.pronamespace
+         WHERE n.nspname = 'ledger' AND p.proname = 'has_quantity_at'",
+    )
+    .fetch_one(db.migrate_pool())
+    .await
+    .expect("prosecdef after");
+    assert!(!definer_after, "has_quantity_at must stay invoker-rights");
+
     db.finish().await.unwrap();
 }
 

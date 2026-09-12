@@ -43,11 +43,13 @@ pub use genealogy::{Node, TraceStart, trace_backward, trace_forward};
 pub use poison::test_is_marked as test_poison_is_marked;
 pub use post::{bind_tx, commit, post};
 pub use projections::{BalanceSlice, apply_group, balance_at, rebuild, verify_projection};
-pub use registry::{StockItem, load_stock_item, upsert_location, upsert_stock_item};
+pub use registry::{
+    StockItem, has_postings, has_quantity_at, load_stock_item, upsert_location, upsert_stock_item,
+};
 pub use residual::{post_uom_conversion_residual, post_uom_residual_flush};
 pub use reverse::reverse;
 
-/// Embedded migrator (`placeholder` + `0001_ledger`).
+/// Embedded migrator (`placeholder` + `0001_ledger` + `0002_query_seam`).
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
 /// Group identifier: the `ledger.posting_group.group_id` uuid.
@@ -78,8 +80,9 @@ mod tests {
 
     #[test]
     fn migrator_has_placeholder() {
-        assert!(MIGRATOR.migrations.len() >= 2);
+        assert!(MIGRATOR.migrations.len() >= 3);
         assert!(MIGRATOR.iter().any(|m| m.version == 1));
+        assert!(MIGRATOR.iter().any(|m| m.version == 2));
     }
 
     #[test]
