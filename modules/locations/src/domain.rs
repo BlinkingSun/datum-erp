@@ -129,6 +129,15 @@ pub struct CreateLocation {
     pub kind: LocationKind,
 }
 
+/// Cursor filter for `GET /api/v1/locations` (`docs/10` §2.3).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ListFilter {
+    /// Page size. Default 50, maximum 200.
+    pub limit: Option<u32>,
+    /// Last id from the previous page (`id` ascending).
+    pub cursor: Option<LocationId>,
+}
+
 /// Patchable fields (`boundary_class` is never accepted).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UpdateLocation {

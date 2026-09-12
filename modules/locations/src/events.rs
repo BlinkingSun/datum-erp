@@ -15,3 +15,9 @@ pub fn register_schemas(registry: &mut SchemaRegistry) -> crate::Result<()> {
         })
         .map_err(Into::into)
 }
+
+/// Register this module's schemas on the process-global registry (`publish` reads it).
+pub fn register_schemas_global() -> crate::Result<()> {
+    let mut guard = datum_events::schema::global_mut()?;
+    register_schemas(&mut guard)
+}

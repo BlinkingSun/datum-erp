@@ -10,5 +10,12 @@ Executable tests (commit mode, `DATUM_REQUIRE_PG=1`):
 - `registry_row_matches_location`
 - `every_locations_table_is_audited_and_owned_by_datum_owner`
 - `writes_go_through_tx`
+- `http_manifest_binds_view_and_edit`
+- `list_paginates_by_cursor`
+- `list_tree_filters_inactive_by_default`
+- `deactivate_after_plain_install`
+- `generated_and_seeded_ids_are_uuid_v7`
+
+Fixtures: `WC-LATHE-03`, `QUARANTINE`, `WO-2026-1847`, `MDS-450-M4x12` (`PLAN.md` §3).
 
 Run: `cargo test -p datum-mod-locations`
