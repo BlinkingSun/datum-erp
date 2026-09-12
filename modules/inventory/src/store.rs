@@ -1699,7 +1699,7 @@ async fn post_uom_residuals(
         };
         let layers = load_open_layers(tx, *item, location).await?;
         let (money, _) = cover_layers(&layers, residual.amount.abs(), *lot, None)?;
-        let adj = GroupBuilder::new(
+        let mut adj = GroupBuilder::new(
             GroupKind::Adjustment,
             PostingGroupHeader {
                 source_kind: format!("inventory.residual.parent.{parent_group}"),
@@ -1709,6 +1709,7 @@ async fn post_uom_residuals(
                 reverses_group_id: None,
             },
         );
+        adj.parent(parent_group);
         let line = PreparedLine {
             item: *item,
             lot: *lot,

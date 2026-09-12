@@ -18,7 +18,8 @@ use sqlx::query_scalar as sql_query_scalar;
 use common::{
     action_ctx, assert_group_conserves, boot_kernel, consumption_count, dec, group_kind,
     has_zz_audit, line, pg_code, qty_ea, qty_ft, qty_in, reason_code, receive_bars, release_lot,
-    residual_group_for, residual_parent_tag, seed_world, table_owner, usd, write_pool,
+    residual_children_of, residual_group_for, residual_parent_tag, seed_world, table_owner, usd,
+    write_pool,
 };
 
 #[tokio::test]
@@ -345,7 +346,13 @@ async fn case_k_issue_by_the_inch_posts_uom_rounding_residual() {
     assert_eq!(line.entered.unit, common::IN);
     assert_eq!(line.canonical.amount, dec("0.5833"));
     let movement = issued.posted_group_id.expect("group");
-    let residual = residual_group_for(db.app_pool(), movement.as_uuid()).await;
+    let children = residual_children_of(&pool, &ctx, movement).await;
+    assert_eq!(children.len(), 1, "movement must have one residual child");
+    let residual = children[0].as_uuid();
+    assert_eq!(
+        residual,
+        residual_group_for(db.app_pool(), movement.as_uuid()).await
+    );
     assert_eq!(group_kind(db.app_pool(), residual).await, "ADJUSTMENT");
     assert_eq!(
         reason_code(db.app_pool(), residual).await.as_deref(),

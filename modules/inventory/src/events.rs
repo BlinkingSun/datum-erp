@@ -68,7 +68,7 @@ pub fn receipt_posted(
             "uom": uom,
             "posting_group_id": posting_group_id.to_string(),
         }))
-        .build()
+        .build_with(&datum_events::SchemaRegistry::standard())
         .map_err(Into::into)
 }
 
@@ -114,6 +114,47 @@ pub fn adjusted(
             "qty": qty.to_string(),
             "reason_code": reason_code,
         }))
-        .build()
+        .build_with(&datum_events::SchemaRegistry::standard())
         .map_err(Into::into)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use datum_core::{Identifier, ItemId, LocationId};
+    use datum_events::SchemaRegistry;
+
+    #[test]
+    fn receipt_posted_builds_from_standard_registry_without_module_register() {
+        let reg = SchemaRegistry::standard();
+        reg.get(RECEIPT_POSTED, 1)
+            .expect("kernel standard seeds receipt_posted.v1");
+        let event = receipt_posted(
+            ItemId::generate(),
+            LocationId::generate(),
+            Decimal::ONE,
+            1,
+            Identifier::generate(),
+            Identifier::generate(),
+        )
+        .expect("receipt_posted helper");
+        reg.validate(RECEIPT_POSTED, 1, &event.payload)
+            .expect("payload matches standard contract");
+    }
+
+    #[test]
+    fn adjusted_builds_from_standard_registry_without_module_register() {
+        let reg = SchemaRegistry::standard();
+        reg.get(ADJUSTED, 1)
+            .expect("kernel standard seeds adjusted.v1");
+        let event = adjusted(
+            ItemId::generate(),
+            Decimal::new(-3, 0),
+            "SCRAP",
+            Identifier::generate(),
+        )
+        .expect("adjusted helper");
+        reg.validate(ADJUSTED, 1, &event.payload)
+            .expect("payload matches standard contract");
+    }
 }

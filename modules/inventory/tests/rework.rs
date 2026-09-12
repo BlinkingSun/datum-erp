@@ -7,10 +7,11 @@ mod common;
 use datum_core::Identifier;
 use datum_db::Tx;
 use datum_mod_inventory::{
-    AdjustRequest, BalanceQuery, CountLine, CountRequest, DOC_TYPE, IssueRequest, LineInput,
-    MoveRequest, ReceiveRequest, ReleaseRequest, ReturnRequest, ShipRequest, adjust, available,
-    customer_return, cycle_count, error_code, http_status, issue_to_wip, move_stock, on_hand,
-    receive, release_from_quarantine, reverse_posted_issue, ship_to_customer, void_document,
+    ADJUSTED, AdjustRequest, BalanceQuery, CountLine, CountRequest, DOC_TYPE, IssueRequest,
+    LineInput, MoveRequest, RECEIPT_POSTED, ReceiveRequest, ReleaseRequest, ReturnRequest,
+    ShipRequest, adjust, available, customer_return, cycle_count, error_code, http_status,
+    issue_to_wip, move_stock, on_hand, receive, release_from_quarantine, reverse_posted_issue,
+    ship_to_customer, void_document,
 };
 use datum_module::Profile;
 use datum_statemachine::DocRef;
@@ -19,7 +20,8 @@ use sqlx::query_scalar as sql_query_scalar;
 
 use common::{
     World, action_ctx, boot_kernel, boot_kernel_with, consumption_count, dec, group_kind, line,
-    qty_ea, qty_ft, qty_in, receive_bars, release_lot, seed_world, usd, write_pool,
+    qty_ea, qty_ft, qty_in, receive_bars, release_lot, residual_children_of, residual_group_for,
+    seed_world, usd, write_pool,
 };
 
 async fn seed_fg_screws(w: &World, pool: &datum_db::WritePool) {
@@ -707,7 +709,17 @@ async fn issue_reversal_restores_consumption() {
     let group = doc.posted_group_id.expect("group");
     let before = consumption_count(db.app_pool(), group.as_uuid()).await;
     assert!(before >= 1);
-    let residual = common::residual_group_for(db.app_pool(), group.as_uuid()).await;
+    let children = residual_children_of(&pool, &ctx, group).await;
+    assert_eq!(
+        children.len(),
+        1,
+        "issue movement must have one residual child"
+    );
+    let residual = children[0].as_uuid();
+    assert_eq!(
+        residual,
+        residual_group_for(db.app_pool(), group.as_uuid()).await
+    );
     assert_eq!(group_kind(db.app_pool(), residual).await, "ADJUSTMENT");
     assert_eq!(
         common::reason_code(db.app_pool(), residual)
@@ -856,6 +868,82 @@ async fn void_document_updates_status_and_is_audited() {
     .await
     .expect("audit");
     assert!(n >= 1);
+    db.finish().await.expect("finish");
+}
+
+#[tokio::test]
+async fn lot_less_receipt_publishes_receipt_posted_event() {
+    let db = db_case!("inv_c3_evt_receipt");
+    let kernel = boot_kernel(&db).await;
+    let w = seed_world(&db, kernel).await;
+    let pool = write_pool(&db);
+    let ctx = action_ctx(&w, "inventory.receive");
+    let mut tx = Tx::begin(&pool, &ctx).await.expect("begin");
+    let doc = receive(
+        &mut tx,
+        &w.kernel,
+        &ctx,
+        ReceiveRequest {
+            to_location: w.fg,
+            reference: Some("lot-less-evt".into()),
+            lines: vec![line(w.screw, qty_ea("25"), None, Some(usd("6.25")))],
+            expected: None,
+            tolerance: None,
+            idempotency_key: Some(uuid::Uuid::now_v7()),
+        },
+    )
+    .await
+    .expect("receive");
+    tx.commit().await.expect("commit");
+    let name: String = sql_query_scalar("SELECT name FROM app.event WHERE doc_id = $1 LIMIT 1")
+        .bind(doc.id.as_uuid())
+        .fetch_one(db.app_pool())
+        .await
+        .expect("outbox row");
+    assert_eq!(name, RECEIPT_POSTED);
+    db.finish().await.expect("finish");
+}
+
+#[tokio::test]
+async fn adjust_publishes_adjusted_event() {
+    let db = db_case!("inv_c3_evt_adjust");
+    let kernel = boot_kernel(&db).await;
+    let w = seed_world(&db, kernel).await;
+    let pool = write_pool(&db);
+    seed_fg_screws(&w, &pool).await;
+    let ctx = action_ctx(&w, "inventory.adjust");
+    let mut tx = Tx::begin(&pool, &ctx).await.expect("begin");
+    let doc = adjust(
+        &mut tx,
+        &w.kernel,
+        &ctx,
+        AdjustRequest {
+            reason: "SCRAP_AT_OP_30".into(),
+            location: w.fg,
+            reference: Some("adj-evt".into()),
+            lines: vec![LineInput {
+                item: w.screw,
+                entered: qty_ea("-2"),
+                lot: None,
+                serial: None,
+                from_location: None,
+                to_location: None,
+                package: None,
+                amount: Some(usd("0.50")),
+                reason_code: None,
+            }],
+            idempotency_key: Some(uuid::Uuid::now_v7()),
+        },
+    )
+    .await
+    .expect("adjust");
+    tx.commit().await.expect("commit");
+    let name: String = sql_query_scalar("SELECT name FROM app.event WHERE doc_id = $1 LIMIT 1")
+        .bind(doc.id.as_uuid())
+        .fetch_one(db.app_pool())
+        .await
+        .expect("outbox row");
+    assert_eq!(name, ADJUSTED);
     db.finish().await.expect("finish");
 }
 

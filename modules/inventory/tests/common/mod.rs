@@ -9,7 +9,7 @@ use datum_core::{
 use datum_db::{Tx, WriteContext, WritePool};
 use datum_identity::rbac::{RoleBundle, assign_role, seed_bundles};
 use datum_identity::{PrincipalKind, SYSTEM_ID, create_principal};
-use datum_ledger::CostMethod;
+use datum_ledger::{CostMethod, children_of};
 use datum_mod_inventory::{ReceiveRequest, ReleaseRequest, receive, release_from_quarantine};
 use datum_mod_items::{Kind, NewItem};
 use datum_mod_locations::{CreateLocation, LocationKind, seed_install};
@@ -386,12 +386,24 @@ pub fn residual_parent_tag(parent: uuid::Uuid) -> String {
 
 pub async fn residual_group_for(pool: &PgPool, parent: uuid::Uuid) -> uuid::Uuid {
     sql_query_scalar(
-        "SELECT group_id FROM ledger.posting_group WHERE source_kind = $1 AND kind = 'ADJUSTMENT'",
+        "SELECT group_id FROM ledger.posting_group
+         WHERE parent_group_id = $1 AND kind = 'ADJUSTMENT'",
     )
-    .bind(residual_parent_tag(parent))
+    .bind(parent)
     .fetch_one(pool)
     .await
     .expect("residual group")
+}
+
+pub async fn residual_children_of(
+    pool: &WritePool,
+    ctx: &WriteContext,
+    movement: Identifier,
+) -> Vec<Identifier> {
+    let mut tx = Tx::begin(pool, ctx).await.expect("begin children_of");
+    children_of(&mut tx, movement)
+        .await
+        .expect("children_of movement")
 }
 
 pub async fn assert_group_conserves(pool: &PgPool, group: uuid::Uuid) {
