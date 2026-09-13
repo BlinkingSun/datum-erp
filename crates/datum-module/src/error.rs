@@ -46,6 +46,9 @@ pub enum Error {
     /// Controlled documents error.
     #[error(transparent)]
     Documents(#[from] datum_documents::Error),
+    /// Print / template-seed error.
+    #[error(transparent)]
+    Print(#[from] datum_print::Error),
     /// JSON error.
     #[error(transparent)]
     Json(#[from] serde_json::Error),
