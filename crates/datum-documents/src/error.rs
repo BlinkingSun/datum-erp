@@ -60,7 +60,7 @@ pub enum Error {
     /// Overlapping effectivity windows on one document.
     #[error("overlapping effectivity")]
     OverlappingEffectivity,
-    /// `legal_hold` refuses Obsolete and retention actions.
+    /// `legal_hold` refuses Obsolete, Superseded, and retention actions.
     #[error("legal hold refuses this action")]
     LegalHold,
     /// Unknown installation profile.

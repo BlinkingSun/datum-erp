@@ -17,10 +17,10 @@ mod manifest;
 mod store;
 
 pub use api::{
-    attach, create, effective_at, history, link, load, new_revision, set_legal_hold, transition,
-    transition_context,
+    attach, create, discard_unreferenced_blob, effective_at, history, link, load, new_revision,
+    set_legal_hold, transition, transition_context,
 };
-pub use blob::{BlobStore, FsBlobStore, verify_blob};
+pub use blob::{BlobStore, FsBlobStore, hash_bytes, verify_blob};
 pub use domain::{
     AttachmentId, BlobHash, DOC_TYPE, DatePrecision, Document, DocumentId, EVENT_EFFECTIVE,
     EVENT_REVISION_CREATED, EVENT_SCHEMAS, EventSchemaDecl, LinkId, Manifest, PERMISSIONS,
@@ -64,6 +64,7 @@ mod tests {
             assert!(names.contains(&"approve"));
             assert!(names.contains(&"make_effective"));
             let approve = m.edges.iter().find(|e| e.name == "approve").unwrap();
+            let make_effective = m.edges.iter().find(|e| e.name == "make_effective").unwrap();
             match profile {
                 "regulated-device" => {
                     assert!(m.regulated);
@@ -71,11 +72,22 @@ mod tests {
                         approve.signature,
                         datum_statemachine::SignatureDeclaration::Required(_)
                     ));
+                    assert!(
+                        matches!(
+                            make_effective.signature,
+                            datum_statemachine::SignatureDeclaration::Required(_)
+                        ),
+                        "regulated-device make_effective must be Required"
+                    );
                 }
                 "plain-shop" => {
                     assert!(!m.regulated);
                     assert!(matches!(
                         approve.signature,
+                        datum_statemachine::SignatureDeclaration::NotRequired { .. }
+                    ));
+                    assert!(matches!(
+                        make_effective.signature,
                         datum_statemachine::SignatureDeclaration::NotRequired { .. }
                     ));
                 }
@@ -89,5 +101,32 @@ mod tests {
         fn unimplemented_display_is_stable(_x in 0u8..4) {
             prop_assert!(!Error::Unimplemented.to_string().is_empty());
         }
+    }
+
+    #[test]
+    fn ranges_overlap_uses_explicit_unbounded_not_a_sentinel() {
+        use chrono::{TimeZone, Utc};
+        let t0 = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let t1 = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
+        assert!(
+            store::ranges_overlap(
+                Some(t0),
+                None,
+                Some(t1),
+                Some(t1 + chrono::Duration::days(1))
+            ),
+            "open until overlaps a later bounded window"
+        );
+        assert!(
+            !store::ranges_overlap(None, None, Some(t0), Some(t1)),
+            "both-NULL is not a window"
+        );
+        assert!(
+            !store::ranges_overlap(Some(t0), Some(t1), Some(t1), None),
+            "half-open: [t0, t1) does not overlap [t1, ∞)"
+        );
+        assert!(store::in_force(None, Some(t1), t0));
+        assert!(!store::in_force(None, Some(t1), t1));
+        assert!(!store::in_force(None, None, t0));
     }
 }

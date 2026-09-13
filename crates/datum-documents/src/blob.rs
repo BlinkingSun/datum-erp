@@ -3,9 +3,15 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use crate::domain::BlobHash;
 use crate::error::{Error, Result};
+
+/// SHA-256 of `bytes` (the blob primary key). Computed before any disk write.
+pub fn hash_bytes(bytes: &[u8]) -> BlobHash {
+    BlobHash(datum_audit::sha256::digest(bytes))
+}
 
 /// Content-addressed blob store. Bytes live on disk; the database holds the hash.
 pub trait BlobStore: Send + Sync {
@@ -15,18 +21,31 @@ pub trait BlobStore: Send + Sync {
     fn get(&self, hash: BlobHash) -> Result<Vec<u8>>;
     /// Recompute the digest of the stored file and compare.
     fn verify(&self, hash: BlobHash) -> Result<()>;
+    /// Whether the content-addressed path already exists.
+    fn exists(&self, hash: BlobHash) -> bool;
+    /// Remove a path after a failed write. No-op if the file is absent.
+    fn discard_hash(&self, hash: BlobHash);
+    /// Delete objects created by [`Self::put`] since [`Self::keep_puts`].
+    /// The composition root calls this after a transaction rollback.
+    fn discard_uncommitted(&self);
+    /// Drop tracking for new objects after a successful commit (files stay).
+    fn keep_puts(&self);
 }
 
 /// Filesystem store: `<root>/<aa>/<bb>/<hash>` (hex), write-once, fsync.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct FsBlobStore {
     root: PathBuf,
+    created: Mutex<Vec<BlobHash>>,
 }
 
 impl FsBlobStore {
     /// Store under `root`.
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        Self {
+            root: root.into(),
+            created: Mutex::new(Vec::new()),
+        }
     }
 
     /// Store under `DATUM_BLOB_ROOT`.
@@ -49,11 +68,29 @@ impl FsBlobStore {
         let bb = &hex[2..4];
         self.root.join(aa).join(bb).join(hex)
     }
+
+    fn track_new(&self, hash: BlobHash) {
+        if let Ok(mut created) = self.created.lock() {
+            created.push(hash);
+        }
+    }
+
+    fn untrack(&self, hash: BlobHash) {
+        if let Ok(mut created) = self.created.lock() {
+            created.retain(|h| *h != hash);
+        }
+    }
+
+    fn remove_file(&self, hash: BlobHash) {
+        let path = self.path_for(hash);
+        let _ = fs::remove_file(&path);
+        self.untrack(hash);
+    }
 }
 
 impl BlobStore for FsBlobStore {
     fn put(&self, bytes: &[u8]) -> Result<BlobHash> {
-        let hash = BlobHash(datum_audit::sha256::digest(bytes));
+        let hash = hash_bytes(bytes);
         let path = self.path_for(hash);
         if path.exists() {
             let existing = fs::read(&path)?;
@@ -101,6 +138,7 @@ impl BlobStore for FsBlobStore {
         if let Some(parent) = path.parent() {
             fsync_dir(parent)?;
         }
+        self.track_new(hash);
         Ok(hash)
     }
 
@@ -126,6 +164,32 @@ impl BlobStore for FsBlobStore {
             Err(Error::BlobCorrupt {
                 hash: hash.to_hex(),
             })
+        }
+    }
+
+    fn exists(&self, hash: BlobHash) -> bool {
+        self.path_for(hash).exists()
+    }
+
+    fn discard_hash(&self, hash: BlobHash) {
+        self.remove_file(hash);
+    }
+
+    fn discard_uncommitted(&self) {
+        let hashes = self
+            .created
+            .lock()
+            .map(|mut created| created.drain(..).collect::<Vec<_>>())
+            .unwrap_or_default();
+        for hash in hashes {
+            let path = self.path_for(hash);
+            let _ = fs::remove_file(path);
+        }
+    }
+
+    fn keep_puts(&self) {
+        if let Ok(mut created) = self.created.lock() {
+            created.clear();
         }
     }
 }

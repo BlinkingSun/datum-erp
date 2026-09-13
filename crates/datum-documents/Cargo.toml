@@ -13,7 +13,6 @@ workspace = true
 
 [features]
 default = []
-test-utils = []
 
 [dependencies]
 chrono.workspace = true

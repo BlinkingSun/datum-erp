@@ -8,11 +8,13 @@ use chrono::{Duration, Utc};
 use datum_core::{Identifier, NoSignatures};
 use datum_db::Tx;
 use datum_documents::{
-    BlobStore, Error, Manifest, Status, attach, create, document_machine, effective_at, history,
-    link, load, new_revision, set_legal_hold, transition, transition_context, verify_blob,
+    BlobStore, Error, Manifest, Status, attach, create, discard_unreferenced_blob,
+    document_machine, effective_at, hash_bytes, history, link, load, new_revision, set_legal_hold,
+    transition, transition_context, verify_blob,
 };
 use serde_json::json;
-use sqlx::{query, query_scalar};
+use sqlx::{query, query_as, query_scalar};
+use uuid::Uuid;
 
 use common::{
     AcceptingGate, PROFILES, actor_with_docs, blob_store, db_sqlstate, dummy_token, frozen_engine,
@@ -27,6 +29,26 @@ where
     for profile in PROFILES {
         f(profile).await;
     }
+}
+
+/// Rebuild the version chain from independent revision rows (root first).
+fn rebuild_ids_from_rows(rows: &[(Uuid, Option<Uuid>)]) -> Vec<Uuid> {
+    let mut children: std::collections::HashMap<Option<Uuid>, Vec<Uuid>> =
+        std::collections::HashMap::new();
+    for (id, parent) in rows {
+        children.entry(*parent).or_default().push(*id);
+    }
+    let mut out = Vec::with_capacity(rows.len());
+    let mut stack: Vec<Uuid> = children.get(&None).cloned().unwrap_or_default();
+    while let Some(id) = stack.pop() {
+        out.push(id);
+        if let Some(next) = children.get(&Some(id)) {
+            for child in next.iter().rev() {
+                stack.push(*child);
+            }
+        }
+    }
+    out
 }
 
 #[tokio::test]
@@ -130,16 +152,34 @@ async fn revision_chain_rebuilds_from_rows() {
         let c = new_revision(&mut tx, id, "C", Manifest::content(json!({"n": 3})))
             .await
             .unwrap();
-        let rebuilt = history(&mut tx, id).await.unwrap();
+        let chain_rows: Vec<(Uuid, Option<Uuid>)> = tx
+            .fetch_all(
+                query_as(
+                    "SELECT revision_id, supersedes_revision_id
+                     FROM documents.revision
+                     WHERE document_id = $1",
+                )
+                .bind(id.as_uuid()),
+            )
+            .await
+            .unwrap();
+        let rebuilt_ids = rebuild_ids_from_rows(&chain_rows);
         let live = history(&mut tx, id).await.unwrap();
         tx.commit().await.unwrap();
-        assert_eq!(rebuilt.len(), 3);
-        assert_eq!(rebuilt[0].id, a);
-        assert_eq!(rebuilt[1].id, b);
-        assert_eq!(rebuilt[2].id, c);
-        assert_eq!(rebuilt[1].supersedes, Some(a));
-        assert_eq!(rebuilt[2].supersedes, Some(b));
-        assert_eq!(rebuilt, live);
+        assert_eq!(rebuilt_ids.len(), 3);
+        assert_eq!(rebuilt_ids[0], a.as_uuid());
+        assert_eq!(rebuilt_ids[1], b.as_uuid());
+        assert_eq!(rebuilt_ids[2], c.as_uuid());
+        assert_eq!(live.len(), 3);
+        assert_eq!(live[0].id, a);
+        assert_eq!(live[1].id, b);
+        assert_eq!(live[2].id, c);
+        assert_eq!(live[1].supersedes, Some(a));
+        assert_eq!(live[2].supersedes, Some(b));
+        assert_eq!(
+            live.iter().map(|r| r.id.as_uuid()).collect::<Vec<_>>(),
+            rebuilt_ids
+        );
         db.finish().await.unwrap();
     })
     .await;
@@ -205,6 +245,70 @@ async fn no_cascade_in_schema() {
         .await
         .unwrap();
         assert_eq!(n, 0, "ON DELETE CASCADE is absent from schema documents");
+        db.finish().await.unwrap();
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn effective_at_null_from_is_unbounded_past() {
+    for_each_profile(|profile| async move {
+        let Some(db) = open_db("doc_effnull", profile).await else {
+            return;
+        };
+        migrate(&db).await;
+        let write = write_pool(&db);
+        let eng = frozen_engine(profile);
+        persist_engine(&write, &eng, profile).await;
+        let t0 = Utc::now();
+        let t1 = t0 + Duration::days(10);
+        let mut tx = Tx::begin(&write, &write_ctx("documents.create", profile))
+            .await
+            .unwrap();
+        let id = create(&mut tx, &eng, "SOP", "NullFrom", "quality")
+            .await
+            .unwrap();
+        let a = new_revision(
+            &mut tx,
+            id,
+            "A",
+            Manifest {
+                content: json!({"rev": "A"}),
+                effective_from: None,
+                effective_until: Some(t0),
+                from_precision: None,
+                until_precision: Some(datum_documents::DatePrecision::Day),
+            },
+        )
+        .await
+        .unwrap();
+        let b = new_revision(
+            &mut tx,
+            id,
+            "B",
+            Manifest {
+                content: json!({"rev": "B"}),
+                effective_from: Some(t0),
+                effective_until: Some(t1),
+                from_precision: Some(datum_documents::DatePrecision::Day),
+                until_precision: Some(datum_documents::DatePrecision::Day),
+            },
+        )
+        .await
+        .unwrap();
+        let before = effective_at(&mut tx, id, t0 - Duration::days(1))
+            .await
+            .unwrap()
+            .unwrap();
+        let at_from = effective_at(&mut tx, id, t0).await.unwrap().unwrap();
+        let at_until = effective_at(&mut tx, id, t1).await.unwrap();
+        tx.commit().await.unwrap();
+        assert_eq!(before.id, a, "NULL effective_from is unbounded past");
+        assert_eq!(at_from.id, b);
+        assert!(
+            at_until.is_none(),
+            "ts == effective_until is exclusive (half-open)"
+        );
         db.finish().await.unwrap();
     })
     .await;
@@ -393,15 +497,11 @@ async fn approval_machine_edges_through_kernel() {
             .unwrap();
         tx.commit().await.unwrap();
 
-        for edge in ["submit", "approve", "make_effective"] {
+        for (i, edge) in ["submit", "approve", "make_effective"]
+            .into_iter()
+            .enumerate()
+        {
             let ctx = transition_context(base.clone(), id, edge);
-            let ver: i64 =
-                query_scalar("SELECT version FROM sm.instance WHERE doc_type = $1 AND doc_id = $2")
-                    .bind(datum_documents::DOC_TYPE)
-                    .bind(id.as_uuid())
-                    .fetch_one(db.app_pool())
-                    .await
-                    .unwrap();
             let token = dummy_token(
                 id,
                 if edge == "make_effective" {
@@ -409,7 +509,7 @@ async fn approval_machine_edges_through_kernel() {
                 } else {
                     "Approved"
                 },
-                ver,
+                (i as i64) + 1,
             );
             let mut tx = Tx::begin(&write, &ctx).await.unwrap();
             transition(&mut tx, &eng, &gate, id, edge, &ctx, Some(&token))
@@ -585,10 +685,16 @@ async fn effective_at_picks_the_right_revision() {
         let at_none = effective_at(&mut tx, id, t2 + Duration::days(1))
             .await
             .unwrap();
+        let at_boundary_a = effective_at(&mut tx, id, t1).await.unwrap();
         tx.commit().await.unwrap();
         assert_eq!(at_a.id, a);
         assert_eq!(at_b.id, b);
         assert!(at_none.is_none());
+        assert_eq!(
+            at_boundary_a.as_ref().map(|r| r.id),
+            Some(b),
+            "half-open: ts == effective_until is exclusive of A and inclusive of B"
+        );
         db.finish().await.unwrap();
     })
     .await;
@@ -641,6 +747,24 @@ async fn overlapping_effectivity_refused() {
         .await
         .unwrap_err();
         assert!(matches!(err, Error::OverlappingEffectivity), "got {err:?}");
+        let err_open = new_revision(
+            &mut tx,
+            id,
+            "C",
+            Manifest {
+                content: json!({}),
+                effective_from: Some(t1 - Duration::days(1)),
+                effective_until: None,
+                from_precision: Some(datum_documents::DatePrecision::Day),
+                until_precision: None,
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(err_open, Error::OverlappingEffectivity),
+            "open until must not use a sentinel; got {err_open:?}"
+        );
         tx.rollback().await.unwrap();
         db.finish().await.unwrap();
     })
@@ -787,16 +911,11 @@ async fn legal_hold_blocks_obsolete() {
             .await
             .unwrap();
         tx.commit().await.unwrap();
-        for edge in ["submit", "approve", "make_effective"] {
+        for (i, edge) in ["submit", "approve", "make_effective"]
+            .into_iter()
+            .enumerate()
+        {
             let ctx = transition_context(base.clone(), id, edge);
-            let ver: (i64,) = sqlx::query_as(
-                "SELECT version FROM sm.instance WHERE doc_type = $1 AND doc_id = $2",
-            )
-            .bind(datum_documents::DOC_TYPE)
-            .bind(id.as_uuid())
-            .fetch_one(db.app_pool())
-            .await
-            .unwrap();
             let token = dummy_token(
                 id,
                 if edge == "make_effective" {
@@ -804,7 +923,7 @@ async fn legal_hold_blocks_obsolete() {
                 } else {
                     "Approved"
                 },
-                ver.0,
+                (i as i64) + 1,
             );
             let mut tx = Tx::begin(&write, &ctx).await.unwrap();
             transition(&mut tx, &eng, &gate, id, edge, &ctx, Some(&token))
@@ -817,20 +936,29 @@ async fn legal_hold_blocks_obsolete() {
             .unwrap();
         set_legal_hold(&mut tx, id, true).await.unwrap();
         tx.commit().await.unwrap();
-        let ctx = transition_context(base, id, "obsolete");
+        let ctx = transition_context(base.clone(), id, "obsolete");
         let mut tx = Tx::begin(&write, &ctx).await.unwrap();
         let err = transition(&mut tx, &eng, &gate, id, "obsolete", &ctx, None)
             .await
             .unwrap_err();
         assert!(matches!(err, Error::LegalHold), "got {err:?}");
         tx.rollback().await.unwrap();
-        let status: String =
-            query_scalar("SELECT status FROM documents.document WHERE document_id = $1")
-                .bind(id.as_uuid())
-                .fetch_one(db.app_pool())
-                .await
-                .unwrap();
-        assert_eq!(status, "Effective");
+        let ctx = transition_context(base, id, "supersede");
+        let mut tx = Tx::begin(&write, &ctx).await.unwrap();
+        let err = transition(&mut tx, &eng, &gate, id, "supersede", &ctx, None)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, Error::LegalHold),
+            "legal hold must block supersede, got {err:?}"
+        );
+        tx.rollback().await.unwrap();
+        let mut tx = Tx::begin(&write, &write_ctx("documents.view", profile))
+            .await
+            .unwrap();
+        let doc = load(&mut tx, id).await.unwrap();
+        tx.rollback().await.unwrap();
+        assert_eq!(doc.status, Status::Effective);
         db.finish().await.unwrap();
     })
     .await;
@@ -867,16 +995,22 @@ async fn every_write_audited_with_stamps() {
         .await
         .unwrap();
         assert!(n >= 2, "create+revision must be audited, got {n}");
+        let app_version = datum_db::app_version();
         let stamped: i64 = query_scalar(
             "SELECT count(*) FROM audit.event
              WHERE table_name = 'document'
-               AND app_version IS NOT NULL
-               AND config_version IS NOT NULL",
+               AND app_version = $1
+               AND config_version = $2",
         )
+        .bind(&app_version)
+        .bind(profile)
         .fetch_one(db.app_pool())
         .await
         .unwrap();
-        assert!(stamped >= 1);
+        assert!(
+            stamped >= 1,
+            "audit stamps must equal bound app_version={app_version:?} config_version={profile:?}, got {stamped}"
+        );
         db.finish().await.unwrap();
     })
     .await;
@@ -955,6 +1089,80 @@ async fn link_binds_revision_to_record() {
             .await
             .unwrap();
         assert_eq!(n, 1);
+        db.finish().await.unwrap();
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn blob_not_orphaned_on_rollback() {
+    for_each_profile(|profile| async move {
+        let Some(db) = open_db("doc_orph", profile).await else {
+            return;
+        };
+        migrate(&db).await;
+        let write = write_pool(&db);
+        let eng = frozen_engine(profile);
+        persist_engine(&write, &eng, profile).await;
+        let store = blob_store("orphan");
+        let bytes = b"rollback-orphan-bytes";
+        let hash = hash_bytes(bytes);
+        let mut tx = Tx::begin(&write, &write_ctx("documents.create", profile))
+            .await
+            .unwrap();
+        let missing = attach(
+            &mut tx,
+            &store,
+            datum_documents::RevisionId(Identifier::generate()),
+            bytes,
+            "missing.bin",
+            "application/octet-stream",
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(missing, Error::NotFound), "got {missing:?}");
+        assert!(
+            !store.exists(hash),
+            "bytes must not hit disk before a revision row exists"
+        );
+        let id = create(&mut tx, &eng, "SOP", "Orphan", "quality")
+            .await
+            .unwrap();
+        let rev = new_revision(&mut tx, id, "A", Manifest::content(json!({})))
+            .await
+            .unwrap();
+        attach(
+            &mut tx,
+            &store,
+            rev,
+            bytes,
+            "a.bin",
+            "application/octet-stream",
+        )
+        .await
+        .unwrap();
+        assert!(
+            store.exists(hash),
+            "put runs after the blob row is inserted in the Tx"
+        );
+        tx.rollback().await.unwrap();
+        store.discard_uncommitted();
+        assert!(
+            !store.exists(hash),
+            "rollback must not leave an orphan blob file"
+        );
+        let mut tx = Tx::begin(&write, &write_ctx("documents.edit", profile))
+            .await
+            .unwrap();
+        discard_unreferenced_blob(&mut tx, &store, hash)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        let n: i64 = query_scalar("SELECT count(*) FROM documents.blob")
+            .fetch_one(db.app_pool())
+            .await
+            .unwrap();
+        assert_eq!(n, 0, "rolled-back blob row must not be visible");
         db.finish().await.unwrap();
     })
     .await;

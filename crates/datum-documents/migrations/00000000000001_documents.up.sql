@@ -106,47 +106,30 @@ CREATE TABLE documents.link (
 );
 ALTER TABLE documents.link OWNER TO datum_owner;
 
--- Live machine state for doc_type = 'document'. search_path is pg_catalog, pg_temp
--- (R-2s-8), so the sm.instance identifier is qualified through format('%I').
-CREATE FUNCTION documents.live_machine_state(p_doc_id uuid) RETURNS text
-LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog, pg_temp AS $fn$
-DECLARE
-  live_state text;
-BEGIN
-  EXECUTE format(
-    'SELECT state FROM %I.%I WHERE doc_type = $1 AND doc_id = $2',
-    'sm',
-    'instance'
-  )
-  INTO live_state
-  USING 'document', p_doc_id;
-  RETURN live_state;
-END
-$fn$;
-ALTER FUNCTION documents.live_machine_state(uuid) OWNER TO datum_owner;
-
+-- Live status is the machine (datum_statemachine::current_state on Tx).
+-- The status column is the insert-time snapshot and is immutable here: a raw
+-- UPDATE cannot skip the graph, and this crate never names another schema.
 CREATE FUNCTION documents.document_guard() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $fn$
 BEGIN
   IF TG_OP = 'UPDATE' THEN
+    IF NEW.status IS DISTINCT FROM OLD.status THEN
+      IF NEW.status IN ('Obsolete', 'Superseded')
+         AND (NEW.legal_hold OR OLD.legal_hold) THEN
+        RAISE EXCEPTION 'legal hold refuses Obsolete and Superseded'
+          USING ERRCODE = 'P0001';
+      END IF;
+      RAISE EXCEPTION 'documents.document.status is assigned by the machine only'
+        USING ERRCODE = 'P0001';
+    END IF;
     IF NEW.document_id IS DISTINCT FROM OLD.document_id
        OR NEW.kind IS DISTINCT FROM OLD.kind
        OR NEW.number IS DISTINCT FROM OLD.number
        OR NEW.title IS DISTINCT FROM OLD.title
        OR NEW.retention_class IS DISTINCT FROM OLD.retention_class
        OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
-      RAISE EXCEPTION 'documents.document is immutable except status and legal_hold'
+      RAISE EXCEPTION 'documents.document is immutable except legal_hold'
         USING ERRCODE = 'P0001';
-    END IF;
-    IF NEW.status IS DISTINCT FROM OLD.status THEN
-      IF NEW.status = 'Obsolete' AND (NEW.legal_hold OR OLD.legal_hold) THEN
-        RAISE EXCEPTION 'legal hold refuses Obsolete'
-          USING ERRCODE = 'P0001';
-      END IF;
-      IF NEW.status IS DISTINCT FROM documents.live_machine_state(NEW.document_id) THEN
-        RAISE EXCEPTION 'documents.document.status must match the live machine instance'
-          USING ERRCODE = 'P0001';
-      END IF;
     END IF;
   END IF;
   RETURN NEW;
@@ -164,35 +147,18 @@ DECLARE
   held boolean;
 BEGIN
   IF TG_OP = 'UPDATE' THEN
-    IF NEW.revision_id IS DISTINCT FROM OLD.revision_id
-       OR NEW.document_id IS DISTINCT FROM OLD.document_id
-       OR NEW.label IS DISTINCT FROM OLD.label
-       OR NEW.supersedes_revision_id IS DISTINCT FROM OLD.supersedes_revision_id
-       OR NEW.content_manifest IS DISTINCT FROM OLD.content_manifest
-       OR NEW.retention_class IS DISTINCT FROM OLD.retention_class
-       OR NEW.effective_from IS DISTINCT FROM OLD.effective_from
-       OR NEW.effective_until IS DISTINCT FROM OLD.effective_until
-       OR NEW.effective_from_precision IS DISTINCT FROM OLD.effective_from_precision
-       OR NEW.effective_until_precision IS DISTINCT FROM OLD.effective_until_precision
-       OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
-      RAISE EXCEPTION 'documents.revision is immutable except status'
-        USING ERRCODE = 'P0001';
-    END IF;
-    IF NEW.status IS DISTINCT FROM OLD.status THEN
-      IF NEW.status = 'Obsolete' THEN
-        SELECT d.legal_hold INTO held
-          FROM documents.document d
-         WHERE d.document_id = NEW.document_id;
-        IF COALESCE(held, false) THEN
-          RAISE EXCEPTION 'legal hold refuses Obsolete'
-            USING ERRCODE = 'P0001';
-        END IF;
-      END IF;
-      IF NEW.status IS DISTINCT FROM documents.live_machine_state(NEW.document_id) THEN
-        RAISE EXCEPTION 'documents.revision.status must match the live machine instance'
+    IF NEW.status IS DISTINCT FROM OLD.status
+       AND NEW.status IN ('Obsolete', 'Superseded') THEN
+      SELECT d.legal_hold INTO held
+        FROM documents.document d
+       WHERE d.document_id = NEW.document_id;
+      IF COALESCE(held, false) THEN
+        RAISE EXCEPTION 'legal hold refuses Obsolete and Superseded'
           USING ERRCODE = 'P0001';
       END IF;
     END IF;
+    RAISE EXCEPTION 'documents.revision is insert-only'
+      USING ERRCODE = 'P0001';
   END IF;
   RETURN NEW;
 END
