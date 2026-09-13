@@ -158,6 +158,28 @@ pub async fn load_principal(pool: &datum_db::Pool, id: UserId) -> Result<Princip
     row_to_principal(row)
 }
 
+/// Look up a principal inside the caller's transaction (D-2b-5 check 1).
+///
+/// A pool read cannot see an uncommitted deactivation on the claim `Tx`, and a
+/// second connection deadlocks a `max_connections=2` `FOR UPDATE` claim.
+pub async fn load_principal_on(tx: &mut datum_db::Tx<'_>, id: UserId) -> Result<Principal> {
+    let row: Option<PrincipalRow> = tx
+        .fetch_optional(
+            sql_query_as(
+                r#"SELECT id, kind, username, display_name, status, created_at, deactivated_at
+                     FROM identity.principal WHERE id = $1
+                     FOR UPDATE"#,
+            )
+            .bind(id.as_uuid()),
+        )
+        .await
+        .map_err(map_tx)?;
+    let Some(row) = row else {
+        return Err(Error::NotFound);
+    };
+    row_to_principal(row)
+}
+
 /// Create a principal. Username uniqueness is enforced by history + unique index.
 pub async fn create_principal(
     tx: &mut datum_db::Tx<'_>,

@@ -2,10 +2,10 @@
 
 use chrono::{DateTime, Utc};
 use datum_core::{
-    NoSignatures, RecordRef, SignatureError, SignatureGate, SignatureId, SignatureRequirement,
-    SignatureToken,
+    Identifier, NoSignatures, RecordRef, SignatureError, SignatureGate, SignatureId,
+    SignatureRequirement, SignatureToken,
 };
-use datum_identity::PrincipalStatus;
+use datum_identity::{PrincipalStatus, UserId, load_principal_on};
 use serde_json::Value;
 use sqlx::query_as as sql_query_as;
 use uuid::Uuid;
@@ -26,7 +26,8 @@ pub struct LiveDoc {
     pub projection: Value,
     /// Live `sm.instance` triple.
     pub instance: InstanceTriple,
-    /// Live signer status from [`datum_identity::load_principal`] (no `Tx` API).
+    /// Caller-supplied signer status. [`prepare`] ignores this and re-reads
+    /// `identity.principal.status` on the claim `Tx` (D-2b-5 check 1).
     pub signer_status: PrincipalStatus,
 }
 
@@ -169,9 +170,8 @@ impl GateFactory {
 
 /// Lock the row `FOR UPDATE`, claim it, recompute the live hash.
 ///
-/// Signer activity is [`LiveDoc::signer_status`]: [`datum_identity::load_principal`]
-/// takes `&Pool`, not `&mut Tx`, and a second pool connection deadlocks a
-/// `max_connections=2` claim.
+/// Signer activity is `identity.principal.status` read on this same sealed `Tx`
+/// (D-2b-5 check 1). A pool read cannot see a deactivation racing the consume.
 pub async fn prepare(
     tx: &mut datum_db::Tx<'_>,
     token: &SignatureToken,
@@ -214,7 +214,16 @@ pub async fn prepare(
     if expires_at <= Utc::now() {
         first = Some(SignatureError::Invalid("expired".into()));
     }
-    if first.is_none() && doc.signer_status != PrincipalStatus::Active {
+    let signer_status = match load_principal_on(
+        tx,
+        UserId::from_identifier(Identifier::from_uuid(signer_id)),
+    )
+    .await
+    {
+        Ok(p) => p.status,
+        Err(_) => PrincipalStatus::Inactive,
+    };
+    if first.is_none() && signer_status != PrincipalStatus::Active {
         first = Some(SignatureError::Invalid("signer inactive".into()));
     }
     if first.is_none() && token.signer.id.as_uuid() != signer_id {

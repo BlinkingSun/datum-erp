@@ -12,7 +12,7 @@ use datum_core::{
 };
 use datum_db::Tx;
 use datum_esign::{InstanceTriple, LiveDoc, MintRequest, mint};
-use datum_identity::PrincipalStatus;
+use datum_identity::{PrincipalStatus, deactivate_principal};
 use datum_ledger::{CostMethod, rebuild, upsert_location, upsert_stock_item, verify_projection};
 use datum_statemachine::{DocRef, EdgeBuilder, Machine, Veto};
 use datum_test::db_case;
@@ -747,8 +747,11 @@ async fn kernel_e2e_regulated_release_with_real_signature() {
         id: doc.doc_id,
         version,
     };
-    let projection = json!({});
     let mut mint_tx = Tx::begin(&write, &boot_ctx()).await.expect("mint begin");
+    let projection = kernel
+        .live_record(&mut mint_tx, &doc.doc_type, doc.doc_id)
+        .await
+        .expect("live record");
     let sig = mint(
         &mut mint_tx,
         &MintRequest {
@@ -985,6 +988,10 @@ async fn regulated_release_refused_without_signature_succeeds_with_two_component
     };
     let mint_ctx = boot_ctx();
     let mut mint_tx = Tx::begin(&write, &mint_ctx).await.expect("mint");
+    let projection = kernel
+        .live_record(&mut mint_tx, &doc.doc_type, doc.doc_id)
+        .await
+        .expect("live record");
     let sig = mint(
         &mut mint_tx,
         &MintRequest {
@@ -995,7 +1002,7 @@ async fn regulated_release_refused_without_signature_succeeds_with_two_component
             reason: None,
             record: rec.clone(),
             doc_type: doc.doc_type.clone(),
-            projection: json!({}),
+            projection,
             instance: inst,
             permission: PermissionKey("calibration.approve".into()),
             signed_at_zone: kernel.profile.seeded_permissions.display_timezone.clone(),
@@ -1202,6 +1209,10 @@ async fn mint_document_token(
         version,
     };
     let mut mint_tx = Tx::begin(write, &boot_ctx()).await.expect("mint begin");
+    let projection = kernel
+        .live_record(&mut mint_tx, &doc.doc_type, doc.doc_id)
+        .await
+        .expect("live record");
     let sig = mint(
         &mut mint_tx,
         &MintRequest {
@@ -1212,7 +1223,7 @@ async fn mint_document_token(
             reason: None,
             record: rec,
             doc_type: doc.doc_type.clone(),
-            projection: json!({}),
+            projection,
             instance: inst,
             permission: PermissionKey(permission.into()),
             signed_at_zone: kernel.profile.seeded_permissions.display_timezone.clone(),
@@ -1229,4 +1240,294 @@ async fn mint_document_token(
     .expect("mint both components");
     mint_tx.commit().await.expect("mint commit");
     sig.token(principal.actor())
+}
+
+fn keep_n_projection(value: &serde_json::Value) -> serde_json::Value {
+    json!({ "n": value.get("n").cloned().unwrap_or(serde_json::Value::Null) })
+}
+
+fn glue_signed_machine(doc_type: &str) -> Machine {
+    Machine::builder(doc_type)
+        .regulated(true)
+        .state("Open")
+        .state("Closed")
+        .edge(
+            EdgeBuilder::new("Open", "Closed", "approve", "calibration.approve").required(
+                SignatureRequirement {
+                    meaning: SignatureMeaning("Approved".into()),
+                    permission: PermissionKey("calibration.approve".into()),
+                },
+            ),
+        )
+        .build()
+        .unwrap()
+}
+
+async fn spawn_open(
+    kernel: &Kernel,
+    write: &datum_db::WritePool,
+    principal: &datum_identity::Principal,
+    doc: &DocRef,
+) {
+    let mut ctx = kernel.transition_context(principal.actor(), doc, "approve");
+    ctx.actor_display = Some(principal.display_name.clone());
+    ctx.reason = Some("kernel-e2e".into());
+    let mut tx = Tx::begin(write, &ctx).await.expect("spawn begin");
+    kernel.spawn(&mut tx, doc, "Open").await.expect("spawn");
+    tx.commit().await.expect("spawn commit");
+}
+
+async fn mint_for_doc(
+    kernel: &Kernel,
+    write: &datum_db::WritePool,
+    principal: &datum_identity::Principal,
+    doc: &DocRef,
+) -> (SignatureToken, datum_core::RecordRef, i64) {
+    let mut mint_tx = Tx::begin(write, &boot_ctx()).await.expect("mint begin");
+    let loaded = kernel
+        .load_sm_instance(&mut mint_tx, doc.doc_id)
+        .await
+        .expect("instance")
+        .expect("spawned");
+    let inst = InstanceTriple {
+        doc_type: loaded.0.clone(),
+        doc_id: doc.doc_id,
+        state: loaded.1,
+        version: loaded.2,
+    };
+    let rec = datum_core::RecordRef {
+        table: "sm.instance".into(),
+        id: doc.doc_id,
+        version: loaded.2,
+    };
+    let projection = kernel
+        .live_record(&mut mint_tx, &doc.doc_type, doc.doc_id)
+        .await
+        .expect("live record");
+    let sig = mint(
+        &mut mint_tx,
+        &MintRequest {
+            components: vec!["code".into(), "secret".into()],
+            code: Some(principal.username.clone()),
+            secret: SIGNING_SECRET.into(),
+            meaning: SignatureMeaning("Approved".into()),
+            reason: None,
+            record: rec.clone(),
+            doc_type: doc.doc_type.clone(),
+            projection,
+            instance: inst,
+            permission: PermissionKey("calibration.approve".into()),
+            signed_at_zone: kernel.profile.seeded_permissions.display_timezone.clone(),
+            policy: kernel.profile.session_policy.clone(),
+            principal: principal.clone(),
+            login_session_id: None,
+            device_fingerprint: Some("e2e-tablet".into()),
+            source_ip: Some("127.0.0.1".into()),
+            boot_epoch: "1".into(),
+            credential_kind: "signing_password".into(),
+        },
+    )
+    .await
+    .expect("mint");
+    mint_tx.commit().await.expect("mint commit");
+    (sig.token(principal.actor()), rec, loaded.2)
+}
+
+/// FINDING 2: the live hash is the registered projection plus the instance triple.
+/// A field dropped by the projection may change without HashMismatch; a kept
+/// field may not. datum-module e2e (not server HTTP): Kernel::live_doc is the
+/// composition-root consume path, and this lane cannot add server tests.
+#[tokio::test]
+async fn live_doc_hash_covers_registered_projection() {
+    let db = db_case!("e2e_proj");
+    migrate_and_install(&db).await;
+    let mut builder = Kernel::builder(db.app_pool().clone(), Profile::regulated_device().unwrap());
+    builder
+        .register_machine(glue_signed_machine("glue.proj.doc"))
+        .unwrap();
+    builder.register_projection("glue.proj.doc", keep_n_projection);
+    let kernel = builder.build().await.expect("build");
+    let write = kernel.write_pool();
+    let principal = signer_with_perms(&write, &["calibration.approve"]).await;
+
+    let kept = DocRef {
+        doc_type: "glue.proj.doc".into(),
+        doc_id: Identifier::generate(),
+    };
+    spawn_open(&kernel, &write, &principal, &kept).await;
+    kernel.set_live_record("glue.proj.doc", kept.doc_id, json!({"n": 1, "drop": "old"}));
+    let (token, _, version) = mint_for_doc(&kernel, &write, &principal, &kept).await;
+    kernel.set_live_record("glue.proj.doc", kept.doc_id, json!({"n": 1, "drop": "new"}));
+    let mut ctx = kernel.transition_context(principal.actor(), &kept, "approve");
+    ctx.actor_display = Some(principal.display_name.clone());
+    ctx.reason = Some("kernel-e2e".into());
+    let mut tx = Tx::begin(&write, &ctx).await.expect("consume drop-field");
+    let out = kernel
+        .transition(&mut tx, &kept, "approve", Some(&token), &ctx)
+        .await
+        .expect("drop-field edit is outside the projection");
+    assert_eq!(out.state.0, "Closed");
+    tx.commit().await.expect("commit drop-field");
+
+    let mismatched = DocRef {
+        doc_type: "glue.proj.doc".into(),
+        doc_id: Identifier::generate(),
+    };
+    spawn_open(&kernel, &write, &principal, &mismatched).await;
+    kernel.set_live_record(
+        "glue.proj.doc",
+        mismatched.doc_id,
+        json!({"n": 1, "drop": "old"}),
+    );
+    let (token2, _, version2) = mint_for_doc(&kernel, &write, &principal, &mismatched).await;
+    kernel.set_live_record(
+        "glue.proj.doc",
+        mismatched.doc_id,
+        json!({"n": 2, "drop": "old"}),
+    );
+    let mut ctx = kernel.transition_context(principal.actor(), &mismatched, "approve");
+    ctx.actor_display = Some(principal.display_name.clone());
+    ctx.reason = Some("kernel-e2e".into());
+    let mut tx = Tx::begin(&write, &ctx).await.expect("consume kept-field");
+    let err = kernel
+        .transition(&mut tx, &mismatched, "approve", Some(&token2), &ctx)
+        .await
+        .expect_err("kept-field edit");
+    assert!(
+        matches!(
+            err,
+            datum_module::Error::Statemachine(datum_statemachine::Error::Signature(
+                SignatureError::HashMismatch
+            ))
+        ),
+        "got {err:?}"
+    );
+    tx.rollback().await.ok();
+    let live_version: i64 =
+        query_scalar("SELECT version FROM sm.instance WHERE doc_type = $1 AND doc_id = $2")
+            .bind(&mismatched.doc_type)
+            .bind(mismatched.doc_id.as_uuid())
+            .fetch_one(db.app_pool())
+            .await
+            .expect("version");
+    assert_eq!(live_version, version2, "instance version unchanged");
+    assert_eq!(version, 1);
+    db.finish().await.expect("finish");
+}
+
+/// FINDING 2: body-only edit between mint and consume is HashMismatch.
+/// datum-module e2e (not server HTTP): the live hash is Kernel::live_doc, and
+/// this lane may only touch the mint hunk in datum-server.
+#[tokio::test]
+async fn mint_then_body_edit_is_hash_mismatch() {
+    let db = db_case!("e2e_body");
+    migrate_and_install(&db).await;
+    let mut builder = Kernel::builder(db.app_pool().clone(), Profile::regulated_device().unwrap());
+    builder
+        .register_machine(glue_signed_machine("glue.body.doc"))
+        .unwrap();
+    let kernel = builder.build().await.expect("build");
+    let write = kernel.write_pool();
+    let principal = signer_with_perms(&write, &["calibration.approve"]).await;
+    let doc = DocRef {
+        doc_type: "glue.body.doc".into(),
+        doc_id: Identifier::generate(),
+    };
+    spawn_open(&kernel, &write, &principal, &doc).await;
+    kernel.set_live_record(
+        "glue.body.doc",
+        doc.doc_id,
+        json!({"wo": "WO-1", "rev": "C"}),
+    );
+    let (token, _, version) = mint_for_doc(&kernel, &write, &principal, &doc).await;
+    kernel.set_live_record(
+        "glue.body.doc",
+        doc.doc_id,
+        json!({"wo": "WO-1", "rev": "D"}),
+    );
+    let live_version: i64 =
+        query_scalar("SELECT version FROM sm.instance WHERE doc_type = $1 AND doc_id = $2")
+            .bind(&doc.doc_type)
+            .bind(doc.doc_id.as_uuid())
+            .fetch_one(db.app_pool())
+            .await
+            .expect("version");
+    assert_eq!(live_version, version, "body edit must not bump sm.instance");
+
+    let mut ctx = kernel.transition_context(principal.actor(), &doc, "approve");
+    ctx.actor_display = Some(principal.display_name.clone());
+    ctx.reason = Some("kernel-e2e".into());
+    let mut tx = Tx::begin(&write, &ctx).await.expect("consume");
+    let err = kernel
+        .transition(&mut tx, &doc, "approve", Some(&token), &ctx)
+        .await
+        .expect_err("body edit");
+    assert!(
+        matches!(
+            err,
+            datum_module::Error::Statemachine(datum_statemachine::Error::Signature(
+                SignatureError::HashMismatch
+            ))
+        ),
+        "got {err:?}"
+    );
+    tx.rollback().await.ok();
+    db.finish().await.expect("finish");
+}
+
+/// FINDING 5: Active is read on the claim Tx, so a same-Tx deactivation is seen
+/// even when LiveDoc.signer_status is still Active.
+#[tokio::test]
+async fn signer_deactivated_on_claim_tx_is_refused() {
+    let db = db_case!("e2e_deact");
+    migrate_and_install(&db).await;
+    let kernel = Kernel::build(db.app_pool(), Profile::regulated_device().unwrap())
+        .await
+        .expect("build");
+    let write = kernel.write_pool();
+    let principal = signer_with_perms(&write, &["calibration.approve"]).await;
+    let doc = DocRef {
+        doc_type: "calibration.certificate".into(),
+        doc_id: Identifier::generate(),
+    };
+    spawn_open(&kernel, &write, &principal, &doc).await;
+    let (token, rec, version) = mint_for_doc(&kernel, &write, &principal, &doc).await;
+
+    let mut ctx = kernel.transition_context(principal.actor(), &doc, "approve");
+    ctx.actor_display = Some(principal.display_name.clone());
+    ctx.reason = Some("kernel-e2e".into());
+    let mut tx = Tx::begin(&write, &ctx).await.expect("claim tx");
+    deactivate_principal(&mut tx, principal.id)
+        .await
+        .expect("deactivate on claim tx");
+    let live = LiveDoc {
+        record: rec.clone(),
+        doc_type: doc.doc_type.clone(),
+        projection: json!({}),
+        instance: InstanceTriple {
+            doc_type: doc.doc_type.clone(),
+            doc_id: doc.doc_id,
+            state: "Open".into(),
+            version,
+        },
+        signer_status: PrincipalStatus::Active,
+    };
+    let gate = kernel
+        .signature_gate_factory()
+        .prepare(&mut tx, &token, &live)
+        .await
+        .expect("prepare");
+    let err = gate
+        .verify(
+            &token,
+            &SignatureRequirement {
+                meaning: SignatureMeaning("Approved".into()),
+                permission: PermissionKey("calibration.approve".into()),
+            },
+            &rec,
+        )
+        .expect_err("inactive");
+    assert_eq!(err, SignatureError::Invalid("signer inactive".into()));
+    tx.rollback().await.ok();
+    db.finish().await.expect("finish");
 }
