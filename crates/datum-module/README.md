@@ -49,8 +49,11 @@ Kernel::build(pool, profile).await?      // same, compiled-in catalog only
 
 Registries (machines, routes, event subscriptions, job kinds, permissions) are
 populated from module manifests (`docs/03` §2 / §3), not from constants in this
-crate. `Kernel::build` freezes only after every enabled module has registered.
-Registration after freeze is `datum_statemachine::Error::Frozen`.
+crate, plus the kernel `document` machine (`datum_documents::document_machine`)
+so regulated `approve` / `make_effective` are `Required` and go through
+`Kernel::transition`'s prepared `GateFactory`. `Kernel::build` freezes only after
+every enabled module has registered. Registration after freeze is
+`datum_statemachine::Error::Frozen`.
 
 `enable_genealogy_bridge` is wired when `mod-genealogy` is enabled; worker ticks
 run `genealogy.refresh` under the system service principal.

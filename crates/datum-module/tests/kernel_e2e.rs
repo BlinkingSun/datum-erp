@@ -1029,3 +1029,208 @@ async fn regulated_release_refused_without_signature_succeeds_with_two_component
     tx.commit().await.expect("signed commit");
     db.finish().await.expect("finish");
 }
+
+#[tokio::test]
+async fn kernel_e2e_regulated_document_approve_with_real_signature() {
+    let db = db_case!("e2e_doc");
+    migrate_and_install(&db).await;
+    let kernel = Kernel::build(db.app_pool(), Profile::regulated_device().unwrap())
+        .await
+        .expect("regulated");
+    assert!(!kernel.gate_is_noop(), "regulated-device binds datum-esign");
+
+    let write = kernel.write_pool();
+    let principal = signer_with_perms(
+        &write,
+        &[
+            "documents.view",
+            "documents.edit",
+            "documents.approve",
+            "documents.release",
+        ],
+    )
+    .await;
+    let actor = principal.actor();
+
+    let mut create_ctx = boot_ctx();
+    create_ctx.actor = actor;
+    create_ctx.actor_display = Some(principal.display_name.clone());
+    let from = chrono::Utc::now() - chrono::Duration::days(1);
+    let mut manifest = datum_documents::Manifest::content(json!({}));
+    manifest.effective_from = Some(from);
+    manifest.from_precision = Some(datum_documents::DatePrecision::Day);
+
+    let mut tx = Tx::begin(&write, &create_ctx).await.expect("create begin");
+    let id = kernel
+        .create_document(&mut tx, "SOP", "Regulated SOP", "quality")
+        .await
+        .expect("create");
+    let rev = kernel
+        .new_document_revision(&mut tx, id, "A", manifest)
+        .await
+        .expect("revision");
+    tx.commit().await.expect("create commit");
+
+    let doc = DocRef {
+        doc_type: datum_documents::DOC_TYPE.into(),
+        doc_id: id.0,
+    };
+    let mut submit_ctx = kernel.transition_context(actor, &doc, "submit");
+    submit_ctx.actor_display = Some(principal.display_name.clone());
+    submit_ctx.reason = Some("kernel-e2e".into());
+    let mut tx = Tx::begin(&write, &submit_ctx).await.expect("submit begin");
+    kernel
+        .transition(&mut tx, &doc, "submit", None, &submit_ctx)
+        .await
+        .expect("submit is NotRequired");
+    tx.commit().await.expect("submit commit");
+
+    let mut approve_ctx = kernel.transition_context(actor, &doc, "approve");
+    approve_ctx.actor_display = Some(principal.display_name.clone());
+    approve_ctx.reason = Some("kernel-e2e".into());
+    let mut tx = Tx::begin(&write, &approve_ctx)
+        .await
+        .expect("unsigned approve begin");
+    let refused = kernel
+        .transition(&mut tx, &doc, "approve", None, &approve_ctx)
+        .await
+        .expect_err("regulated approve without a signature");
+    assert!(
+        matches!(
+            refused,
+            datum_module::Error::Statemachine(datum_statemachine::Error::Signature(
+                SignatureError::NoProvider | SignatureError::Invalid(_)
+            )) | datum_module::Error::Documents(datum_documents::Error::Signature(
+                SignatureError::NoProvider | SignatureError::Invalid(_)
+            ))
+        ),
+        "unsigned Required approve must refuse, got {refused:?}"
+    );
+    tx.rollback().await.ok();
+
+    let mut tx = Tx::begin(&write, &approve_ctx)
+        .await
+        .expect("load after refuse");
+    let after_refuse = datum_documents::load(&mut tx, id)
+        .await
+        .expect("load after refuse");
+    tx.rollback().await.ok();
+    assert_eq!(
+        after_refuse.status,
+        datum_documents::Status::InReview,
+        "unsigned approve writes nothing"
+    );
+
+    let token_approve = mint_document_token(
+        &kernel,
+        &write,
+        &principal,
+        &doc,
+        "Approved",
+        "documents.approve",
+    )
+    .await;
+    let mut tx = Tx::begin(&write, &approve_ctx)
+        .await
+        .expect("signed approve begin");
+    let approved = kernel
+        .transition(&mut tx, &doc, "approve", Some(&token_approve), &approve_ctx)
+        .await
+        .expect("two-component signature on approve");
+    assert_eq!(approved.state.0, "Approved");
+    tx.commit().await.expect("approve commit");
+
+    let mut effective_ctx = kernel.transition_context(actor, &doc, "make_effective");
+    effective_ctx.actor_display = Some(principal.display_name.clone());
+    effective_ctx.reason = Some("kernel-e2e".into());
+    let token_effective = mint_document_token(
+        &kernel,
+        &write,
+        &principal,
+        &doc,
+        "Responsible",
+        "documents.release",
+    )
+    .await;
+    let mut tx = Tx::begin(&write, &effective_ctx)
+        .await
+        .expect("make_effective begin");
+    let made = kernel
+        .transition(
+            &mut tx,
+            &doc,
+            "make_effective",
+            Some(&token_effective),
+            &effective_ctx,
+        )
+        .await
+        .expect("two-component signature on make_effective");
+    assert_eq!(made.state.0, "Effective");
+    let live = datum_documents::effective_at(&mut tx, id, chrono::Utc::now())
+        .await
+        .expect("effective_at");
+    tx.commit().await.expect("make_effective commit");
+    let live = live.expect("effective revision retrievable");
+    assert_eq!(live.id, rev);
+    assert_eq!(live.document_id, id);
+
+    db.finish().await.expect("finish");
+}
+
+async fn mint_document_token(
+    kernel: &Kernel,
+    write: &datum_db::WritePool,
+    principal: &datum_identity::Principal,
+    doc: &DocRef,
+    meaning: &str,
+    permission: &str,
+) -> SignatureToken {
+    let (state, version): (String, i64) = sqlx::query_as(
+        r#"SELECT state, version FROM sm.instance
+            WHERE doc_type = $1 AND doc_id = $2"#,
+    )
+    .bind(&doc.doc_type)
+    .bind(doc.doc_id.as_uuid())
+    .fetch_one(kernel.pool())
+    .await
+    .expect("instance");
+    let inst = InstanceTriple {
+        doc_type: doc.doc_type.clone(),
+        doc_id: doc.doc_id,
+        state,
+        version,
+    };
+    let rec = datum_core::RecordRef {
+        table: "sm.instance".into(),
+        id: doc.doc_id,
+        version,
+    };
+    let mut mint_tx = Tx::begin(write, &boot_ctx()).await.expect("mint begin");
+    let sig = mint(
+        &mut mint_tx,
+        &MintRequest {
+            components: vec!["code".into(), "secret".into()],
+            code: Some(principal.username.clone()),
+            secret: SIGNING_SECRET.into(),
+            meaning: SignatureMeaning(meaning.into()),
+            reason: None,
+            record: rec,
+            doc_type: doc.doc_type.clone(),
+            projection: json!({}),
+            instance: inst,
+            permission: PermissionKey(permission.into()),
+            signed_at_zone: kernel.profile.seeded_permissions.display_timezone.clone(),
+            policy: kernel.profile.session_policy.clone(),
+            principal: principal.clone(),
+            login_session_id: None,
+            device_fingerprint: Some("e2e-tablet".into()),
+            source_ip: Some("127.0.0.1".into()),
+            boot_epoch: "1".into(),
+            credential_kind: "signing_password".into(),
+        },
+    )
+    .await
+    .expect("mint both components");
+    mint_tx.commit().await.expect("mint commit");
+    sig.token(principal.actor())
+}
