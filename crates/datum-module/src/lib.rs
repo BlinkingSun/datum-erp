@@ -1,13 +1,11 @@
 //! Composition root: module registry, profiles, and kernel wiring.
 //!
 //! Wires [`datum_core::PostingSink`] ([`datum_ledger::GroupBuilder`]) and
-//! [`datum_core::SignatureGate`] (`NoSignatures` until `datum-esign`).
+//! [`datum_esign::GateFactory`] (`NoSignatures` or the prepared esign gate).
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
-use datum_customfields as _;
 use datum_documents as _;
-use datum_esign as _;
 use datum_print as _;
 #[cfg(test)]
 use rust_decimal as _;

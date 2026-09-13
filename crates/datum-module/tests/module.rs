@@ -7,8 +7,9 @@ mod common;
 use std::collections::BTreeSet;
 
 use datum_core::{
-    Actor, ActorKind, GroupKind, Identifier, PermissionKey, PostingGroupHeader, RecordRef,
-    SignatureError, SignatureId, SignatureMeaning, SignatureRequirement, SignatureToken,
+    Actor, ActorKind, GroupKind, Identifier, NoSignatures, PermissionKey, PostingGroupHeader,
+    RecordRef, SignatureError, SignatureGate, SignatureId, SignatureMeaning, SignatureRequirement,
+    SignatureToken,
 };
 use datum_db::{Tx, WriteContext};
 use datum_events::EventHandler;
@@ -48,6 +49,7 @@ fn kernel_order_is_a_topological_sort_of_contract_graph() {
     assert!(is_topological_sort(KERNEL_ORDER, CONTRACT_KERNEL_EDGES));
     assert_eq!(KERNEL_ORDER[0], "datum-db");
     assert_eq!(KERNEL_ORDER[1], "datum-audit");
+    assert!(KERNEL_ORDER.contains(&"datum-esign"));
     assert_eq!(*KERNEL_ORDER.last().unwrap(), "datum-statemachine");
 }
 
@@ -704,13 +706,13 @@ fn signature_gate_comes_from_profile_toml_gate_field() {
     assert_eq!(plain.signature_gate_binding, GateBinding::NoSignatures);
     let (token, required, record) = sample_token();
     for profile in [&regulated, &plain] {
-        let gate = bind_signature_gate(profile.signature_gate_binding);
+        let _factory = bind_signature_gate(profile.signature_gate_binding);
         assert!(
             matches!(
-                datum_core::SignatureGate::verify(&*gate, &token, &required, &record),
+                NoSignatures.verify(&token, &required, &record),
                 Err(SignatureError::NoProvider)
             ),
-            "verify-only gate named by SPEC-profiles key 4 / CONTRACT §6.3"
+            "NoSignatures factory named by SPEC-profiles key 4 / CONTRACT §6.3"
         );
     }
 }
@@ -738,8 +740,12 @@ async fn regulated_required_set_from_registered_machine() {
         "calibration.certificate.approve must be listed"
     );
     let (token, required, record) = sample_token();
+    assert!(
+        kernel.gate_is_noop(),
+        "regulated still binds NoSignatures until g2"
+    );
     assert!(matches!(
-        datum_core::SignatureGate::verify(kernel.signature_gate(), &token, &required, &record),
+        NoSignatures.verify(&token, &required, &record),
         Err(SignatureError::NoProvider)
     ));
     startup_fails_if_required_meets_no_signatures(&kernel.engine, true, true)
