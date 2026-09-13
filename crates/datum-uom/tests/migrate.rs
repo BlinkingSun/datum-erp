@@ -24,15 +24,7 @@ async fn btree_gist_installed(pool: &sqlx::PgPool) -> bool {
 #[tokio::test]
 async fn reversible_migration_drops_btree_gist() {
     let db = db_case!("uom_btree_gist_rev");
-    datum_db::migrate::run(
-        db.migrate_pool(),
-        &[
-            ("datum-db", &datum_db::MIGRATOR),
-            ("datum-audit", &datum_audit::MIGRATOR),
-        ],
-    )
-    .await
-    .expect("kernel");
+    common::migrate_predecessors(&db).await;
 
     let migrator = uom_migrator();
     migrator.run(db.migrate_pool()).await.expect("up");
@@ -67,15 +59,7 @@ async fn reversible_migration_drops_btree_gist() {
 #[tokio::test]
 async fn migrate_down_then_up() {
     let db = db_case!("uom_down_up");
-    datum_db::migrate::run(
-        db.migrate_pool(),
-        &[
-            ("datum-db", &datum_db::MIGRATOR),
-            ("datum-audit", &datum_audit::MIGRATOR),
-        ],
-    )
-    .await
-    .expect("db+audit");
+    common::migrate_predecessors(&db).await;
 
     let migrator = uom_migrator();
     migrator.run(db.migrate_pool()).await.expect("uom up");
@@ -107,5 +91,44 @@ async fn migrate_down_then_up() {
         "0002 must still drop the shim after down-then-up"
     );
 
+    db.finish().await.expect("finish");
+}
+
+async fn has_zz_audit_row(pool: &sqlx::PgPool, rel: &str) -> bool {
+    query_scalar(
+        r#"
+        SELECT EXISTS (
+            SELECT 1 FROM pg_trigger t
+             WHERE t.tgrelid = $1::regclass
+               AND t.tgname = 'zz_audit_row'
+               AND NOT t.tgisinternal
+        )
+        "#,
+    )
+    .bind(rel)
+    .fetch_one(pool)
+    .await
+    .expect("zz_audit_row")
+}
+
+#[tokio::test]
+async fn migrates_at_canonical_position() {
+    let db = db_case!("uom_canon");
+    common::migrate(&db).await;
+    assert!(
+        has_zz_audit_row(db.migrate_pool(), "uom.unit").await,
+        "uom.unit must carry zz_audit_row at canonical position"
+    );
+    db.finish().await.expect("finish");
+}
+
+#[tokio::test]
+async fn migrates_as_last_crate() {
+    let db = db_case!("uom_last");
+    common::migrate_as_last_crate(&db).await;
+    assert!(
+        has_zz_audit_row(db.migrate_pool(), "uom.unit").await,
+        "uom.unit must carry zz_audit_row as last crate with audit_attach up"
+    );
     db.finish().await.expect("finish");
 }

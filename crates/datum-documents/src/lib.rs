@@ -14,6 +14,7 @@ mod domain;
 mod error;
 mod machine;
 mod manifest;
+mod read;
 mod store;
 
 pub use api::{
@@ -29,6 +30,10 @@ pub use domain::{
 pub use error::{Error, Result};
 pub use machine::document_machine;
 pub use manifest::{DocumentsManifest, manifest};
+pub use read::{
+    AttachmentForRender, RevisionForRender, attachments_for_render, attachments_for_render_on,
+    revision_for_render, revision_for_render_on,
+};
 
 /// Embedded migrator (`placeholder` + `0001_documents`).
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");

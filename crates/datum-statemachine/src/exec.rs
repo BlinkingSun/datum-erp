@@ -32,8 +32,8 @@ impl Engine {
         Ok(())
     }
 
-    /// Insert `sm.instance` in `initial`. The state column is only changed later by
-    /// [`Engine::transition`].
+    /// Insert `sm.instance` in `initial` via `sm.spawn_instance`. The state column
+    /// is only changed later by [`Engine::transition`].
     /// Refuses until [`Engine::freeze`] (SPEC: hook order computed once at startup).
     pub async fn spawn(&self, tx: &mut Tx<'_>, doc: &DocRef, initial: &str) -> Result<Instance> {
         self.ensure_frozen()?;
@@ -50,19 +50,32 @@ impl Engine {
             Some(id) => id,
             None => machine.id,
         };
-        tx.execute(
-            sql_query(
-                r#"INSERT INTO sm.instance
-                       (doc_type, doc_id, machine_id, state, version, entered_at)
-                   VALUES ($1, $2, $3, $4, 1, now())"#,
+        let row: Option<(Uuid, String, i64, DateTime<Utc>)> = tx
+            .fetch_optional(
+                sql_query_as(
+                    r#"SELECT machine_id, state, version, entered_at
+                         FROM sm.spawn_instance($1, $2, $3, $4)"#,
+                )
+                .bind(&doc.doc_type)
+                .bind(doc.doc_id.as_uuid())
+                .bind(machine_id.as_uuid())
+                .bind(initial),
             )
-            .bind(&doc.doc_type)
-            .bind(doc.doc_id.as_uuid())
-            .bind(machine_id.as_uuid())
-            .bind(initial),
-        )
-        .await?;
-        load_instance(tx, doc).await
+            .await?;
+        let Some((id, state, version, entered_at)) = row else {
+            return Err(Error::InstanceNotFound {
+                doc_type: doc.doc_type.clone(),
+                doc_id: doc.doc_id.to_string(),
+            });
+        };
+        Ok(Instance {
+            doc_type: doc.doc_type.clone(),
+            doc_id: doc.doc_id,
+            machine_id: MachineId(datum_core::Identifier::from_uuid(id)),
+            state: State(state),
+            version,
+            entered_at,
+        })
     }
 
     /// Transition executor (CONTRACT §6.2 rules 1 and 8; §6.3 executor obligation).
@@ -138,7 +151,7 @@ impl Engine {
             return Err(e);
         }
 
-        // (d) mutate sm.instance — the only writer of the state column
+        // (d) mutate sm.instance — only through sm.transition_instance
         let updated = mutate_instance(tx, doc, &edge, instance.version).await?;
 
         let after_err = if edge.hooks_allowed {
@@ -454,20 +467,13 @@ async fn mutate_instance(
     let row: Option<(Uuid, String, i64, DateTime<Utc>)> = tx
         .fetch_optional(
             sql_query_as(
-                r#"UPDATE sm.instance
-                      SET state = $1,
-                          version = version + 1,
-                          entered_at = now()
-                    WHERE doc_type = $2
-                      AND doc_id = $3
-                      AND state = $4
-                      AND version = $5
-                RETURNING machine_id, state, version, entered_at"#,
+                r#"SELECT machine_id, state, version, entered_at
+                     FROM sm.transition_instance($1, $2, $3, $4, $5)"#,
             )
-            .bind(&edge.to.0)
             .bind(&doc.doc_type)
             .bind(doc.doc_id.as_uuid())
             .bind(&edge.from.0)
+            .bind(&edge.to.0)
             .bind(version),
         )
         .await?;

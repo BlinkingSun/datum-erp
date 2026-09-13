@@ -11,17 +11,34 @@
 --     but does not place the standard amount; required by SPEC deliverable 4.
 --   * Schema, grants, audit.attach, schema_class, and transient projections are
 --     workspace obligations (CONTRACT §§5, 8a, SPEC items 1 and 7), not in D2 SQL.
+-- Created by datum_migrate so CREATE TABLE can fire audit.attach_new_tables;
+-- tables are then owned by datum_owner. D-2b-11.
 
-CREATE SCHEMA IF NOT EXISTS ledger AUTHORIZATION datum_owner;
+SELECT
+  pg_catalog.set_config('datum.actor_id',      '00000000-0000-4000-8000-000000000002', true),
+  pg_catalog.set_config('datum.actor_kind',    'migration', true),
+  pg_catalog.set_config('datum.actor_display', 'migration', true),
+  pg_catalog.set_config('datum.txid',          pg_catalog.pg_current_xact_id()::text, true),
+  pg_catalog.set_config('datum.action',        'ledger.migrate', true),
+  pg_catalog.set_config('datum.source_kind',   'migration', true);
+
+CREATE SCHEMA IF NOT EXISTS ledger AUTHORIZATION datum_migrate;
 
 REVOKE ALL ON SCHEMA ledger FROM PUBLIC;
-GRANT USAGE ON SCHEMA ledger TO datum_app, datum_migrate, datum_owner;
+GRANT USAGE ON SCHEMA ledger TO datum_app;
+GRANT USAGE, CREATE ON SCHEMA ledger TO datum_migrate, datum_owner;
 
 INSERT INTO datum.schema_class (nspname, class) VALUES ('ledger', 'app')
 ON CONFLICT (nspname) DO UPDATE SET class = EXCLUDED.class;
 
+ALTER DEFAULT PRIVILEGES FOR ROLE datum_migrate IN SCHEMA ledger
+  GRANT SELECT, INSERT, UPDATE ON TABLES TO datum_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE datum_migrate IN SCHEMA ledger
+  GRANT TRIGGER ON TABLES TO datum_owner;
 ALTER DEFAULT PRIVILEGES FOR ROLE datum_owner IN SCHEMA ledger
   GRANT SELECT, INSERT, UPDATE ON TABLES TO datum_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE datum_migrate IN SCHEMA ledger
+  GRANT USAGE ON SEQUENCES TO datum_app;
 ALTER DEFAULT PRIVILEGES FOR ROLE datum_owner IN SCHEMA ledger
   GRANT USAGE ON SEQUENCES TO datum_app;
 
