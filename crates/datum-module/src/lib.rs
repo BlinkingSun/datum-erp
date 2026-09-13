@@ -5,7 +5,6 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
-use datum_documents as _;
 use datum_print as _;
 #[cfg(test)]
 use rust_decimal as _;

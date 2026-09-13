@@ -51,7 +51,13 @@ fn kernel_order_is_a_topological_sort_of_contract_graph() {
     assert_eq!(KERNEL_ORDER[1], "datum-audit");
     assert!(KERNEL_ORDER.contains(&"datum-esign"));
     assert!(KERNEL_ORDER.contains(&"datum-customfields"));
-    assert_eq!(*KERNEL_ORDER.last().unwrap(), "datum-statemachine");
+    assert!(KERNEL_ORDER.contains(&"datum-documents"));
+    let pos = |name: &str| KERNEL_ORDER.iter().position(|n| *n == name).unwrap();
+    assert!(pos("datum-esign") < pos("datum-documents"));
+    assert!(pos("datum-customfields") < pos("datum-documents"));
+    assert!(pos("datum-numbering") < pos("datum-documents"));
+    assert!(pos("datum-statemachine") < pos("datum-documents"));
+    assert_eq!(*KERNEL_ORDER.last().unwrap(), "datum-documents");
 }
 
 #[test]
@@ -469,6 +475,30 @@ async fn audit_trigger_matrix() {
         }
         db.finish().await.expect("finish");
     }
+}
+
+#[tokio::test]
+async fn documents_schema_installed_with_kernel() {
+    let db = db_case!("doc_kern");
+    migrate_and_install(&db).await;
+    let n: i64 = sqlx::query_scalar(
+        r#"SELECT count(*) FROM pg_class c
+             JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = 'documents'
+              AND c.relkind = 'r'
+              AND c.relname IN ('document','revision','blob','attachment','link')"#,
+    )
+    .fetch_one(db.migrate_pool())
+    .await
+    .expect("documents tables");
+    assert_eq!(n, 5, "install_kernel must apply datum-documents");
+    let class: String =
+        sqlx::query_scalar("SELECT class FROM datum.schema_class WHERE nspname = 'documents'")
+            .fetch_one(db.migrate_pool())
+            .await
+            .expect("schema_class");
+    assert_eq!(class, "app");
+    db.finish().await.expect("finish");
 }
 
 #[tokio::test]

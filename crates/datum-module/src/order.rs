@@ -22,6 +22,7 @@ pub const KERNEL_ORDER: &[&str] = &[
     "datum-jobs",
     "datum-ledger",
     "datum-statemachine",
+    "datum-documents",
 ];
 
 /// CONTRACT §4 kernel edges used to prove [`KERNEL_ORDER`] is a topological sort.
@@ -48,6 +49,11 @@ pub const CONTRACT_KERNEL_EDGES: &[(&str, &str)] = &[
     ("datum-statemachine", "datum-db"),
     ("datum-statemachine", "datum-audit"),
     ("datum-statemachine", "datum-identity"),
+    ("datum-documents", "datum-db"),
+    ("datum-documents", "datum-audit"),
+    ("datum-documents", "datum-identity"),
+    ("datum-documents", "datum-numbering"),
+    ("datum-documents", "datum-statemachine"),
 ];
 
 /// [`KERNEL_ORDER`] paired with each crate's embedded migrator.
@@ -64,6 +70,7 @@ pub fn kernel_crates() -> Vec<(&'static str, &'static Migrator)> {
         ("datum-jobs", &datum_jobs::MIGRATOR),
         ("datum-ledger", &datum_ledger::MIGRATOR),
         ("datum-statemachine", &datum_statemachine::MIGRATOR),
+        ("datum-documents", &datum_documents::MIGRATOR),
     ]
 }
 
@@ -161,6 +168,11 @@ pub const KERNEL_AUDIT_RELS: &[&str] = &[
     "sm.state",
     "sm.edge",
     "sm.instance",
+    "documents.document",
+    "documents.revision",
+    "documents.blob",
+    "documents.attachment",
+    "documents.link",
     "items.item",
     "items.item_revision_history",
     "locations.site",

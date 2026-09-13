@@ -170,7 +170,7 @@ crate name below, hyphenated.
 | `datum-statemachine` | core db audit identity | uses `core::PostingSink` + `core::SignatureGate`; **never** ledger or esign |
 | `datum-esign` | core db audit identity | implements `core::SignatureGate` (Wave 2b) |
 | `datum-customfields` | core db audit | (Wave 2b) |
-| `datum-documents` | core db audit identity numbering statemachine | (Wave 2b) |
+| `datum-documents` | core db audit identity numbering statemachine | (Wave 2b; events and `SignatureGate` composed in `datum-module`) |
 | `datum-print` | core db audit documents esign | (Wave 2b) |
 | `datum-module` | all of the above | composition root |
 | `datum-server` | everything | only crate allowed `axum`, `tower*`, `clap` |
