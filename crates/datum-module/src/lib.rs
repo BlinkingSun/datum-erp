@@ -5,6 +5,8 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+#[cfg(test)]
+use chrono as _;
 use datum_print as _;
 #[cfg(test)]
 use rust_decimal as _;

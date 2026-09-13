@@ -78,3 +78,11 @@ calls `production_min::start` with embedded issue lines; inventory postings are
 contributed on the transition's bound `PostingSink` via the module hook. The
 named test `issue_wo_is_one_transaction` asserts one begin, one `audit.tx_seal`
 row, and atomic rollback when start fails.
+
+## Documents HTTP (Wave 3)
+
+SPEC-documents names no HTTP routes: the API is the sealed `Tx` plus a
+manifest export. PLAN.md §3 Wave 2b has no documents HTTP exit criterion;
+SPEC-server-slice covers the Wave 2s inventory/production slice only. Documents
+HTTP is deferred to Wave 3 (interface).
+
