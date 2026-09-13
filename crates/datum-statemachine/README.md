@@ -19,7 +19,7 @@ Declarative state machines, uniformly audited, with a frozen hook ABI. Uses
 - `check_gate_binding` — release build fails if a Required edge meets `NoSignatures`
 - `current_state` / `instance_exists` / `machine_id_for` — live-state query seam (see table)
 - `Error` / `Result` — `Frozen` / `NotFrozen` / `MachineChanged` / `Veto` / `HookBudgetExceeded` / `AfterHookCannotVeto` / `StartupGate` / …
-- `MIGRATOR` — `placeholder` + `0001_statemachine` + `0002_query_seam`
+- `MIGRATOR` — `placeholder` + `0001_statemachine` + `0002_query_seam` + `0003_engine_write`
 
 `Engine` methods other crates call: `new`, `set_module_graph`, `register_machine`,
 `register_hook`, `freeze`, `hook_order`, `edges_for_manifest`, `persist`, `spawn`,
@@ -39,10 +39,26 @@ Instance identity is `(doc_type, doc_id)` (`DocRef`).
 | `machine_id_for_on` | `async fn machine_id_for_on(pool: &ReadPool, doc_type: &str) -> Result<Option<MachineId>>` | same, through `ReadPool` |
 
 All three SQL helpers are **invoker-rights** (not `SECURITY DEFINER`; R-2s-8 does not
-exempt this crate): `datum_app` already has `SELECT` on `sm.instance` / `sm.machine`.
+exempt this crate): `datum_app` has `SELECT` on `sm.instance` / `sm.machine`.
 `EXECUTE` is granted only to `datum_app` (`REVOKE` from `PUBLIC`). They do **not**
 call `audit.require_context`, so a `datum_db::ReadPool` fetch (no actor) succeeds.
-Transition behaviour is unchanged: only `Engine::transition` writes the state column.
+
+### Write seam (R-2s-5)
+
+`datum_app` has **no** `INSERT` / `UPDATE` / `DELETE` on `sm.instance`. A raw
+`UPDATE sm.instance` is SQLSTATE `42501`. Spawn and transition write only through
+`sm.spawn_instance` / `sm.transition_instance` (invoker-rights; `GRANT EXECUTE` to
+`datum_app` only). Those helpers DML `sm.instance_engine`, a `datum_owner` view of
+`sm.instance` (default view rights: the owner accesses the base table). A `BEFORE
+INSERT OR UPDATE` trigger on `sm.instance` refuses writes unless the helper set
+`sm.engine_write` for the statement. No `SECURITY DEFINER`.
+
+| Relation / function | `datum_app` SELECT | INSERT | UPDATE | DELETE | EXECUTE |
+|---|---|---|---|---|---|
+| `sm.instance` (0001, before 0003) | t | t | t | f | — |
+| `sm.instance` (after 0003) | t | f | f | f | — |
+| `sm.instance_engine` (view) | t | t | t | f | — |
+| `sm.spawn_instance` / `sm.transition_instance` | — | — | — | — | t (`REVOKE` PUBLIC) |
 
 ## Migrations
 
@@ -52,6 +68,10 @@ Transition behaviour is unchanged: only `Engine::transition` writes the state co
 - `00000000000002_query_seam` — `sm.current_state(text, uuid)`,
   `sm.instance_exists(text, uuid)`, `sm.machine_id_for(text)` (invoker-rights;
   `GRANT EXECUTE` to `datum_app` only)
+- `00000000000003_engine_write` — revoke `INSERT`/`UPDATE`/`DELETE` on
+  `sm.instance` from `datum_app`; `sm.instance_engine` view; `sm.spawn_instance`,
+  `sm.transition_instance`, guard trigger (invoker-rights; `GRANT EXECUTE` to
+  `datum_app` only)
 
 ## Tests (`tests/`)
 
@@ -69,6 +89,8 @@ Transition behaviour is unchanged: only `Engine::transition` writes the state co
 - `migration_is_reversible` / `catalogue_accepts_sm_schema`
 - Query seam: `current_state_none_then_some_after_spawn_then_released`,
   `query_seam_on_read_pool_under_app_and_migrate` (both LOGIN roles)
+- Write seam: `direct_update_instance_as_app_is_42501`,
+  `engine_transition_succeeds_for_app_and_migrate` (both LOGIN roles)
 - trybuild: `signature_declaration_has_no_default`
 
 Lib: `regulated_machine_requires_total_declaration`, `non_regulated_absence_means_none`,

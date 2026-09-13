@@ -69,11 +69,23 @@ async fn migration_is_reversible() {
     assert!(query_seam_fn_exists(db.migrate_pool(), "instance_exists").await);
     assert!(query_seam_fn_exists(db.migrate_pool(), "machine_id_for").await);
     assert!(
+        query_seam_fn_exists(db.migrate_pool(), "spawn_instance").await,
+        "0003 must create sm.spawn_instance"
+    );
+    assert!(query_seam_fn_exists(db.migrate_pool(), "transition_instance").await);
+    assert!(query_seam_fn_exists(db.migrate_pool(), "instance_engine_guard").await);
+    assert!(
         !is_security_definer(db.migrate_pool(), "current_state").await,
         "current_state must be invoker-rights"
     );
     assert!(!is_security_definer(db.migrate_pool(), "instance_exists").await);
     assert!(!is_security_definer(db.migrate_pool(), "machine_id_for").await);
+    assert!(
+        !is_security_definer(db.migrate_pool(), "spawn_instance").await,
+        "spawn_instance must be invoker-rights"
+    );
+    assert!(!is_security_definer(db.migrate_pool(), "transition_instance").await);
+    assert!(!is_security_definer(db.migrate_pool(), "instance_engine_guard").await);
     let app_exec: bool = sql_query_scalar(
         "SELECT has_function_privilege('datum_app', 'sm.current_state(text, uuid)', 'EXECUTE')",
     )
@@ -88,6 +100,31 @@ async fn migration_is_reversible() {
     .await
     .expect("public execute");
     assert!(!public_exec, "EXECUTE revoked from PUBLIC");
+    let spawn_exec: bool = sql_query_scalar(
+        "SELECT has_function_privilege('datum_app', 'sm.spawn_instance(text, uuid, uuid, text)', 'EXECUTE')",
+    )
+    .fetch_one(db.migrate_pool())
+    .await
+    .expect("spawn execute");
+    assert!(spawn_exec, "EXECUTE granted to datum_app on spawn_instance");
+    let app_update: bool =
+        sql_query_scalar("SELECT has_table_privilege('datum_app', 'sm.instance', 'UPDATE')")
+            .fetch_one(db.migrate_pool())
+            .await
+            .expect("app update");
+    assert!(!app_update, "UPDATE on sm.instance revoked from datum_app");
+    let app_insert: bool =
+        sql_query_scalar("SELECT has_table_privilege('datum_app', 'sm.instance', 'INSERT')")
+            .fetch_one(db.migrate_pool())
+            .await
+            .expect("app insert");
+    assert!(!app_insert, "INSERT on sm.instance revoked from datum_app");
+    let app_select: bool =
+        sql_query_scalar("SELECT has_table_privilege('datum_app', 'sm.instance', 'SELECT')")
+            .fetch_one(db.migrate_pool())
+            .await
+            .expect("app select");
+    assert!(app_select, "SELECT on sm.instance stays for the query seam");
     let owner_before: String = sql_query_scalar(
         r#"SELECT r.rolname::text
            FROM pg_class c
@@ -114,12 +151,31 @@ async fn migration_is_reversible() {
     );
     assert!(!query_seam_fn_exists(db.migrate_pool(), "instance_exists").await);
     assert!(!query_seam_fn_exists(db.migrate_pool(), "machine_id_for").await);
+    assert!(
+        !query_seam_fn_exists(db.migrate_pool(), "spawn_instance").await,
+        "0003 down must drop sm.spawn_instance"
+    );
+    assert!(!query_seam_fn_exists(db.migrate_pool(), "transition_instance").await);
 
     migrator.run(db.migrate_pool()).await.expect("up again");
     assert!(query_seam_fn_exists(db.migrate_pool(), "current_state").await);
+    assert!(query_seam_fn_exists(db.migrate_pool(), "spawn_instance").await);
     assert!(
         !is_security_definer(db.migrate_pool(), "machine_id_for").await,
         "machine_id_for must stay invoker-rights after re-up"
+    );
+    assert!(
+        !is_security_definer(db.migrate_pool(), "transition_instance").await,
+        "transition_instance must stay invoker-rights after re-up"
+    );
+    let app_update_after: bool =
+        sql_query_scalar("SELECT has_table_privilege('datum_app', 'sm.instance', 'UPDATE')")
+            .fetch_one(db.migrate_pool())
+            .await
+            .expect("app update after");
+    assert!(
+        !app_update_after,
+        "UPDATE on sm.instance stays revoked after re-up"
     );
     let owner_after: String = sql_query_scalar(
         r#"SELECT r.rolname::text
