@@ -10,6 +10,7 @@ use datum_print as _;
 use rust_decimal as _;
 
 mod config;
+mod documents;
 mod error;
 mod install_graph;
 mod kernel;

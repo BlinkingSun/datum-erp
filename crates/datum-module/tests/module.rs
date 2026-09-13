@@ -13,7 +13,7 @@ use datum_core::{
 };
 use datum_db::{Tx, WriteContext};
 use datum_events::EventHandler;
-use datum_statemachine::{EdgeBuilder, Engine, HookPhase, Machine, ModuleNode};
+use datum_statemachine::{DocRef, EdgeBuilder, Engine, HookPhase, Machine, ModuleNode};
 use datum_test::db_case;
 
 use datum_module::{
@@ -26,8 +26,8 @@ use datum_module::{
 };
 
 use common::{
-    has_zz_audit, migrate_and_install, migrate_and_install_slice, module_enabled, module_hash,
-    pg_code, table_count, toy_manifest, toy_manifest_regulated, write_pool,
+    actor_with_perms, has_zz_audit, migrate_and_install, migrate_and_install_slice, module_enabled,
+    module_hash, pg_code, table_count, toy_manifest, toy_manifest_regulated, write_pool,
 };
 
 fn boot_ctx() -> WriteContext {
@@ -498,6 +498,106 @@ async fn documents_schema_installed_with_kernel() {
             .await
             .expect("schema_class");
     assert_eq!(class, "app");
+    db.finish().await.expect("finish");
+}
+
+#[tokio::test]
+async fn documents_events_emitted_from_composition_root() {
+    let db = db_case!("doc_evt");
+    migrate_and_install(&db).await;
+    let kernel = Kernel::build(db.app_pool(), Profile::plain_shop().unwrap())
+        .await
+        .expect("plain-shop kernel");
+    assert!(
+        kernel
+            .event_schemas
+            .get(datum_documents::EVENT_REVISION_CREATED, 1)
+            .is_some(),
+        "revision_created schema registered"
+    );
+    assert!(
+        kernel
+            .event_schemas
+            .get(datum_documents::EVENT_EFFECTIVE, 1)
+            .is_some(),
+        "effective schema registered"
+    );
+
+    let write = kernel.write_pool();
+    let actor = actor_with_perms(
+        &write,
+        &[
+            "documents.view",
+            "documents.edit",
+            "documents.approve",
+            "documents.release",
+        ],
+    )
+    .await;
+    let mut create_ctx = boot_ctx();
+    create_ctx.actor = actor;
+    create_ctx.actor_display = Some("Operator".into());
+    let mut tx = Tx::begin(&write, &create_ctx).await.expect("create begin");
+    let id = kernel
+        .create_document(&mut tx, "SOP", "Glue event", "quality")
+        .await
+        .expect("create");
+    let rev = kernel
+        .new_document_revision(
+            &mut tx,
+            id,
+            "A",
+            datum_documents::Manifest::content(serde_json::json!({})),
+        )
+        .await
+        .expect("revision");
+    tx.commit().await.expect("create commit");
+
+    let created: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM app.event WHERE name = $1 AND doc_id = $2")
+            .bind(datum_documents::EVENT_REVISION_CREATED)
+            .bind(id.as_uuid())
+            .fetch_one(db.app_pool())
+            .await
+            .expect("revision_created count");
+    assert_eq!(created, 1, "composition root publishes revision_created");
+    let payload: serde_json::Value =
+        sqlx::query_scalar("SELECT payload FROM app.event WHERE name = $1 AND doc_id = $2")
+            .bind(datum_documents::EVENT_REVISION_CREATED)
+            .bind(id.as_uuid())
+            .fetch_one(db.app_pool())
+            .await
+            .expect("revision_created payload");
+    assert_eq!(payload["revision_id"], rev.as_uuid().to_string());
+    assert_eq!(payload["label"], "A");
+
+    let doc = DocRef {
+        doc_type: datum_documents::DOC_TYPE.into(),
+        doc_id: id.0,
+    };
+    for edge in ["submit", "approve", "make_effective"] {
+        let mut ctx = kernel.transition_context(actor, &doc, edge);
+        ctx.actor_display = Some("Operator".into());
+        ctx.reason = Some("documents-glue".into());
+        let mut tx = Tx::begin(&write, &ctx).await.expect("edge begin");
+        kernel
+            .transition(&mut tx, &doc, edge, None, &ctx)
+            .await
+            .unwrap_or_else(|e| panic!("{edge}: {e:#}"));
+        tx.commit().await.expect("edge commit");
+    }
+
+    let effective: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM app.event WHERE name = $1 AND doc_id = $2")
+            .bind(datum_documents::EVENT_EFFECTIVE)
+            .bind(id.as_uuid())
+            .fetch_one(db.app_pool())
+            .await
+            .expect("effective count");
+    assert_eq!(
+        effective, 1,
+        "composition root publishes documents.effective"
+    );
     db.finish().await.expect("finish");
 }
 

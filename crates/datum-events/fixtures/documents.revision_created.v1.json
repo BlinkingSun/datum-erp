@@ -1,0 +1,9 @@
+{
+  "name": "documents.revision_created",
+  "version": 1,
+  "fields": [
+    { "name": "document_id", "required": true },
+    { "name": "revision_id", "required": true },
+    { "name": "label", "required": true }
+  ]
+}

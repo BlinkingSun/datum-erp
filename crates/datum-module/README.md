@@ -36,7 +36,9 @@ Kernel::build(pool, profile).await?      // same, compiled-in catalog only
 | Method | Role |
 |---|---|
 | `Kernel::spawn` | `Engine::spawn` after freeze |
-| `Kernel::transition` | `esign::prepare` (when a token is present) then `Engine::transition` with the prepared gate; `datum.esign_id` is stamped so every audit row of the transition carries the signature id; a refusal aborts and `esign::log_refusal` is written on a fresh Tx |
+| `Kernel::create_document` | `datum_documents::create` on the frozen engine (number allocated late) |
+| `Kernel::new_document_revision` | insert revision and publish `documents.revision_created` in the same `Tx` |
+| `Kernel::transition` | `esign::prepare` (when a token is present) then `Engine::transition` with the prepared gate; `datum.esign_id` is stamped so every audit row of the transition carries the signature id; a refusal aborts and `esign::log_refusal` is written on a fresh Tx. A successful `document.make_effective` also publishes `documents.effective` |
 | `Kernel::signature_gate` | bound sync gate: `NoSignatures` under plain-shop, esign `Invalid` (never `NoProvider`) under regulated-device; `Engine::transition` callers do not choose the provider |
 | `Kernel::signature_gate_factory` | `GateFactory` bound from the profile TOML `gate` field (`NoSignatures` or `datum-esign`) |
 | `Kernel::posting_sink` / `bind_sink` | `PostingSink` factory; unfinalized Drop poisons via `datum_ledger::commit` |

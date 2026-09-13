@@ -166,6 +166,30 @@ mod tests {
     }
 
     #[test]
+    fn standard_registry_has_documents_events_v1() {
+        let registry = SchemaRegistry::standard();
+        let created = registry
+            .get("documents.revision_created", 1)
+            .expect("documents.revision_created.v1 is seeded");
+        let names: Vec<&str> = created.fields.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(
+            names.as_slice(),
+            SchemaRegistry::DOCUMENTS_REVISION_CREATED_V1_FIELDS
+        );
+        assert!(created.fields.iter().all(|f| f.required));
+
+        let effective = registry
+            .get("documents.effective", 1)
+            .expect("documents.effective.v1 is seeded");
+        let names: Vec<&str> = effective.fields.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(
+            names.as_slice(),
+            SchemaRegistry::DOCUMENTS_EFFECTIVE_V1_FIELDS
+        );
+        assert!(effective.fields.iter().all(|f| f.required));
+    }
+
+    #[test]
     fn adjusted_round_trip() {
         let registry = SchemaRegistry::standard();
         let payload = json!({
