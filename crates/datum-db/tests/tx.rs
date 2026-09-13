@@ -396,6 +396,97 @@ async fn execute_and_fetch_helpers() {
     db.finish().await.expect("finish");
 }
 
+/// FINDING 6 (a): a failing statement inside a `Tx`, then `commit`, is
+/// `Error::Poisoned` and nothing is persisted. `fetch_one` RowNotFound does
+/// not abort PostgreSQL, so without poison the INSERT would commit.
+#[tokio::test]
+async fn failing_statement_then_commit_is_poisoned_and_persists_nothing() {
+    let db = db_case!("tx_poison_commit");
+    sqlx::query("CREATE TABLE app.poison_probe (id int PRIMARY KEY, n int NOT NULL)")
+        .execute(db.migrate_pool())
+        .await
+        .expect("create");
+    let write = WritePool::new(db.app_pool().clone());
+    let mut tx = Tx::begin(&write, &test_ctx()).await.expect("begin");
+    tx.execute("INSERT INTO app.poison_probe (id, n) VALUES (1, 7)")
+        .await
+        .expect("insert");
+    let fetch_err = tx
+        .fetch_one(sqlx::query_as::<_, (i32,)>(
+            "SELECT n FROM app.poison_probe WHERE id = 99",
+        ))
+        .await
+        .expect_err("missing row");
+    assert!(
+        matches!(fetch_err, Error::Sqlx(_)),
+        "fetch miss is sqlx, got {fetch_err}"
+    );
+    let commit_err = tx.commit().await.expect_err("poisoned commit");
+    assert!(matches!(commit_err, Error::Poisoned), "got {commit_err}");
+    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM app.poison_probe")
+        .fetch_one(db.app_pool())
+        .await
+        .expect("count");
+    assert_eq!(n, 0, "poisoned commit must persist nothing");
+    db.finish().await.expect("finish");
+}
+
+/// FINDING 6 (b): a clean `Tx` still commits.
+#[tokio::test]
+async fn clean_tx_still_commits() {
+    let db = db_case!("tx_poison_clean");
+    sqlx::query("CREATE TABLE app.poison_clean (id int PRIMARY KEY, n int NOT NULL)")
+        .execute(db.migrate_pool())
+        .await
+        .expect("create");
+    let write = WritePool::new(db.app_pool().clone());
+    let mut tx = Tx::begin(&write, &test_ctx()).await.expect("begin");
+    tx.execute("INSERT INTO app.poison_clean (id, n) VALUES (1, 3)")
+        .await
+        .expect("insert");
+    let (n,): (i32,) = tx
+        .fetch_one(sqlx::query_as(
+            "SELECT n FROM app.poison_clean WHERE id = 1",
+        ))
+        .await
+        .expect("fetch");
+    assert_eq!(n, 3);
+    tx.commit().await.expect("commit");
+    let persisted: i64 = sqlx::query_scalar("SELECT count(*) FROM app.poison_clean")
+        .fetch_one(db.app_pool())
+        .await
+        .expect("count");
+    assert_eq!(persisted, 1);
+    db.finish().await.expect("finish");
+}
+
+/// `fetch_optional` returning `None` is not a failure and must not poison.
+#[tokio::test]
+async fn fetch_optional_none_does_not_poison() {
+    let db = db_case!("tx_poison_optional");
+    sqlx::query("CREATE TABLE app.poison_opt (id int PRIMARY KEY, n int NOT NULL)")
+        .execute(db.migrate_pool())
+        .await
+        .expect("create");
+    let write = WritePool::new(db.app_pool().clone());
+    let mut tx = Tx::begin(&write, &test_ctx()).await.expect("begin");
+    tx.execute("INSERT INTO app.poison_opt (id, n) VALUES (1, 4)")
+        .await
+        .expect("insert");
+    let missing: Option<(i32,)> = tx
+        .fetch_optional(sqlx::query_as("SELECT n FROM app.poison_opt WHERE id = 99"))
+        .await
+        .expect("optional");
+    assert!(missing.is_none());
+    tx.commit().await.expect("commit");
+    let persisted: i64 = sqlx::query_scalar("SELECT count(*) FROM app.poison_opt")
+        .fetch_one(db.app_pool())
+        .await
+        .expect("count");
+    assert_eq!(persisted, 1);
+    db.finish().await.expect("finish");
+}
+
 #[allow(dead_code)]
 fn _row_trait_used(row: &sqlx::postgres::PgRow) -> i32 {
     row.get(0)

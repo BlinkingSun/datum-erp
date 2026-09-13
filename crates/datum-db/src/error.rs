@@ -43,6 +43,9 @@ pub enum Error {
     /// Serialization failure (`40001`); retry with [`crate::retry_serializable`].
     #[error("serialization failure")]
     Serialization,
+    /// A prior non-aborting execute/fetch on this `Tx` failed; [`crate::Tx::commit`] rolled back.
+    #[error("transaction poisoned")]
+    Poisoned,
     /// Catalogue lint failed; each string names a violating object.
     #[error("ddl check failed:\n{}", .0.join("\n"))]
     Ddl(Vec<String>),

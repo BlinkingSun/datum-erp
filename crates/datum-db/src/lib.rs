@@ -236,6 +236,11 @@ mod tests {
     }
 
     #[test]
+    fn poisoned_formats() {
+        assert!(!Error::Poisoned.to_string().is_empty());
+    }
+
+    #[test]
     fn migrator_has_placeholder() {
         assert!(!MIGRATOR.migrations.is_empty());
     }

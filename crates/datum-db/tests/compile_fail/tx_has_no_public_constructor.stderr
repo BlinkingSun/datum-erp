@@ -1,3 +1,11 @@
+error: cannot construct `Tx<'_>` with struct literal syntax due to private fields
+ --> tests/compile_fail/tx_has_no_public_constructor.rs:2:15
+  |
+2 |     let _tx = datum_db::Tx { inner: panic!() };
+  |               ^^^^^^^^^^^^   --------------- private field
+  |
+  = note: ...and other private field `poisoned` that was not provided
+
 warning: unreachable expression
  --> tests/compile_fail/tx_has_no_public_constructor.rs:2:15
   |
@@ -8,9 +16,3 @@ warning: unreachable expression
   |               unreachable expression
   |
   = note: `#[warn(unreachable_code)]` (part of `#[warn(unused)]`) on by default
-
-error[E0451]: field `inner` of struct `Tx` is private
- --> tests/compile_fail/tx_has_no_public_constructor.rs:2:30
-  |
-2 |     let _tx = datum_db::Tx { inner: panic!() };
-  |                              ^^^^^ private field

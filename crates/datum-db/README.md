@@ -18,7 +18,7 @@ legal here (D3 §11). Event-trigger attach is `datum-audit`.
 - `apply_ddl` — stub; returns `Unimplemented` (audit owns attach)
 - `attach_audit_trigger` — stub; returns `Unimplemented` (`datum-audit::attach`)
 - `runtime_kind` — `"tokio"`
-- `Error` / `Result` / `SqlState` — `Refused(42501)`, `Serialization(40001)`, `Ddl`
+- `Error` / `Result` / `SqlState` — `Refused(42501)`, `Serialization(40001)`, `Ddl`, `Poisoned`
 - `Tx` — sealed write transaction (`begin`, `begin_serializable`, `execute`,
   `fetch_one`/`optional`/`all`, `setting`, `pg_txid`, `commit`, `rollback`)
 - `retry_serializable` — re-run on `Error::Serialization`
@@ -39,20 +39,31 @@ legal here (D3 §11). Event-trigger attach is `datum-audit`.
 - `write_without_context_aborts` / `session_level_actor_is_refused` / `refused_maps_42501`
 - `pooled_connection_cannot_leak_actor` / `after_release_resets_state`
 - `serialization_retry_reruns_on_40001` / `execute_and_fetch_helpers`
+- `failing_statement_then_commit_is_poisoned_and_persists_nothing` / `clean_tx_still_commits`
+- `fetch_optional_none_does_not_poison`
 - `migrate_runs_in_order_under_lock` / `migrate_is_idempotent` / `migrate_down_then_up`
 - `tables_not_owned_by_login_role`
 - `ddl_check_rejects_cascade` / `ddl_check_rejects_app_delete_outside_transient`
 - `log_unattributable_write_unimplemented` / `log_unattributable_write_calls_audit_log_event`
 - trybuild: `tx_has_no_deref`, `tx_has_no_public_constructor`
 
-## Tx::commit and the poison flag
+## Tx::commit and poison
 
-`Tx::commit` does not consult the in-process ledger poison flag (there is no
-`Tx::poison`). An unfinalized posting sink marks poison by transaction id when it
-is dropped; committing that work must go through [`datum_ledger::commit`], which
-returns `Error::Unfinalized` and rolls back. Module code that posts through the
-kernel transition path finalizes or posts inside the same `Tx` and then calls
-`Tx::commit` on success paths only.
+Execute, fetch, and savepoint-style helpers on the sealed `Tx` mark it poisoned
+on non-aborting `Err` (RowNotFound, decode — including a hook that reports
+failure through those helpers). `Tx::commit` on a poisoned `Tx` rolls back
+and returns [`Error::Poisoned`] instead of persisting partial work. A clean
+`Tx` still commits. A PostgreSQL error already aborts the server transaction
+(`COMMIT` is ROLLBACK), so those paths are not poisoned: callers that catch
+`23505` / `42501` and still `commit` are unchanged. This is in-struct state
+(no new public fields).
+
+`Tx::commit` still does not consult the ledger's in-process unfinalized-sink
+flag (there is no `Tx::poison`). An unfinalized posting sink marks poison by
+transaction id when it is dropped; committing that work must go through
+[`datum_ledger::commit`], which returns `Error::Unfinalized` and rolls back.
+Module code that posts through the kernel transition path finalizes or posts
+inside the same `Tx` and then calls `Tx::commit` on success paths only.
 
 ## Frozen / seams
 

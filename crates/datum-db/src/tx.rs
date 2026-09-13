@@ -13,8 +13,18 @@ use crate::{DATUM_SETTINGS, WriteContext, WritePool, app_version, guc};
 ///
 /// No `Deref` / `DerefMut` to the inner `sqlx::Transaction`. The only public
 /// constructors are [`Tx::begin`] and [`Tx::begin_serializable`].
+///
+/// Execute, fetch, and savepoint-style helpers mark this `Tx` poisoned on
+/// non-aborting `Err` (RowNotFound, decode). [`Tx::commit`] then rolls back
+/// and returns [`Error::Poisoned`] instead of persisting partial work. A
+/// PostgreSQL error already aborts the server transaction (COMMIT is
+/// ROLLBACK); those paths stay unpoisoned so existing callers that catch
+/// `23505` / `42501` and still `commit` compile and run unchanged. This is
+/// the sealed-Tx poison, distinct from the ledger's in-process
+/// unfinalized-sink flag.
 pub struct Tx<'c> {
     inner: Transaction<'c, Postgres>,
+    poisoned: bool,
 }
 
 impl<'c> Tx<'c> {
@@ -39,9 +49,10 @@ impl<'c> Tx<'c> {
     where
         E: Execute<'q, Postgres> + 'q,
     {
-        Executor::execute(&mut *self.inner, query)
+        let result = Executor::execute(&mut *self.inner, query)
             .await
-            .map_err(Error::from)
+            .map_err(Error::from);
+        self.capture(result)
     }
 
     /// Fetch exactly one row.
@@ -52,7 +63,8 @@ impl<'c> Tx<'c> {
     where
         T: Send + Unpin + for<'r> FromRow<'r, PgRow>,
     {
-        query.fetch_one(&mut *self.inner).await.map_err(Error::from)
+        let result = query.fetch_one(&mut *self.inner).await.map_err(Error::from);
+        self.capture(result)
     }
 
     /// Fetch at most one row.
@@ -63,10 +75,11 @@ impl<'c> Tx<'c> {
     where
         T: Send + Unpin + for<'r> FromRow<'r, PgRow>,
     {
-        query
+        let result = query
             .fetch_optional(&mut *self.inner)
             .await
-            .map_err(Error::from)
+            .map_err(Error::from);
+        self.capture(result)
     }
 
     /// Fetch every row.
@@ -77,24 +90,41 @@ impl<'c> Tx<'c> {
     where
         T: Send + Unpin + for<'r> FromRow<'r, PgRow>,
     {
-        query.fetch_all(&mut *self.inner).await.map_err(Error::from)
+        let result = query.fetch_all(&mut *self.inner).await.map_err(Error::from);
+        self.capture(result)
     }
 
     /// Read a transaction-local GUC (`current_setting(name, true)`).
     pub async fn setting(&mut self, name: &str) -> Result<String> {
-        let row: (Option<String>,) = sqlx::query_as("SELECT pg_catalog.current_setting($1, true)")
+        let result = sqlx::query_as("SELECT pg_catalog.current_setting($1, true)")
             .bind(name)
             .fetch_one(&mut *self.inner)
-            .await?;
+            .await
+            .map_err(Error::from);
+        let row: (Option<String>,) = self.capture(result)?;
         Ok(row.0.unwrap_or_default())
     }
 
     /// Current PostgreSQL transaction id (`pg_current_xact_id()::text`).
     pub async fn pg_txid(&mut self) -> Result<String> {
-        let row: (String,) = sqlx::query_as("SELECT pg_catalog.pg_current_xact_id()::text")
+        let result = sqlx::query_as("SELECT pg_catalog.pg_current_xact_id()::text")
             .fetch_one(&mut *self.inner)
-            .await?;
+            .await
+            .map_err(Error::from);
+        let row: (String,) = self.capture(result)?;
         Ok(row.0)
+    }
+
+    fn capture<T>(&mut self, result: Result<T>) -> Result<T> {
+        if let Err(Error::Sqlx(ref err)) = result {
+            // A PostgreSQL error already aborts the server transaction, so
+            // `COMMIT` is ROLLBACK. Poison the cases that do *not* abort
+            // (RowNotFound, decode) — those would persist earlier writes.
+            if err.as_database_error().is_none() {
+                self.poisoned = true;
+            }
+        }
+        result
     }
 
     /// The seventeen-plus `datum.*` names bound by [`Tx::begin`].
@@ -103,8 +133,17 @@ impl<'c> Tx<'c> {
     }
 
     /// Commit. Consumes the transaction.
+    ///
+    /// A poisoned `Tx` (a prior non-aborting execute/fetch `Err`, including a
+    /// hook that failed through those helpers) is rolled back and returns
+    /// [`Error::Poisoned`]. A clean `Tx` still commits.
     pub async fn commit(self) -> Result<()> {
-        self.inner.commit().await?;
+        let Tx { inner, poisoned } = self;
+        if poisoned {
+            let _ = inner.rollback().await;
+            return Err(Error::Poisoned);
+        }
+        inner.commit().await?;
         Ok(())
     }
 
@@ -184,5 +223,8 @@ async fn bind_context<'c>(
     .bind(config_version)
     .execute(&mut *inner)
     .await?;
-    Ok(Tx { inner })
+    Ok(Tx {
+        inner,
+        poisoned: false,
+    })
 }
