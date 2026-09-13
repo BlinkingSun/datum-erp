@@ -1055,11 +1055,9 @@ fn audited_refusal(err: &SignatureError) -> bool {
 /// Stamp `datum.esign_id` for remaining statements in this transaction.
 ///
 /// D-2b-1: every audit row of the consuming transition carries the signature id.
-/// The SQL lives in `stamp_esign.sql` so this crate does not name the
-/// session-protocol token confined by CONTRACT §5a.
+/// The GUC write lives on [`Tx::bind_esign_id`] (CONTRACT §5a).
 async fn stamp_esign_id(tx: &mut Tx<'_>, id: SignatureId) -> Result<()> {
-    tx.execute(sqlx::query(include_str!("stamp_esign.sql")).bind(id.as_uuid().to_string()))
-        .await?;
+    tx.bind_esign_id(id.as_uuid().to_string()).await?;
     Ok(())
 }
 

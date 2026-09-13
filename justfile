@@ -16,9 +16,12 @@ clippy:
     cargo clippy --manifest-path "{{root}}/Cargo.toml" --workspace --all-targets --all-features -- -D warnings
 
 # String-level raw-SQL fence (CONTRACT §5a / §5a.1). Fails on any hit outside datum-db / datum-audit / datum-test.
+# Session-protocol scans *.rs and src *.sql (FINDINGS-1 #9: stamp_esign.sql evaded *.rs).
+# Migrations have their own session-protocol plant (lint-sql-migrations.sh).
 lint-sql:
     command -v rg >/dev/null 2>&1 || { echo 'lint-sql: ripgrep (rg) is required' >&2; exit 1; }
-    if rg -n --glob '*.rs' --glob '!**/datum-db/**' --glob '!**/datum-audit/**' --glob '!**/datum-test/**' \
+    if rg -n --glob '*.rs' --glob '*.sql' --glob '!**/migrations/**' \
+        --glob '!**/datum-db/**' --glob '!**/datum-audit/**' --glob '!**/datum-test/**' \
         -e 'QueryBuilder' -e 'raw_sql' -e 'copy_in_raw' -e 'set_config' -e 'current_setting' \
         "{{root}}/crates"; then \
       echo "lint-sql: session-protocol SQL token outside crates/datum-db, crates/datum-audit, and crates/datum-test" >&2; \
@@ -68,6 +71,7 @@ lint-sql-selftest:
     mkdir -p \
       "$tmp/crates/datum-server/migrations" \
       "$tmp/crates/datum-server/src" \
+      "$tmp/crates/datum-db/src" \
       "$tmp/crates/datum-esign/src" \
       "$tmp/crates/datum-uom/migrations" \
       "$tmp/crates/datum-documents/migrations" \
@@ -94,6 +98,8 @@ lint-sql-selftest:
     plant_include_cross="$tmp/crates/datum-server/src/_lint_sql_include_cross.sql"; \
     plant_include_own="$tmp/crates/datum-esign/src/_lint_sql_include_own.sql"; \
     plant_include_exempt="$tmp/crates/datum-module/src/_lint_sql_include_exempt.sql"; \
+    plant_session_sql="$tmp/crates/datum-server/src/_lint_sql_session_include.sql"; \
+    plant_session_sql_ok="$tmp/crates/datum-db/src/_lint_sql_session_ok.sql"; \
     if ! REPO_ROOT="$tmp" bash "$root/scripts/lint-sql-migrations.sh" --selftest-hits; then \
       echo 'lint-sql-selftest: Windows-shaped hit parser/neutralization failed' >&2; \
       exit 1; \
@@ -187,6 +193,30 @@ lint-sql-selftest:
     fi; \
     echo 'lint-sql-selftest: planted *.sql include reading esign.* correctly rejected'; \
     echo 'lint-sql-selftest: invariant-6 negatives (owning crate *.sql, datum-module *.sql) correctly allowed'; \
+    if [ -f "$root/crates/datum-module/src/stamp_esign.sql" ]; then \
+      echo 'lint-sql-selftest: stamp_esign.sql must be deleted (FINDINGS-1 #9)' >&2; \
+      exit 1; \
+    fi; \
+    echo 'lint-sql-selftest: stamp_esign.sql is gone'; \
+    printf '%s\n' "SELECT pg_catalog.set_config('datum.esign_id', 'lint-selftest', true);" > "$plant_session_sql"; \
+    printf '%s\n' "SELECT pg_catalog.set_config('datum.esign_id', 'lint-selftest', true);" > "$plant_session_sql_ok"; \
+    session_out="$(rg -n --glob '*.rs' --glob '*.sql' --glob '!**/migrations/**' \
+      --glob '!**/datum-db/**' --glob '!**/datum-audit/**' --glob '!**/datum-test/**' \
+      -e 'QueryBuilder' -e 'raw_sql' -e 'copy_in_raw' -e 'set_config' -e 'current_setting' \
+      "$tmp/crates" 2>&1 || true)"; \
+    if ! printf '%s\n' "$session_out" | grep -F 'crates/datum-server/src/_lint_sql_session_include.sql' >/dev/null; then \
+      echo 'lint-sql-selftest: expected session-protocol lint to report planted src *.sql set_config' >&2; \
+      printf '%s\n' "$session_out" >&2; \
+      exit 1; \
+    fi; \
+    if printf '%s\n' "$session_out" | grep -F 'crates/datum-db/src/_lint_sql_session_ok.sql' >/dev/null; then \
+      echo 'lint-sql-selftest: session-protocol lint false-positive on datum-db src *.sql' >&2; \
+      printf '%s\n' "$session_out" >&2; \
+      exit 1; \
+    fi; \
+    echo 'lint-sql-selftest: planted src *.sql set_config correctly rejected'; \
+    echo 'lint-sql-selftest: datum-db src *.sql set_config correctly allowed'; \
+    rm -f "$plant_session_sql" "$plant_session_sql_ok"; \
     plant_dyn_doc="$tmp/crates/datum-documents/migrations/99999999999999_lint_sql_dyn_documents.up.sql"; \
     plant_dyn_qid="$tmp/modules/items/src/_lint_sql_dyn_quote_ident.rs"; \
     plant_dyn_concat="$tmp/modules/items/src/_lint_sql_dyn_concat.rs"; \

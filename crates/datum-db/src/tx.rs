@@ -115,6 +115,19 @@ impl<'c> Tx<'c> {
         Ok(row.0)
     }
 
+    /// Stamp `datum.esign_id` for remaining statements in this transaction (D-2b-1).
+    ///
+    /// Mid-Tx bind after [`Tx::begin`]. Does not change [`WriteContext::esign_id`]
+    /// (the begin-time field) and does not rebind the action GUC (R-2s-7).
+    pub async fn bind_esign_id(&mut self, id: impl AsRef<str>) -> Result<()> {
+        let id = id.as_ref().to_owned();
+        self.execute(
+            sqlx::query("SELECT pg_catalog.set_config('datum.esign_id', $1, true)").bind(id),
+        )
+        .await?;
+        Ok(())
+    }
+
     fn capture<T>(&mut self, result: Result<T>) -> Result<T> {
         if let Err(Error::Sqlx(ref err)) = result {
             // A PostgreSQL error already aborts the server transaction, so
