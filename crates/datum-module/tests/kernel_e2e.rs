@@ -905,9 +905,7 @@ async fn regulated_release_refused_without_signature_succeeds_with_two_component
     let mut spawn_ctx = kernel.transition_context(principal.actor(), &doc, "approve");
     spawn_ctx.actor_display = Some(principal.display_name.clone());
     spawn_ctx.reason = Some("kernel-e2e".into());
-    let mut tx = Tx::begin(&write, &spawn_ctx)
-        .await
-        .expect("spawn");
+    let mut tx = Tx::begin(&write, &spawn_ctx).await.expect("spawn");
     kernel.spawn(&mut tx, &doc, "Open").await.expect("spawn");
     tx.commit().await.expect("spawn commit");
 
@@ -930,9 +928,7 @@ async fn regulated_release_refused_without_signature_succeeds_with_two_component
         "inventory-style Engine::transition callers see the bound gate, got {gate_err:?}"
     );
 
-    let mut tx = Tx::begin(&write, &spawn_ctx)
-        .await
-        .expect("dummy begin");
+    let mut tx = Tx::begin(&write, &spawn_ctx).await.expect("dummy begin");
     let dummy_err = kernel
         .engine
         .transition(
@@ -955,9 +951,7 @@ async fn regulated_release_refused_without_signature_succeeds_with_two_component
     );
     tx.rollback().await.ok();
 
-    let mut tx = Tx::begin(&write, &spawn_ctx)
-        .await
-        .expect("kt dummy");
+    let mut tx = Tx::begin(&write, &spawn_ctx).await.expect("kt dummy");
     let kt_err = kernel
         .transition(&mut tx, &doc, "approve", Some(&dummy), &spawn_ctx)
         .await
@@ -994,9 +988,7 @@ async fn regulated_release_refused_without_signature_succeeds_with_two_component
         version,
     };
     let mint_ctx = boot_ctx();
-    let mut mint_tx = Tx::begin(&write, &mint_ctx)
-        .await
-        .expect("mint");
+    let mut mint_tx = Tx::begin(&write, &mint_ctx).await.expect("mint");
     let sig = mint(
         &mut mint_tx,
         &MintRequest {
@@ -1028,9 +1020,7 @@ async fn regulated_release_refused_without_signature_succeeds_with_two_component
     let mut ctx = kernel.transition_context(principal.actor(), &doc, "approve");
     ctx.actor_display = Some(principal.display_name.clone());
     ctx.reason = Some("kernel-e2e".into());
-    let mut tx = Tx::begin(&write, &ctx)
-        .await
-        .expect("signed begin");
+    let mut tx = Tx::begin(&write, &ctx).await.expect("signed begin");
     let out = kernel
         .transition(&mut tx, &doc, "approve", Some(&token), &ctx)
         .await

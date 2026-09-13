@@ -370,8 +370,14 @@ impl Kernel {
         tx: &mut Tx<'_>,
         id: SignatureId,
     ) -> Result<Option<SignatureToken>> {
-        let row: Option<(sqlx::types::Uuid, String, String, sqlx::types::Uuid, i64, Vec<u8>)> =
-            tx
+        let row: Option<(
+            sqlx::types::Uuid,
+            String,
+            String,
+            sqlx::types::Uuid,
+            i64,
+            Vec<u8>,
+        )> = tx
             .fetch_optional(
                 sqlx::query_as(
                     r#"SELECT signer_id, meaning, record_table, record_id, record_version,

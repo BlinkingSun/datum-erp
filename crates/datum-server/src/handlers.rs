@@ -559,9 +559,7 @@ async fn manifestation_via_tx(tx: &mut Tx<'_>, id: SignatureId) -> Result<Value>
         Option<Uuid>,
     );
     let row: Option<ManifestRow> = tx
-        .fetch_optional(
-            sqlx::query_as(include_str!("esign_manifest.sql")).bind(id.as_uuid()),
-        )
+        .fetch_optional(sqlx::query_as(include_str!("esign_manifest.sql")).bind(id.as_uuid()))
         .await?;
     let Some(row) = row else {
         return Err(Error::not_found("signature not found"));

@@ -128,11 +128,9 @@ impl Error {
                 StatusCode::UNAUTHORIZED,
                 err.to_string(),
             )),
-            SignatureError::SignerNotPermitted => Some((
-                "SIGNATURE_REQUIRED",
-                StatusCode::FORBIDDEN,
-                err.to_string(),
-            )),
+            SignatureError::SignerNotPermitted => {
+                Some(("SIGNATURE_REQUIRED", StatusCode::FORBIDDEN, err.to_string()))
+            }
             // D-2b-5 Invalid (dummy / expired / no such signature / signer mismatch)
             // and MeaningMismatch / RecordMismatch: esign is bound, so this is
             // not 409 SIGNATURE_NO_PROVIDER.

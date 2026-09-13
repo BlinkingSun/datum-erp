@@ -178,7 +178,11 @@ async fn regulated_release_refused_without_signature_succeeds_with_two_component
             1,
         )
         .await;
-    assert_eq!(st, StatusCode::FORBIDDEN, "refused without signature {refused}");
+    assert_eq!(
+        st,
+        StatusCode::FORBIDDEN,
+        "refused without signature {refused}"
+    );
     assert_eq!(refused["error"]["code"], "SIGNATURE_REQUIRED", "{refused}");
 
     let (st, minted) = w.post("/api/v1/esign/signatures", mint_body(rec)).await;
