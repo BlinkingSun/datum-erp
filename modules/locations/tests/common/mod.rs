@@ -3,25 +3,55 @@
 use datum_core::{Actor, ActorKind, Identifier};
 use datum_db::WriteContext;
 use datum_identity::SYSTEM_ID;
-use datum_mod_locations::migrate as migrate_locations;
-use datum_module::{Kernel, Profile, attach_kernel_audit, migrate_prefix, migrate_suffix};
+use datum_module::{Kernel, Profile};
 use datum_statemachine::DocRef;
 use sqlx::PgPool;
 
-pub async fn migrate_kernel(db: &datum_test::TestDb) {
-    migrate_prefix(db.migrate_pool()).await.expect("prefix");
-    migrate_suffix(db.migrate_pool()).await.expect("suffix");
-    migrate_locations(db.migrate_pool())
+/// D-2b-13: one published order. `install_upto` is not on this tree yet
+/// (glue lane); fall back to kernel prefix/suffix then `wave_2s1_migrators`
+/// / `slice_migrators`, with `audit_attach` up before this crate's DDL.
+pub async fn install_through(db: &datum_test::TestDb, crate_name: &str) {
+    datum_module::migrate_prefix(db.migrate_pool())
         .await
-        .expect("locations migrate");
+        .expect("migrate prefix");
+    datum_module::migrate_suffix(db.migrate_pool())
+        .await
+        .unwrap_or_else(|e| panic!("migrate suffix: {e:#}"));
     let boot = db.bootstrap_pool().await.expect("bootstrap");
     datum_audit::install_privileged(&boot)
         .await
-        .expect("privileged");
+        .expect("install_privileged");
     boot.close().await;
-    attach_kernel_audit(db.migrate_pool())
+
+    let mut found = false;
+    for (name, migrator) in datum_module::wave_2s1_migrators().expect("wave_2s1") {
+        datum_db::migrate::run(db.migrate_pool(), &[(name, migrator)])
+            .await
+            .unwrap_or_else(|e| panic!("migrate {name}: {e:#}"));
+        if name == crate_name {
+            found = true;
+            break;
+        }
+    }
+    if !found {
+        for (name, migrator) in datum_module::slice_migrators() {
+            datum_db::migrate::run(db.migrate_pool(), &[(name, migrator)])
+                .await
+                .unwrap_or_else(|e| panic!("migrate {name}: {e:#}"));
+            if name == crate_name {
+                found = true;
+                break;
+            }
+        }
+    }
+    assert!(found, "{crate_name} not in published wave_2s1/slice order");
+    datum_module::attach_kernel_audit(db.migrate_pool())
         .await
-        .expect("attach");
+        .expect("attach_kernel_audit");
+}
+
+pub async fn migrate_kernel(db: &datum_test::TestDb) {
+    install_through(db, "datum-mod-locations").await;
 }
 
 pub async fn boot_kernel(db: &datum_test::TestDb) -> Kernel {
