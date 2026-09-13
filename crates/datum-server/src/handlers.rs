@@ -7,7 +7,7 @@ use axum::response::{IntoResponse, Response};
 use datum_core::{
     Identifier, ItemId, LocationId, LotId, RecordRef, SignatureId, SignatureMeaning, SignatureToken,
 };
-use datum_db::{Tx, WritePool};
+use datum_db::{ReadPool, Tx, WritePool};
 use datum_identity::{PasswordProvider, Provider};
 use datum_ledger::CostMethod;
 use datum_mod_inventory::{BalanceQuery, DocumentKind, LineInput, ReceiveRequest, ReleaseRequest};
@@ -2328,7 +2328,7 @@ async fn esign_manifestation_inner(
     let _session =
         extract::require_permission(state, headers, request_id, "identity.session").await?;
     let sig_id = parse_uuid(id, "id", datum_core::SignatureId::from_uuid)?;
-    let body = datum_esign::manifestation(state.pool(), sig_id).await?;
+    let body = datum_esign::manifestation(&ReadPool::new(state.pool().clone()), sig_id).await?;
     Ok(serde_json::to_value(body)?)
 }
 
@@ -2354,7 +2354,7 @@ async fn esign_bundle_inner(
     let _session =
         extract::require_permission(state, headers, request_id, "esign.bundle.read").await?;
     let sig_id = parse_uuid(id, "id", datum_core::SignatureId::from_uuid)?;
-    let body = datum_esign::archival_bundle(state.pool(), sig_id).await?;
+    let body = datum_esign::archival_bundle(&ReadPool::new(state.pool().clone()), sig_id).await?;
     Ok(serde_json::to_value(body)?)
 }
 

@@ -135,6 +135,7 @@ pub const KERNEL_AUDIT_RELS: &[&str] = &[
     "identity.principal_role",
     "esign.signature",
     "esign.meaning_policy",
+    "esign.supersession",
     "customfields.definition",
     "customfields.value_string",
     "customfields.value_text",
