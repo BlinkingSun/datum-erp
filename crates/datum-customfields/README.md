@@ -7,7 +7,8 @@ Kernel extension mechanism: typed, validated, audited fields on any app-class en
 | Function | Purpose |
 |---|---|
 | `define` | Create or version a field definition |
-| `retire` | Retire a definition (owner module or `customfields.define`) |
+| `retire` | Retire a definition through the registered lifecycle machine (`active → retired`, terminal). Owner module or `customfields.*` action. |
+| `definition_machine` | Machine the composition root registers (same pattern as `document_machine`) |
 | `set` / `get` | Write/read typed values on a record |
 | `list_for_record` | Active definitions with values present |
 | `definitions_for` | Active definitions for an entity |
@@ -16,8 +17,12 @@ Kernel extension mechanism: typed, validated, audited fields on any app-class en
 
 ## Schema
 
-- `customfields.definition` — effectivity-versioned metadata (no `jsonb`).
+- `customfields.definition` — effectivity-versioned metadata (no `jsonb`). `status` is the insert-time snapshot; live lifecycle is `sm.instance` for `doc_type = customfields.definition`.
 - `customfields.value_*` — one table per type (`string`, `text`, `integer`, `decimal`, `bool`, `date`, `enum`, `reference`), keyed by `(definition_id, record_id)`, audited via `zz_audit_row`.
+
+## Lifecycle machine (R-2s-5)
+
+`definition_machine(profile)` — `doc_type = "customfields.definition"`. One edge: `active → retired` (`retire`), terminal, `NotRequired` in both profiles. `define` spawns the instance. `retire` drives `Engine::transition`; a second retire is `Error::AlreadyRetired`. The composition root registers the machine before freeze, like `document_machine`.
 
 ## Validation registry
 

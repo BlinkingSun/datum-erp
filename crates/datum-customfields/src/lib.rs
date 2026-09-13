@@ -9,20 +9,23 @@
 )]
 
 use datum_audit as _;
-use datum_core::Identifier;
-use datum_db::Tx;
+use datum_core::{Identifier, NoPostings, NoSignatures, PostingSink};
+use datum_db::{Tx, WriteContext};
+use datum_statemachine::{Engine, instance_exists};
 
 mod domain;
 mod error;
+mod machine;
 mod manifest;
 mod store;
 mod validate;
 
 pub use domain::{
-    DatePrecision, Definition, DefinitionId, DefinitionSpec, DefinitionStatus, FieldKey, FieldType,
-    Value, ValueWire,
+    DOC_TYPE, DatePrecision, Definition, DefinitionId, DefinitionSpec, DefinitionStatus, FieldKey,
+    FieldType, PERMISSIONS, Value, ValueWire,
 };
 pub use error::{Error, Result};
+pub use machine::{RETIRE_EDGE, RETIRE_PERMISSION, definition_machine, doc_ref, retire_context};
 pub use manifest::{ManifestCustomField, ManifestCustomFields};
 pub use validate::{gtin_valid, validate_value as validate};
 
@@ -50,33 +53,67 @@ pub async fn define(tx: &mut Tx<'_>, spec: DefinitionSpec) -> Result<DefinitionI
         store::close_previous_version(tx, existing.id, existing.version).await?;
         store::insert_definition_version(tx, existing.id, new_ver, &spec, DefinitionStatus::Active)
             .await?;
+        spawn_definition(tx, existing.id).await?;
         return Ok(existing.id);
     }
     let id = DefinitionId::generate();
     store::insert_definition_version(tx, id, 1, &spec, DefinitionStatus::Active).await?;
+    spawn_definition(tx, id).await?;
     Ok(id)
 }
 
-/// Retire a definition (`owner` module or `customfields.define` action only).
-pub async fn retire(tx: &mut Tx<'_>, id: DefinitionId) -> Result<()> {
-    let row = tx
-        .fetch_optional(
-            sqlx::query_as::<_, (i32, String)>(
-                "SELECT version, owner_module FROM customfields.definition
-                 WHERE definition_id = $1 AND status = 'active' AND effective_to IS NULL
-                 ORDER BY version DESC LIMIT 1",
-            )
-            .bind(id.as_uuid()),
+/// Persist the definition machine and spawn `id` in `active` if no instance exists.
+async fn spawn_definition(tx: &mut Tx<'_>, id: DefinitionId) -> Result<()> {
+    let profile = match tx.setting("datum.config_version").await?.as_str() {
+        "regulated-device" => "regulated-device",
+        _ => "plain-shop",
+    };
+    let engine = machine::frozen_engine(profile)?;
+    engine.persist(tx).await?;
+    let doc = machine::doc_ref(id);
+    if !instance_exists(tx, &doc).await? {
+        engine
+            .spawn(tx, &doc, DefinitionStatus::Active.as_str())
+            .await?;
+    }
+    Ok(())
+}
+
+/// Retire a definition through the registered lifecycle machine (R-2s-5).
+///
+/// `tx` must have been begun with [`retire_context`]. `engine` must have
+/// [`definition_machine`] registered (composition root or test harness).
+/// Owner module or `customfields.*` action only.
+pub async fn retire(
+    tx: &mut Tx<'_>,
+    engine: &Engine,
+    id: DefinitionId,
+    ctx: &WriteContext,
+) -> Result<()> {
+    let def = store::load_latest_by_id(tx, id)
+        .await?
+        .ok_or(Error::NotFound)?;
+    let action = tx.setting("datum.action").await?;
+    if !store::caller_may_retire(&action, &def.owner_module) {
+        return Err(Error::RetireForbidden {
+            owner: def.owner_module,
+        });
+    }
+    engine.persist(tx).await?;
+    let doc = machine::doc_ref(id);
+    let sink: Box<dyn PostingSink> = Box::new(NoPostings);
+    engine
+        .transition(
+            tx,
+            sink,
+            &doc,
+            machine::RETIRE_EDGE,
+            None,
+            &NoSignatures,
+            ctx,
         )
         .await?;
-    let Some((version, owner)) = row else {
-        return Err(Error::NotFound);
-    };
-    let action = tx.setting("datum.action").await?;
-    if !store::caller_may_retire(&action, &owner) {
-        return Err(Error::RetireForbidden { owner });
-    }
-    store::mark_retired(tx, id, version).await?;
+    store::close_previous_version(tx, id, def.version).await?;
     Ok(())
 }
 
@@ -180,6 +217,31 @@ mod tests {
     #[test]
     fn postgres_helper_is_callable() {
         let _ = datum_test::postgres_available();
+    }
+
+    #[test]
+    fn machine_is_active_to_retired_terminal() {
+        for profile in ["plain-shop", "regulated-device"] {
+            let m = definition_machine(profile).expect("machine");
+            assert_eq!(m.doc_type, DOC_TYPE);
+            assert!(!m.regulated);
+            let names: Vec<&str> = m.edges.iter().map(|e| e.name.as_str()).collect();
+            assert_eq!(names, ["retire"]);
+            let retire = m.edges.iter().find(|e| e.name == "retire").unwrap();
+            assert_eq!(retire.from.0, DefinitionStatus::Active.as_str());
+            assert_eq!(retire.to.0, DefinitionStatus::Retired.as_str());
+            assert!(matches!(
+                retire.signature,
+                datum_statemachine::SignatureDeclaration::NotRequired { .. }
+            ));
+            assert!(
+                !m.edges
+                    .iter()
+                    .any(|e| e.from.0 == DefinitionStatus::Retired.as_str()),
+                "retired is terminal"
+            );
+        }
+        assert!(definition_machine("no-such-profile").is_err());
     }
 
     proptest! {

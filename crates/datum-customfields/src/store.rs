@@ -6,11 +6,13 @@ use uuid::Uuid;
 
 use datum_core::Identifier;
 use datum_db::Tx;
+use datum_statemachine::current_state;
 
 use crate::domain::{
     DatePrecision, Definition, DefinitionId, DefinitionSpec, DefinitionStatus, FieldType, Value,
 };
 use crate::error::{Error, Result};
+use crate::machine::doc_ref;
 use crate::validate::{parse_rule_at_define, validate_value};
 
 #[derive(sqlx::FromRow)]
@@ -67,7 +69,35 @@ pub(crate) async fn load_latest_by_entity_key(
             .bind(key),
         )
         .await?;
-    row.map(row_to_def).transpose()
+    let mut def = row.map(row_to_def).transpose()?;
+    if let Some(d) = def.as_mut() {
+        overlay_live_status(tx, d).await?;
+    }
+    Ok(def)
+}
+
+pub(crate) async fn load_latest_by_id(
+    tx: &mut Tx<'_>,
+    id: DefinitionId,
+) -> Result<Option<Definition>> {
+    let row = tx
+        .fetch_optional(
+            sqlx::query_as::<_, DefRow>(
+                "SELECT definition_id, version, entity, key, field_type, label, validation_rule,
+                        required, indexed, owner_module, status
+                 FROM customfields.definition
+                 WHERE definition_id = $1
+                 ORDER BY version DESC
+                 LIMIT 1",
+            )
+            .bind(id.as_uuid()),
+        )
+        .await?;
+    let mut def = row.map(row_to_def).transpose()?;
+    if let Some(d) = def.as_mut() {
+        overlay_live_status(tx, d).await?;
+    }
+    Ok(def)
 }
 
 pub(crate) async fn load_active_by_entity_key(
@@ -89,7 +119,14 @@ pub(crate) async fn load_active_by_entity_key(
             .bind(key),
         )
         .await?;
-    row.map(row_to_def).transpose()
+    let mut def = row.map(row_to_def).transpose()?;
+    if let Some(d) = def.as_mut() {
+        overlay_live_status(tx, d).await?;
+        if d.status != DefinitionStatus::Active {
+            return Ok(None);
+        }
+    }
+    Ok(def)
 }
 
 pub(crate) async fn list_active_for_entity(
@@ -109,7 +146,29 @@ pub(crate) async fn list_active_for_entity(
             .bind(entity),
         )
         .await?;
-    rows.into_iter().map(row_to_def).collect()
+    let mut out = Vec::new();
+    for r in rows {
+        let mut def = row_to_def(r)?;
+        overlay_live_status(tx, &mut def).await?;
+        if def.status == DefinitionStatus::Active {
+            out.push(def);
+        }
+    }
+    Ok(out)
+}
+
+/// Live status is the machine. The column is the insert-time snapshot.
+async fn overlay_live_status(tx: &mut Tx<'_>, def: &mut Definition) -> Result<()> {
+    let live = current_state(tx, &doc_ref(def.id)).await?;
+    if let Some(state) = live {
+        def.status = DefinitionStatus::parse(&state.0).ok_or_else(|| {
+            Error::Core(datum_core::Error::Invariant(format!(
+                "bad machine state {}",
+                state.0
+            )))
+        })?;
+    }
+    Ok(())
 }
 
 pub(crate) async fn insert_definition_version(
@@ -153,20 +212,6 @@ pub(crate) async fn close_previous_version(
             "UPDATE customfields.definition
              SET effective_to = pg_catalog.now()
              WHERE definition_id = $1 AND version = $2 AND effective_to IS NULL",
-        )
-        .bind(id.as_uuid())
-        .bind(version),
-    )
-    .await?;
-    Ok(())
-}
-
-pub(crate) async fn mark_retired(tx: &mut Tx<'_>, id: DefinitionId, version: i32) -> Result<()> {
-    tx.execute(
-        sqlx::query(
-            "UPDATE customfields.definition
-             SET status = 'retired', effective_to = pg_catalog.now()
-             WHERE definition_id = $1 AND version = $2",
         )
         .bind(id.as_uuid())
         .bind(version),

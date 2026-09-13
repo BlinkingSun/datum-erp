@@ -6,6 +6,12 @@ use serde::{Deserialize, Serialize};
 
 use datum_core::Identifier;
 
+/// Machine `doc_type` registered by [`crate::definition_machine`].
+pub const DOC_TYPE: &str = "customfields.definition";
+
+/// Permission keys exported for the composition root.
+pub const PERMISSIONS: &[&str] = &["customfields.retire"];
+
 /// Stable definition identity (all versions share this id).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DefinitionId(Identifier);
@@ -100,7 +106,8 @@ pub enum DefinitionStatus {
 }
 
 impl DefinitionStatus {
-    pub(crate) fn as_str(self) -> &'static str {
+    /// SQL / machine state name.
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::Active => "active",
             Self::Retired => "retired",
