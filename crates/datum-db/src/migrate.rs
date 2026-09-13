@@ -1,10 +1,23 @@
 //! Multi-crate migration runner (D3 §11; composition order owned later by `datum-module`).
 
 use sqlx::migrate::Migrator;
-use sqlx::{AssertSqlSafe, PgConnection};
+use sqlx::{AssertSqlSafe, Connection, PgConnection};
 
 use crate::error::{Error, Result, is_undefined_table};
 use crate::{Pool, app_version};
+
+/// D-2b-11 six-GUC migration preamble (D-2b-12). `is_local = true` so the
+/// values last for the implicit (apply) or explicit (flush) transaction.
+/// Well-known actor is `identity.principal` 'migration'.
+const MIGRATION_GUC_PREAMBLE: &str = r#"
+SELECT
+  pg_catalog.set_config('datum.actor_id',      '00000000-0000-4000-8000-000000000002', true),
+  pg_catalog.set_config('datum.actor_kind',    'migration', true),
+  pg_catalog.set_config('datum.actor_display', 'migration', true),
+  pg_catalog.set_config('datum.txid',          pg_catalog.pg_current_xact_id()::text, true),
+  pg_catalog.set_config('datum.action',        'migrate', true),
+  pg_catalog.set_config('datum.source_kind',   'migration', true);
+"#;
 
 /// Advisory lock key held for the whole of [`run`].
 pub const ADVISORY_LOCK_KEY: i64 = 0x0044_4154_554D_0001;
@@ -13,6 +26,11 @@ pub const ADVISORY_LOCK_KEY: i64 = 0x0044_4154_554D_0001;
 ///
 /// Records `(crate, version, applied_at, app_version)` in `datum.schema_history`.
 /// Already-recorded `(crate, version)` pairs are skipped (idempotent).
+///
+/// Sets the six `datum.*` migration GUCs on this connection for each apply
+/// and for the history insert (D-2b-12), so a later `run` still records
+/// history after `datum.schema_history` is attached. Individual migrations
+/// need no preamble of their own to survive `zz_audit_row`.
 ///
 /// Call as `datum_migrate`. Schema `datum` / `datum.schema_history` come from
 /// this crate's `0001_datum_schema` migration, which must run first.
@@ -79,11 +97,15 @@ async fn grant_owner_create(conn: &mut PgConnection) -> Result<()> {
 
 /// Apply one up-migration as `datum_migrate`. Ownership is reassigned
 /// afterwards so later crates inherit `datum_owner` table ownership.
+///
+/// The six-GUC preamble is prepended so the migration's implicit
+/// transaction carries a matching `datum.txid` (D-2b-12).
 async fn apply_sql(conn: &mut PgConnection, sql: &str) -> Result<()> {
     if sql_is_noop(sql) {
         return Ok(());
     }
-    sqlx::raw_sql(AssertSqlSafe(sql.to_owned()))
+    let wrapped = format!("{MIGRATION_GUC_PREAMBLE}\n{sql}");
+    sqlx::raw_sql(AssertSqlSafe(wrapped))
         .execute(&mut *conn)
         .await?;
     Ok(())
@@ -164,6 +186,10 @@ async fn flush_pending(
     if !schema_history_exists(conn).await? {
         return Ok(());
     }
+    let mut tx = conn.begin().await?;
+    sqlx::raw_sql(MIGRATION_GUC_PREAMBLE)
+        .execute(&mut *tx)
+        .await?;
     for (crate_name, version) in pending.drain(..) {
         sqlx::query(
             r#"
@@ -175,9 +201,10 @@ async fn flush_pending(
         .bind(&crate_name)
         .bind(version)
         .bind(app_version)
-        .execute(&mut *conn)
+        .execute(&mut *tx)
         .await?;
     }
+    tx.commit().await?;
     Ok(())
 }
 
