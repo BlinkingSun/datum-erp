@@ -1,0 +1,101 @@
+# Wave 2b (remaining kernel crates) — rulings record
+
+Companion to `w2-rulings.md` and `w2s-rulings.md`. D-2b-1..9 were ratified by the decision authority on 2026-09-12 for `datum-esign`; the full text is promoted here verbatim.
+
+## D-2b-1 — The signature record
+
+Schema `esign`, class `app` (`CONTRACT:468`: no DELETE, no TRUNCATE, no CASCADE). Three tables:
+
+`esign.signature` (one row per signing, insert-only):
+`signature_id uuid PK` (= `SignatureId`, the nonce — `traits-profiles.md:212-215`) · `signer_id uuid NOT NULL REFERENCES identity.principal(id)` · `signer_printed_name text NOT NULL` (snapshot at mint; inv 15, `docs/05:363`; never a live join) · `signer_username text NOT NULL` (snapshot) · `meaning text NOT NULL` · `reason text NULL` · `signed_at timestamptz NOT NULL` (`now()`, server time, D3 §4; never a bound parameter) · `signed_at_zone text NOT NULL` (signer's IANA zone; 11.50(a)(2) + preamble 101, `docs/06:225-231`) · `record_table text NOT NULL` / `record_id uuid NOT NULL` / `record_version bigint NOT NULL` · `doc_type text NOT NULL` (display/manifestation only) · `record_content_hash bytea NOT NULL CHECK (octet_length = 32)` · `record_snapshot jsonb NOT NULL` (the canonical bytes hashed) · `permission_snapshot text[] NOT NULL` (effective set at mint) · `credential_kind text NOT NULL CHECK IN ('signing_password','idp_step_up')` · `components_used text[] NOT NULL` · `signing_session_id uuid NULL` · `login_session_id uuid NULL` · `source_device text NULL` / `source_ip inet NULL` · `expires_at timestamptz NOT NULL` · `consumed_at timestamptz NULL` · `consumed_xid xid8 NULL` · `application_version`/`configuration_version` (inv 17).
+Immutability: `datum_app` holds `SELECT, INSERT` and `UPDATE (consumed_at, consumed_xid)` only — a `BEFORE UPDATE` trigger refuses any other column change; no DELETE grant anywhere. `consumed_at` is the single mutable fact and it is monotone (NULL → once).
+
+`esign.meaning_policy` (`meaning PK, requires_reason bool, permission_hint text`) — the reason-text policy: a mint whose meaning has `requires_reason` and no `reason` is `VALIDATION`, mirroring `audit.reason_policy` (`audit.up.sql:91-94`) rather than duplicating it.
+`transient.signing_session` (class `transient`, DELETE allowed) — D-2b-3.
+
+**Audit link.** Exactly one audit row per signature, and nobody writes it: the `zz_audit_row` trigger attaches at `CREATE TABLE` and emits the `INSERT` on `esign.signature` (`docs/06:189-196`). The chain is the existing one — that row lands in `audit.event` (`audit.up.sql:45-79`) and its transaction is sealed into `audit.tx_seal` (`:106-117`). The consuming transition sets `datum.esign_id` from `WriteContext.esign_id` (`datum-db/src/lib.rs:45,123`), so every audit row of the transition carries `esign_id = signature_id` (`docs/10:297`) — that is the 11.70 technology link in the trail, and the content hash is the link on the record.
+
+**Rejected:** a `signatures` array column on the business record (excisable by an UPDATE, unqueryable, and it puts 11.70 in module hands); and a bespoke esign hash chain (a second chain to validate — `audit.tx_seal` already seals the signature row's transaction).
+
+## D-2b-2 — Manifestation read (11.50) — exact wire shape
+
+Extends `docs/10:275-297` verbatim and adds only what 11.50/preamble 101 force:
+
+```json
+{ "signature": {
+  "id": "01932c5a-…-e2", "signer_id": "01932c5a-…-0b", "printed_name": "M. Reyes",
+  "meaning": "Released", "reason": null,
+  "signed_at": "2026-03-14T15:02:11Z", "signed_at_zone": "America/New_York",
+  "signed_at_local": "2026-03-14T11:02:11-04:00",
+  "record": { "table": "sm.instance", "doc_type": "production.work_order",
+              "id": "01932c5a-…-06", "version": 3 },
+  "record_content_hash": "e3b0c442…b855",
+  "credential_kind": "signing_password", "components_used": ["code","secret"],
+  "superseded": false } }
+```
+
+`signed_at_local` is derived, not stored. The three 11.50(a) items are `printed_name`, `signed_at*`, `meaning` — all snapshots. **Rejected:** returning the live display name (preamble 102, `docs/06:263-265`).
+
+## D-2b-3 — Minting: two components, always; the relaxation is defined and off
+
+**Ruling: v1 ships `components = ["code","secret"]` on every signing.** D3 §9 (`:907-946`), `docs/06:273-280` and `docs/10:221` are not overturned — a session cookie on a shared work-centre tablet is not a component "designed to be used only by the individual", and tightening after a customer validates the loose behaviour invalidates their validation. What I *do* rule now is the shape the relaxation takes when a customer validates it, so enabling it is a flag and not a schema change:
+
+- **Key.** `[signature_gate_binding] continuous_session = "off" | "on"`, `idle_timeout_secs = 300`, `max_window_secs = 900` — sub-keys of frozen SPEC-profiles **key 4**, not a twelfth root key (D-W1-5, `traits-profiles.md:371-374`). Both shipped profiles carry `"off"`.
+- **"Continuous session" =** a `transient.signing_session` row `(id, principal_id, login_session_id, device_fingerprint, boot_epoch, opened_at, last_signed_at, closed_at, close_reason)`, opened by a full two-component signing. It is continuous while `now() < last_signed_at + idle_timeout_secs` **and** `now() < opened_at + max_window_secs` **and** `closed_at IS NULL`. It closes — recorded, never deleted before its `audit.log_event` — on logout, `login_session_id` change, device fingerprint or IP change, any failed signing attempt, a credential reset (`identity.credential_reset`), principal deactivation, a `boot_epoch` change, and any profile/config change.
+- **First signing in the window uses both components; a continuation uses the signing secret** — the component executable only by the individual. Never the code alone, never the session. `components_used` on the row is the evidence, so an inspector can tell the two apart per signature.
+- **State lives in `transient`**, because it is working state with no history (`CONTRACT:468`); the audited facts live on `esign.signature` and `audit.event`, which is where history belongs.
+
+**Separable credential, no server dependency.** esign calls `datum_identity::reauth_signing(tx, principal, secret)` (`session.rs:137-147`) → `verify_signing` (`credential.rs:67`), which reads `identity.signing_credential` — a different column family from `login_credential` (inv 14, `docs/05:362`). esign depends on identity (`PLAN.md:338`); `datum-server` only transports the request. Using the login secret at `identification.secret` is `VALIDATION`, not a fallback.
+
+**Token binding (D-W1-5 / D-W1-4).** `record_content_hash` = SHA-256 over the canonical JSONB of a module-registered projection of the business record **concatenated with** the `sm.instance` triple `(doc_type, doc_id, state, version)` read in the mint transaction. Both halves are needed: `sm.instance` is the version the executor checks (`exec.rs:170-180`), and it does not bump when the document body changes (`exec.rs:295-303`), so a body-only edit after minting must still refuse. The bytes hashed are stored in `record_snapshot`. `expires_at = signed_at + max_window_secs` (900 s default). Single use is **per signature** (`traits-profiles.md:219-228`), claimed inside the transition's transaction — see D-2b-4.
+
+**Rejected:** minting inside the transition (CONTRACT §6.3 "verify, never mint"); hashing only `sm.instance` (defeats 11.70); a token-nonce column (the uuid v7 `SignatureId` *is* the nonce).
+
+## D-2b-4 — How a synchronous gate claims a row inside the transition's Tx
+
+`SignatureGate::verify` is `&self`, synchronous, and takes no `Tx` (`signature.rs:132-137`) — frozen. The resolution is a **per-transaction prepared gate**, not a singleton: `esign::prepare(tx, token, doc) -> PreparedGate` is called by the composition root inside the transition's transaction, immediately before `Engine::transition` (`kernel.rs:354`). `prepare` does, in that Tx: `SELECT … FROM esign.signature WHERE signature_id = $1 FOR UPDATE`, then the claim `UPDATE … SET consumed_at = now(), consumed_xid = pg_current_xact_id() WHERE signature_id = $1 AND consumed_at IS NULL RETURNING`, then recomputes the content hash from the live projection. `PreparedGate::verify` is then a pure in-memory comparison that reports the **first** failure in the frozen order. Atomicity is exact: a refusal aborts the transition, the rollback un-claims the row, and a commit commits signature-claim + `sm.instance` + audit rows as one transaction. Concurrency is the row lock: the loser sees `consumed_at` set and gets `Consumed`.
+
+`bind_signature_gate` (`kernel.rs:631-635`) therefore returns a **factory**, not a gate: `GateBinding::NoSignatures` → the existing singleton; `GateBinding::DatumEsign` → the prepared-gate factory. **Rejected:** a task-local "current Tx" read inside a sync `verify` (`block_on` inside a runtime worker); claiming on a second connection (loses atomicity); amending core to an async `verify_in_tx` (the surface is frozen and thirteen lanes copied it).
+
+## D-2b-5 — What each frozen check reads, and its error
+
+| # | Check | Reads | Error on failure | Audited? |
+|---|---|---|---|---|
+| 0 | provider bound | the binding | `NoProvider` | silent (config, not misuse) |
+| 1 | row | `esign.signature` FOR UPDATE: exists; `expires_at > now()`; signer `PrincipalStatus::Active`; `token.signer` == `signer_id` | `Invalid("no such signature" \| "expired" \| "signer inactive" \| "signer mismatch")` | **yes** |
+| 2 | meaning | row `meaning` vs `required.meaning` (and vs `token.meaning`) | `MeaningMismatch` | **yes** |
+| 3 | reference | row `(record_table, record_id, record_version)` vs the executor's live `RecordRef` (`exec.rs:174-178`); v5 token at v6 is here | `RecordMismatch` | **yes** |
+| 4 | hashes | `token.record_content_hash` vs row vs the hash recomputed from the live projection in-Tx | `HashMismatch` | **yes** |
+| 5 | permission snapshot | `required.permission.0 ∈ permission_snapshot` (no live RBAC read — CONTRACT:405-408) | `SignerNotPermitted` | **yes** |
+| 6 | single-use claim | the conditional `UPDATE`'s row count | `Consumed` | **yes** |
+
+A missing token on a `Required` edge is `Invalid("missing token")` (`exec.rs:175`) — audited. Audited failures are written by the composition root **after** the rollback, on a fresh transaction, via `audit.log_event` (`audit.up.sql:340`) as security events, because rows written inside an aborted transaction do not survive (D3 §9: failed signing attempts are security events, not business audit rows). Silent: `NoProvider` and `Unimplemented` only — those are a misconfigured build, caught at startup, and per-attempt logging of them is a flood vector.
+
+## D-2b-6 — Profile binding
+
+The key is `[signature_gate_binding] gate` (`profile.rs:287-288`), values `"NoSignatures"` | `"datum-esign"` (`profile.rs:100-113`). Plain-shop keeps `gate = "NoSignatures"` (`plain-shop.toml:70-71`) and stays honest because it enables no `regulated = true` module (`plain-shop.toml:63-68`). Regulated-device flips to `gate = "datum-esign"` at 2b.1 (`regulated-device.toml:71-72`); the startup guard stands — any `Required` edge in the enabled set with `NoSignatures` bound fails at startup and CI asserts no release profile binds it (`kernel.rs:563`, `traits-profiles.md:371-374`).
+
+**A `Required` edge when esign is bound but the principal has no signing credential:** the transition is refused, never skipped. The refusal happens at **mint**, not at the gate — `POST /esign/signatures` returns 401 `SIGNATURE_REQUIRED` with `code = "SIGNATURE_REQUIRED"`, `field = "identification.secret"` (`docs/10:124-126`), and the attempt is an `audit.log_event` security event. With no token, the transition returns `Invalid("missing token")` → 401 `SIGNATURE_REQUIRED`. Seeding a role bundle that grants `calibration.approve` to a principal with no signing credential is therefore a configuration defect the first signing attempt surfaces loudly; esign does not mint a "credential-less" signature under any flag.
+
+## D-2b-7 — Revocation, expiry, supersession
+
+Deactivating a principal is a status change, never a delete (inv 13, `docs/06:236-242`). **Past signatures stay valid and stay readable**: manifestation renders from the snapshot columns, so it never joins a live principal row and never changes when the signer leaves. **Unconsumed** signatures of a deactivated principal refuse at check 1 (`Invalid("signer inactive")`), and their open signing sessions close with `close_reason = 'principal_deactivated'`. Expired unconsumed rows are **kept** with `consumed_at IS NULL` — nothing is deleted; expiry is read from `expires_at`, not from absence. A signature on a superseded version reads back unchanged with `"superseded": true` when the live `sm.instance.version > record_version`, plus `superseded_by_version`; the archival bundle always renders `record_snapshot`, never the live row — that is what makes a five-year-old DHR print reproduce.
+
+## D-2b-8 — Published API surface
+
+For `datum-print` (`PLAN.md:341`), reads through `ReadPool` (legitimate under `CONTRACT:201`):
+`esign::manifestation(&ReadPool, SignatureId) -> Result<Manifestation>` (the D-2b-2 struct) ·
+`esign::archival_bundle(&ReadPool, SignatureId) -> Result<ArchivalBundle { manifestation, record_snapshot: serde_json::Value, record_content_hash: [u8;32], audit_event_ids: Vec<Uuid>, seals: Vec<SealRef { seq, xid, hash, prev_hash, sealed_at }>, anchor: Option<AnchorRef> }>` ·
+`esign::verify_bundle(&ArchivalBundle) -> BundleVerification { hash_ok, chain_ok, anchored }` — pure, no database, so an exported bundle verifies on a separate machine (`docs/06:302-321`).
+
+For `datum-server` (shape only; the server implements transport, esign owns semantics):
+`POST /api/v1/esign/challenges` → `{ components_required: ["code","secret"] | ["secret"], signing_session_expires_at, credential_kind }` ·
+`POST /api/v1/esign/signatures` (Idempotency-Key) → the D-2b-2 body, per `docs/10:243-273` ·
+`GET /api/v1/esign/signatures/{id}` → manifestation · `GET …/{id}/bundle` → archival bundle, permission `esign.bundle.read`.
+Error codes are the frozen set (`docs/10:124`): `SIGNATURE_REQUIRED`, `SIGNATURE_NO_PROVIDER`, `VALIDATION`, `CONFLICT`. No new code is minted for `Consumed`/`HashMismatch` — both are 409 `CONFLICT` with a specific `message`, because a client must not branch on which misuse it committed.
+
+## D-2b-9 — Named tests SPEC-esign must require (both profiles unless noted)
+
+`two_component_first_signing_is_required` · `one_component_continuation_refused_when_relaxation_off` (v1 default; the positive `one_component_continuation_accepted_when_on` runs only with `continuous_session = "on"`) · `session_expiry_forces_two_components` (idle and max-window, two cases) · `signing_session_closes_on_device_change` · `token_is_single_use` · `concurrent_claim_one_wins_one_consumed` · `content_hash_mismatch_refuses` (body-only edit, instance version unchanged) · `meaning_mismatch_refuses` · `record_version_mismatch_refuses` · `permission_snapshot_not_live_rbac` (revoke after mint → still verifies; never held → `SignerNotPermitted`) · `transition_signature_and_audit_row_share_one_tx` (same `xid`, one `audit.tx_seal` row, `esign_id` on every audit row) · `refused_transition_rolls_back_the_claim` · `manifestation_wire_shape_is_exact` · `printed_name_is_a_snapshot_not_a_join` · `deactivated_signer_reads_back` (+ `deactivated_signer_cannot_consume_open_token`) · `superseded_version_reads_back_with_snapshot` · `signature_row_is_insert_only` (UPDATE of any column but `consumed_at` refused; no DELETE grant) · `login_secret_is_not_a_signing_component` · `failed_mint_is_a_security_event_not_a_business_row` · `required_edge_with_no_signing_credential_refuses_at_mint` · `plain_shop_binds_nosignatures_and_enables_no_regulated_module` · `regulated_device_startup_fails_if_required_meets_no_signatures` · `archival_bundle_verifies_offline` · `every_esign_table_is_audited` · `hash_and_secret_columns_are_redacted_in_audit` · `writes_go_through_tx` (the `CONTRACT:201` fence test) · `migrate_down_then_up` · `esign_tables_owned_by_datum_owner`.
+
+DECISION: Ratified as D-2b-1..9 — an insert-only `esign.signature` row carrying the printed-name/zone/permission/component snapshots and audited by the standard trigger into the existing seal chain, two identification components on every signing with the continuous-session relaxation fully specified but shipped `off` under SPEC-profiles key 4, a content hash binding the business projection *and* the `sm.instance` triple, and single use claimed by a per-transaction prepared gate inside the transition's own transaction so that the frozen synchronous `SignatureGate` never needs to change.

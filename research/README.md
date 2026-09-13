@@ -65,3 +65,4 @@ Decisions made during the foundation build (2026-09-12), promoted from the run's
 - `decisions/traits-profiles.md` — D-W1-3 (`PostingSink`, final text), D-W1-4 (`SignatureGate`, final text, total `SignatureDeclaration` on regulated edges), D-W1-5 (installation profiles: runtime enablement, module-owned signature requirements, the eleven `SPEC-profiles` keys).
 - `decisions/w2-rulings.md` — Wave 2 (kernel) rulings and adjudications, promoted at the Wave 2 close.
 - `decisions/w2s-rulings.md` — Wave 2s (module slices) rulings R-2s-1…
+- `decisions/w2b-rulings.md` — Wave 2b rulings D-2b-1…9 (datum-esign semantics)
