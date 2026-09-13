@@ -1,5 +1,7 @@
 # Wicket
 
+<p align="center"><img src="design/icon-wicket-512.png" width="160" alt="Wicket ERP icon"></p>
+
 Conforms to: [ADR 0003](docs/adr/0003-database.md) (Accepted, as amended), [ADR 0006](docs/adr/0006-license.md) (Accepted).
 
 ## 1. What this is
