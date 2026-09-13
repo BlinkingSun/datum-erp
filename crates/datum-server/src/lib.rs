@@ -25,7 +25,10 @@ mod read;
 mod session;
 mod wire;
 
-pub use boot::{App, AppState, build_kernel, migrate_slice_modules, run_iq, startup_guard_release};
+pub use boot::{
+    App, AppState, BootError, build_kernel, install_test_blob_root, migrate_slice_modules, run_iq,
+    startup_guard_release,
+};
 pub use config::{Config, bootstrap_against_app, rewrite_database, with_os_userinfo};
 pub use envelope::{ErrorBody, ListBody};
 pub use error::{Error, Result};

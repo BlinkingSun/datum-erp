@@ -11,7 +11,9 @@ use datum_db::{Tx, WriteContext, WritePool};
 use datum_documents::{BlobHash, BlobStore};
 use datum_module::Profile;
 use datum_print::{TemplateId, seed_templates, set_installation_profile};
+use datum_server::{App, Config, Error};
 use serde_json::{Value, json};
+use std::process::Command;
 use uuid::Uuid;
 
 fn profiles() -> [Profile; 2] {
@@ -366,4 +368,70 @@ async fn print_unauthenticated_is_401() {
         )
         .await;
     assert_eq!(st, StatusCode::UNAUTHORIZED, "{body}");
+}
+
+fn spawn_blob_root_child(kind: &str, blob_root: Option<&str>) {
+    let exe = std::env::current_exe().expect("current_exe");
+    let mut cmd = Command::new(&exe);
+    cmd.args(["boot_refuses_without_blob_root", "--exact", "--nocapture"]);
+    cmd.env("DATUM_TEST_CHILD", kind);
+    match blob_root {
+        Some(root) => {
+            cmd.env("DATUM_BLOB_ROOT", root);
+        }
+        None => {
+            cmd.env_remove("DATUM_BLOB_ROOT");
+        }
+    }
+    let out = cmd.output().expect("spawn child");
+    assert!(
+        out.status.success(),
+        "child {kind} failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+async fn assert_boot_refuses_both_profiles(needle: &str) {
+    for profile in profiles() {
+        let id = profile.id.as_str().to_string();
+        let cfg = Config {
+            profile,
+            bind: "127.0.0.1:0".parse().expect("bind"),
+            database_url: "postgres://127.0.0.1:1/none".into(),
+            migrate_url: "postgres://127.0.0.1:1/none".into(),
+            bootstrap_url: "postgres://127.0.0.1:1/none".into(),
+        };
+        let Err(err) = App::boot(cfg).await else {
+            panic!("App::boot must refuse without a usable DATUM_BLOB_ROOT (profile={id})");
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains(needle),
+            "profile={id} needle={needle:?} err={msg}"
+        );
+        assert!(
+            matches!(err, Error::Config(_)),
+            "profile={id} named configuration error, got {err:?}"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn boot_refuses_without_blob_root() {
+    match std::env::var("DATUM_TEST_CHILD").ok().as_deref() {
+        Some("missing") => {
+            assert_boot_refuses_both_profiles("DATUM_BLOB_ROOT is not set").await;
+        }
+        Some("notdir") => {
+            assert_boot_refuses_both_profiles("DATUM_BLOB_ROOT is not a writable directory").await;
+        }
+        _ => {
+            spawn_blob_root_child("missing", None);
+            let file = std::env::temp_dir().join(format!("datum-blob-not-dir-{}", Uuid::now_v7()));
+            std::fs::write(&file, b"not-a-dir").expect("notdir file");
+            spawn_blob_root_child("notdir", Some(file.to_str().expect("utf8 path")));
+            let _ = std::fs::remove_file(&file);
+        }
+    }
 }

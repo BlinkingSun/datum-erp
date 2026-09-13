@@ -1,7 +1,8 @@
 //! Kernel wiring: migrate in `CANONICAL_ORDER`, register modules, `Kernel::build`.
 
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
 
 use datum_core::{Identifier, ItemId};
 use datum_db::{Pool, Tx, WritePool};
@@ -18,6 +19,30 @@ use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::session;
 
+/// Process-start configuration failures. Both installation profiles require a
+/// writable [`DATUM_BLOB_ROOT`](FsBlobStore::from_env); boot never falls back
+/// to a temp directory.
+#[derive(Debug, thiserror::Error)]
+pub enum BootError {
+    /// `DATUM_BLOB_ROOT` is missing or empty.
+    #[error("DATUM_BLOB_ROOT is not set")]
+    BlobRootMissing,
+    /// `DATUM_BLOB_ROOT` names a path that is not a writable directory.
+    #[error("DATUM_BLOB_ROOT is not a writable directory ({path}): {message}")]
+    BlobRootNotWritable {
+        /// Configured path.
+        path: String,
+        /// OS error or reason.
+        message: String,
+    },
+}
+
+impl From<BootError> for Error {
+    fn from(err: BootError) -> Self {
+        Error::Config(err.to_string())
+    }
+}
+
 /// Assembled HTTP process.
 pub struct App {
     /// Composition root.
@@ -31,22 +56,60 @@ pub struct App {
     pub calibration_doc: Option<Identifier>,
     /// App-role URL (fresh pools for nested block_on).
     pub database_url: String,
+    blobs: FsBlobStore,
 }
 
-fn compose_blob_store() -> FsBlobStore {
+/// Test harness pin used by [`App::boot`] when `DATUM_BLOB_ROOT` is unset.
+/// Edition 2024 makes `env::set_var` unsafe; workspace lints forbid `unsafe`.
+static TEST_BLOB_ROOT: OnceLock<PathBuf> = OnceLock::new();
+
+/// Pin a blob root for tests that boot through [`App::boot`] (IQ) without
+/// mutating process environment. Does not override a set `DATUM_BLOB_ROOT`.
+pub fn install_test_blob_root(root: PathBuf) {
+    let _ = TEST_BLOB_ROOT.set(root);
+}
+
+fn blob_root_not_writable(path: &Path, message: impl std::fmt::Display) -> BootError {
+    BootError::BlobRootNotWritable {
+        path: path.display().to_string(),
+        message: message.to_string(),
+    }
+}
+
+fn open_writable_blob_root(root: &Path) -> Result<FsBlobStore> {
+    let meta = std::fs::metadata(root).map_err(|e| blob_root_not_writable(root, e))?;
+    if !meta.is_dir() {
+        return Err(blob_root_not_writable(root, "not a directory").into());
+    }
+    let probe = root.join(format!(".datum-write-probe-{}", Uuid::now_v7()));
+    std::fs::write(&probe, b"").map_err(|e| blob_root_not_writable(root, e))?;
+    let _ = std::fs::remove_file(&probe);
+    Ok(FsBlobStore::new(root))
+}
+
+/// Resolve the process blob store. Required on both installation profiles.
+/// Canonical name is `DATUM_BLOB_ROOT` ([`FsBlobStore::from_env`]); never a
+/// per-boot temp directory.
+fn compose_blob_store() -> Result<FsBlobStore> {
     match FsBlobStore::from_env() {
-        Ok(store) => store,
-        Err(_) => {
-            let root = std::env::temp_dir().join(format!("datum-blobs-{}", Uuid::now_v7()));
-            let _ = std::fs::create_dir_all(&root);
-            FsBlobStore::new(root)
+        Ok(store) => open_writable_blob_root(store.root()),
+        Err(datum_documents::Error::BlobRootMissing) => {
+            if let Some(root) = TEST_BLOB_ROOT.get() {
+                open_writable_blob_root(root)
+            } else {
+                Err(BootError::BlobRootMissing.into())
+            }
         }
+        Err(e) => Err(e.into()),
     }
 }
 
 impl App {
     /// Migrate, register, freeze, seed locations, record the boot row.
+    /// Requires a writable `DATUM_BLOB_ROOT` (both profiles) before any pool
+    /// is opened; never substitutes a temp directory.
     pub async fn boot(cfg: Config) -> Result<Self> {
+        let blobs = compose_blob_store()?;
         let migrate = datum_db::connect(&cfg.migrate_url).await?;
         let app_pool = datum_db::connect(&cfg.database_url).await?;
         let bootstrap = datum_db::connect(&cfg.bootstrap_url).await?;
@@ -57,6 +120,7 @@ impl App {
             &bootstrap,
             cfg.bind,
             cfg.database_url.clone(),
+            blobs,
         )
         .await?;
         bootstrap.close().await;
@@ -64,7 +128,7 @@ impl App {
         Ok(app)
     }
 
-    /// Boot against already-open pools (tests).
+    /// Boot against already-open pools (tests). `blobs` is the per-test root.
     pub async fn boot_pools(
         profile: Profile,
         app_pool: Pool,
@@ -72,6 +136,7 @@ impl App {
         bootstrap: &PgPool,
         bind: SocketAddr,
         database_url: String,
+        blobs: FsBlobStore,
     ) -> Result<Self> {
         // Same order as `install_upto(..., "datum-server")` / `install_slice`.
         // `install_privileged` stays up for the whole install (D-2b-11).
@@ -114,10 +179,11 @@ impl App {
             bind,
             calibration_doc,
             database_url,
+            blobs,
         })
     }
 
-    /// Shared state for axum.
+    /// Shared state for axum. Blob store was composed at boot.
     pub fn state(self) -> AppState {
         AppState {
             inner: Arc::new(AppInner {
@@ -126,7 +192,7 @@ impl App {
                 manifest_hash: self.manifest_hash,
                 calibration_doc: self.calibration_doc,
                 database_url: self.database_url,
-                blobs: Arc::new(compose_blob_store()),
+                blobs: Arc::new(self.blobs),
             }),
         }
     }
@@ -321,4 +387,100 @@ pub fn _calibration_machine_name() -> &'static str {
     let _ = core::any::type_name::<Machine>();
     let _ = core::any::type_name::<ItemId>();
     "calibration.certificate"
+}
+
+#[cfg(test)]
+mod blob_root_tests {
+    use super::*;
+    use std::process::Command;
+
+    fn spawn_child(kind: &str, blob_root: Option<&str>) {
+        let exe = std::env::current_exe().expect("current_exe");
+        let mut cmd = Command::new(&exe);
+        cmd.args(["boot_refuses_without_blob_root", "--exact", "--nocapture"]);
+        cmd.env("DATUM_TEST_CHILD", kind);
+        match blob_root {
+            Some(root) => {
+                cmd.env("DATUM_BLOB_ROOT", root);
+            }
+            None => {
+                cmd.env_remove("DATUM_BLOB_ROOT");
+            }
+        }
+        let out = cmd.output().expect("spawn child");
+        assert!(
+            out.status.success(),
+            "child {kind} failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn assert_named_config(err: &Error, needle: &str, profile: &str) {
+        let msg = err.to_string();
+        assert!(
+            msg.contains(needle),
+            "profile={profile} needle={needle:?} err={msg}"
+        );
+        assert!(
+            matches!(err, Error::Config(_)),
+            "profile={profile} expected BootError via Error::Config, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn boot_refuses_without_blob_root() {
+        match std::env::var("DATUM_TEST_CHILD").ok().as_deref() {
+            Some("missing") => {
+                for profile in [
+                    Profile::plain_shop().unwrap(),
+                    Profile::regulated_device().unwrap(),
+                ] {
+                    let id = profile.id.as_str().to_string();
+                    let err = compose_blob_store().expect_err("blob root required");
+                    assert_named_config(&err, "DATUM_BLOB_ROOT is not set", &id);
+                    let cfg = Config {
+                        profile,
+                        bind: "127.0.0.1:0".parse().expect("bind"),
+                        database_url: "postgres://127.0.0.1:1/none".into(),
+                        migrate_url: "postgres://127.0.0.1:1/none".into(),
+                        bootstrap_url: "postgres://127.0.0.1:1/none".into(),
+                    };
+                    let Err(err) = App::boot(cfg).await else {
+                        panic!("App::boot must refuse without blob root (profile={id})");
+                    };
+                    assert_named_config(&err, "DATUM_BLOB_ROOT is not set", &id);
+                }
+            }
+            Some("notdir") => {
+                for profile in [
+                    Profile::plain_shop().unwrap(),
+                    Profile::regulated_device().unwrap(),
+                ] {
+                    let id = profile.id.as_str().to_string();
+                    let err = compose_blob_store().expect_err("blob root not a directory");
+                    assert_named_config(&err, "DATUM_BLOB_ROOT is not a writable directory", &id);
+                    let cfg = Config {
+                        profile,
+                        bind: "127.0.0.1:0".parse().expect("bind"),
+                        database_url: "postgres://127.0.0.1:1/none".into(),
+                        migrate_url: "postgres://127.0.0.1:1/none".into(),
+                        bootstrap_url: "postgres://127.0.0.1:1/none".into(),
+                    };
+                    let Err(err) = App::boot(cfg).await else {
+                        panic!("App::boot must refuse a non-directory blob root (profile={id})");
+                    };
+                    assert_named_config(&err, "DATUM_BLOB_ROOT is not a writable directory", &id);
+                }
+            }
+            _ => {
+                spawn_child("missing", None);
+                let file =
+                    std::env::temp_dir().join(format!("datum-blob-not-dir-{}", Uuid::now_v7()));
+                std::fs::write(&file, b"not-a-dir").expect("notdir file");
+                spawn_child("notdir", Some(file.to_str().expect("utf8 path")));
+                let _ = std::fs::remove_file(&file);
+            }
+        }
+    }
 }
