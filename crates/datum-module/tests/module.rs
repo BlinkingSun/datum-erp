@@ -19,9 +19,9 @@ use datum_test::db_case;
 use datum_module::{
     CANONICAL_ORDER, CONTRACT_KERNEL_EDGES, CONTRACT_SLICE_EDGES, ConfigurationManifest,
     DELTA_ALLOWED, GateBinding, KERNEL_AUDIT_RELS, KERNEL_ORDER, Kernel, Profile, ProfileId,
-    SLICE_AUDIT_RELS, bind_signature_gate, compiled_in, delta_keys, disable, edges_from_registry,
-    enable, export_manifest, install, is_topological_sort, list_installed, load_kernel_defaults,
-    module_nodes, posting_sink, profile_does_not_rewrite_edges,
+    SLICE_AUDIT_RELS, SignatureEdge, bind_signature_gate, compiled_in, delta_keys, disable,
+    edges_from_registry, enable, export_manifest, install, is_topological_sort, list_installed,
+    load_kernel_defaults, module_nodes, posting_sink, profile_does_not_rewrite_edges,
     startup_fails_if_required_meets_no_signatures, topological_order, verify,
 };
 
@@ -142,6 +142,46 @@ fn plain_shop_required_signature_set_is_empty() {
         .unwrap()
         .with_registry_edges(edges_from_registry(&eng));
     assert!(live.required_edges().is_empty());
+}
+
+#[test]
+fn required_edge_permission_is_a_set_for_shared_meaning() {
+    let profile = Profile::plain_shop().unwrap().with_registry_edges(vec![
+        SignatureEdge::Required {
+            module: "document".into(),
+            edge: "approve".into(),
+            meaning: "Approved".into(),
+            permission: "documents.approve".into(),
+        },
+        SignatureEdge::Required {
+            module: "document".into(),
+            edge: "other".into(),
+            meaning: "Approved".into(),
+            permission: "documents.other".into(),
+        },
+        SignatureEdge::Required {
+            module: "calibration.certificate".into(),
+            edge: "approve".into(),
+            meaning: "Approved".into(),
+            permission: "calibration.approve".into(),
+        },
+    ]);
+    assert_eq!(
+        profile.required_edge_permission("document", "Approved"),
+        vec![
+            "documents.approve".to_string(),
+            "documents.other".to_string()
+        ]
+    );
+    assert_eq!(
+        profile.required_edge_permission("calibration.certificate", "Approved"),
+        vec!["calibration.approve".to_string()]
+    );
+    assert!(
+        profile
+            .required_edge_permission("document", "Released")
+            .is_empty()
+    );
 }
 
 #[test]
