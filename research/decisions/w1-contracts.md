@@ -146,7 +146,7 @@ authoring guide.
 >    minor scale is a settlement scale reached through `Money::settle` (D1 §2.5), never a
 >    storage scale — this is what reconciles item 1 with item 2's `numeric(24,6)` money
 >    column, and the document must not print both widths. The decision's §10 bar — slice
->    definitions, boundary matrix and §7 verbatim before any `datum-ledger` migration —
+>    definitions, boundary matrix and §7 verbatim before any `wicket-ledger` migration —
 >    stands, as amended.
 
 **Handed to Wave 2 ledger:** confirm D2 §5.4's deferred trigger has no literal scale or
@@ -159,7 +159,7 @@ did not read §5.4 and am not asserting it is clean.
 
 ### 2.1 The ruling
 
-`datum_app` holds `DELETE` on **schema `transient` only**. It holds no `DELETE` on
+`wicket_app` holds `DELETE` on **schema `transient` only**. It holds no `DELETE` on
 schema `app`, no `INSERT`/`UPDATE`/`DELETE` on schema `audit` (D3 §1.3 unchanged), and
 no `TRUNCATE` anywhere. The rule is expressed as **default privileges by schema class**,
 not per table.
@@ -212,28 +212,28 @@ CASCADE` stays banned in `transient` too.
 --   transient = working state with no history   -> DELETE allowed
 --   audit     = the trail                       -> SELECT only
 
-CREATE SCHEMA IF NOT EXISTS app       AUTHORIZATION datum_migrate;
-CREATE SCHEMA IF NOT EXISTS transient AUTHORIZATION datum_migrate;
-CREATE SCHEMA IF NOT EXISTS audit     AUTHORIZATION datum_migrate;
+CREATE SCHEMA IF NOT EXISTS app       AUTHORIZATION wicket_migrate;
+CREATE SCHEMA IF NOT EXISTS transient AUTHORIZATION wicket_migrate;
+CREATE SCHEMA IF NOT EXISTS audit     AUTHORIZATION wicket_migrate;
 
 REVOKE ALL   ON SCHEMA app, transient, audit FROM PUBLIC;
-GRANT  USAGE ON SCHEMA app, transient, audit TO   datum_app;
+GRANT  USAGE ON SCHEMA app, transient, audit TO   wicket_app;
 
 -- app: records with history. No DELETE. (PLAN §6b inv 16, D-W1-2)
-ALTER DEFAULT PRIVILEGES FOR ROLE datum_migrate IN SCHEMA app
-  GRANT SELECT, INSERT, UPDATE ON TABLES TO datum_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE wicket_migrate IN SCHEMA app
+  GRANT SELECT, INSERT, UPDATE ON TABLES TO wicket_app;
 
 -- transient: sessions, idempotency keys, job queue, projection caches. (D-W1-2)
-ALTER DEFAULT PRIVILEGES FOR ROLE datum_migrate IN SCHEMA transient
-  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO datum_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE wicket_migrate IN SCHEMA transient
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO wicket_app;
 
 -- audit: SELECT and nothing else, for every role. (audit-persistence §1.3)
-ALTER DEFAULT PRIVILEGES FOR ROLE datum_migrate IN SCHEMA audit
-  GRANT SELECT ON TABLES TO datum_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE wicket_migrate IN SCHEMA audit
+  GRANT SELECT ON TABLES TO wicket_app;
 
 -- sequences: draw, never set.
-ALTER DEFAULT PRIVILEGES FOR ROLE datum_migrate IN SCHEMA app, transient
-  GRANT USAGE ON SEQUENCES TO datum_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE wicket_migrate IN SCHEMA app, transient
+  GRANT USAGE ON SEQUENCES TO wicket_app;
 
 -- TRUNCATE appears in no GRANT above, in any schema, and PUBLIC holds nothing.
 -- The absence is deliberate: TRUNCATE fires no row trigger, so it would erase
@@ -241,16 +241,16 @@ ALTER DEFAULT PRIVILEGES FOR ROLE datum_migrate IN SCHEMA app, transient
 ```
 
 Production note: where D3 §1.1's five-role model is in force, tables are created by
-`datum_owner` — repeat each `ALTER DEFAULT PRIVILEGES` with `FOR ROLE datum_owner`, since
-default privileges key on the *creating* role and `datum_migrate`'s membership in
-`datum_owner` does not cover it.
+`wicket_owner` — repeat each `ALTER DEFAULT PRIVILEGES` with `FOR ROLE wicket_owner`, since
+default privileges key on the *creating* role and `wicket_migrate`'s membership in
+`wicket_owner` does not cover it.
 
 ### 2.5 Amended `PLAN.md` §6b invariant 16
 
 > 16. **No hard deletes of any record, and no cascade deletes.** A record — anything an
 >     audit trigger attests to, or that a history-bearing table references — is retired by
 >     state change, never by `DELETE`. This is a privilege fact, not a convention:
->     `datum_app` holds no `DELETE` on schema `app` and no `TRUNCATE` in any schema
+>     `wicket_app` holds no `DELETE` on schema `app` and no `TRUNCATE` in any schema
 >     (D-W1-2). Working state that carries no history — sessions, idempotency keys,
 >     completed job rows, projection caches — lives in schema `transient`, where `DELETE`
 >     is granted and expected; a table qualifies for `transient` only if it has no audit
@@ -261,9 +261,9 @@ default privileges key on the *creating* role and `datum_migrate`'s membership i
 
 ### 2.6 Wording of the harness test `grants_pattern_holds`
 
-> - `grants_pattern_holds`: as `datum_migrate`, create `audit.probe`, `app.probe` and
+> - `grants_pattern_holds`: as `wicket_migrate`, create `audit.probe`, `app.probe` and
 >   `transient.probe` inside a case schema triple, each with one seeded row. As
->   `datum_app` (second pool from a URL derived from `DATABASE_URL` with the app role),
+>   `wicket_app` (second pool from a URL derived from `DATABASE_URL` with the app role),
 >   assert: on `audit.probe`, `SELECT` succeeds and `INSERT` is refused; on `app.probe`,
 >   `SELECT`, `INSERT` and `UPDATE` succeed and `DELETE` is refused; on
 >   `transient.probe`, `SELECT`, `INSERT`, `UPDATE` and `DELETE` all succeed; and
@@ -274,7 +274,7 @@ default privileges key on the *creating* role and `datum_migrate`'s membership i
 >   privileges reach tables that did not exist when the grant was written.
 
 Update `SPEC-harness.md` §`dev/sql` `02-grants.sql` accordingly (the file currently says
-`datum_app` never gets `DELETE` on application tables, which stays true and is now
+`wicket_app` never gets `DELETE` on application tables, which stays true and is now
 mechanised per schema), and the acceptance checkbox to:
 `grants_pattern_holds` proves SELECT-only on `audit`, no DELETE on `app`, DELETE
 permitted on `transient`, and no TRUNCATE anywhere — each by SQLSTATE.
@@ -288,4 +288,4 @@ P2, P3 and R1–R5 untouched. Q2 adds one schema and one membership rule, and re
 `DELETE` grant that D3's own SQL never issued.
 
 DECISION D-W1-1: `ledger.posting.amount` is `numeric(24,6)` and `unit_cost_applied` is `numeric(24,8)`, matching D1 §2.5's `MONEY_MAX_SCALE = 6` and `RATE_MAX_SCALE = 8`, with P2 value conservation asserted exactly at that stored scale — a currency's minor unit is a settlement scale reached through `Money::settle`, never a storage scale, because a column narrower than the type it stores is an unnamed rounding site that would make P2 fail intermittently on groups the kernel computed as balanced.
-DECISION D-W1-2: `datum_app` holds `DELETE` on schema `transient` only (sessions, idempotency keys, job rows, projection caches) and never on schema `app` or `audit`, and holds `TRUNCATE` nowhere — expressed as default privileges by schema class so the rule binds tables that do not exist yet, with invariant 16 amended to prohibit hard deletion of *records* rather than the `DELETE` verb, and `ON DELETE CASCADE` still banned in every schema.
+DECISION D-W1-2: `wicket_app` holds `DELETE` on schema `transient` only (sessions, idempotency keys, job rows, projection caches) and never on schema `app` or `audit`, and holds `TRUNCATE` nowhere — expressed as default privileges by schema class so the rule binds tables that do not exist yet, with invariant 16 amended to prohibit hard deletion of *records* rather than the `DELETE` verb, and `ON DELETE CASCADE` still banned in every schema.

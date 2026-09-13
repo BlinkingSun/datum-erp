@@ -9,7 +9,7 @@
 
 ## Executive verdict
 
-PLAN §7 names “property tests on `datum-ledger`” as the highest-value test in the project and then **stops**. Architecture §9 repeats the slogan (“groups sum to zero, projections equal the ledger sum”) and defers “specifics to a later document.” That later document does not exist. **This is a missing acceptance criterion, not a testing-style preference.** A Wave 2 lane that ships `proptest` over `Vec<i32>` and asserts `group.iter().map(|p| p.qty).sum() == 0` will be green, will not catch a BOM completion, and will not be the test the architecture is betting the company on.
+PLAN §7 names “property tests on `wicket-ledger`” as the highest-value test in the project and then **stops**. Architecture §9 repeats the slogan (“groups sum to zero, projections equal the ledger sum”) and defers “specifics to a later document.” That later document does not exist. **This is a missing acceptance criterion, not a testing-style preference.** A Wave 2 lane that ships `proptest` over `Vec<i32>` and asserts `group.iter().map(|p| p.qty).sum() == 0` will be green, will not catch a BOM completion, and will not be the test the architecture is betting the company on.
 
 What a property test on this ledger **actually** asserts is a **state-machine lockstep** against a pure model:
 
@@ -53,7 +53,7 @@ Slice 1’s forcing case: one `group_id`, one `SUM(quantity)` across a WO comple
 | `WIP` (per work order) | Issue to job; residual after close is variance, moved to `VARIANCE` or `SCRAP` |
 | `PRODUCTION` | Finished-good completion (the manufactured analog of `SUPPLIER`) |
 
-**Canonical UoM (slice 1 + 5):** convert in `datum-uom` **before** insert. The SQL trigger never adds feet to inches. Mixed-UoM rows in one `(group, item)` must fail (either at the engine or as two unbalanced slices at COMMIT).
+**Canonical UoM (slice 1 + 5):** convert in `wicket-uom` **before** insert. The SQL trigger never adds feet to inches. Mixed-UoM rows in one `(group, item)` must fail (either at the engine or as two unbalanced slices at COMMIT).
 
 **PLAN amendment (one sentence to paste into §6.2 / ADR 0004):**
 
@@ -63,7 +63,7 @@ Until that sentence is in the ADR, the “highest-value test” has nothing true
 
 ---
 
-## 2. Acceptance criteria (paste into `datum-ledger` SPEC)
+## 2. Acceptance criteria (paste into `wicket-ledger` SPEC)
 
 Copy from here through the end of §2. Numbered so an audit can fail a lane by AC id.
 
@@ -385,7 +385,7 @@ Document this in the test module. If the team uses `proptest-state-machine` with
 |------|----------------|--------|
 | **Zero qty** | Silent no-op groups, empty-looking commits | X1 named reject; `nonzero_qty()` never 0 |
 | **`Decimal` max / high scale** | `numeric(24,8)` overflow; `SUM` ≠ 0 by rounding; rust_decimal vs PG `numeric` | Extremal **shard**; default strategy stays in `1..=500` plus `1e-8` and `1/3` |
-| **UoM conversion loss** | `10 FT` received, `36 IN` issued, `convert` rounds; `A→B→A` not identity (primer §9.2) | Engine posts **stocking UoM only**. Property: leftover vs `convert(issue)` is either 0 or posted to a documented remainder policy. `1/3` in the qty strategy. Conversion tests **live in `datum-uom`**, not as golden costing here; ledger only asserts “no mixed uom in a slice” |
+| **UoM conversion loss** | `10 FT` received, `36 IN` issued, `convert` rounds; `A→B→A` not identity (primer §9.2) | Engine posts **stocking UoM only**. Property: leftover vs `convert(issue)` is either 0 or posted to a documented remainder policy. `1/3` in the qty strategy. Conversion tests **live in `wicket-uom`**, not as golden costing here; ledger only asserts “no mixed uom in a slice” |
 | **Dual-unit catch-weight** | Serial qty=1 each **and** a unique kg; one `quantity` column cannot conserve both | **Out of kernel v1 unless opus says otherwise.** X: posting with two measures in one row rejected. Optional weight is an attribute, not a conservation key (slice 1: designable). Do not generate catch-weight as a balanced pair of unlike dimensions |
 | **Serial qty ≠ 1** | Breaks “a serial is a unit” and genealogy cardinality | X5; generator for serialized grains only emits `1` |
 | **Empty group** | `COMMIT` with zero rows: trigger never fires (FOR EACH ROW), **unbalanced-empty succeeds** — this is a real hole in a row-level constraint trigger | X2: engine refuses empty commit **in application code**; add a deferred **statement-level** guard or a group header row that the trigger checks. **PLAN gap:** slice 1’s trigger does not catch empty groups. Property test must include this or the hole ships |
@@ -393,7 +393,7 @@ Document this in the test module. If the team uses `proptest-state-machine` with
 | **Reasonless adjustment** | 21 CFR 11.10(e) “why”; ADR 0004 “reason required” | X4; `Adjust`/`CycleCount` constructors take `ReasonCode` newtype (`std::convert::TryFrom<&str>` fails on empty) |
 | **WIP residual as variance** | Completion of FG does **not** empty component WIP. Variance is leftover **qty at WIP(wo)**, moved on `CloseWO` | Generator includes `CompleteWO` without `CloseWO` (WIP residual remains — AC-P2) and with `CloseWO` (WIP(wo) all zero — AC). Do not “balance” leftover by cooking FG qty |
 | **Backflush of phantoms** | Phantom is not stocked; explosion must skip it | Explicit BOM with one phantom between FG and a buy item; assert **no posting row with the phantom `item_id`** |
-| **Period-close freeze** | ERPNext freezes stock by date; Datum has **no GL** (ADR 0007) | **Out of scope.** Do not generate. Note in SPEC as a future hook, not a ledger invariant |
+| **Period-close freeze** | ERPNext freezes stock by date; Wicket has **no GL** (ADR 0007) | **Out of scope.** Do not generate. Note in SPEC as a future hook, not a ledger invariant |
 | **Hook extra postings** | docs/03 §3.2: hook may contribute to the **same** group | `HookContribute` attached to an op; group still per-slice zero; hook-unbalanced pair fails the whole business transaction |
 | **Multi-ledger one group** | WO complete posts inventory + cost together | `CompleteWO` may include a `CostPair` in the same `group_id`; each ledger slices independently (slice 1: fatal if one scalar) |
 | **Negative on-hand** | Not a group-balance bug (slice 1) | `WellFormed` allows; `Physical` does not. Policy flag, not a constraint trigger |
@@ -414,7 +414,7 @@ Document this in the test module. If the team uses `proptest-state-machine` with
 | **In-memory `FakeLedger`** | AC-P1 (engine assembler), P2, P3, P4, P7 graph, shrinker, generator sanity | Deferred PG trigger, grants, `posted_at` default, isolation, numeric(24,8) vs Decimal |
 | **Real PostgreSQL** | All of the above **plus** P1-at-COMMIT, P5, P6, P8 | Nothing — this is the compliance surface |
 
-**A fake that reimplements `SUM == 0` tests the fake.** Because ADR 0004’s entire claim is *database-enforced* balance, the **default `cargo test -p datum-ledger` must hit Postgres for P1/P5/P6.** In-memory is the fast inner loop and the shrinker playground.
+**A fake that reimplements `SUM == 0` tests the fake.** Because ADR 0004’s entire claim is *database-enforced* balance, the **default `cargo test -p wicket-ledger` must hit Postgres for P1/P5/P6.** In-memory is the fast inner loop and the shrinker playground.
 
 **Do not** use one container per proptest case. Startup would blow the time cap by itself.
 
@@ -449,11 +449,11 @@ Assumptions: shared Postgres, migrate **once** per process, `TRUNCATE` ~2–5 ms
 | Extremal Decimal + 20-row groups | 64 | 20 | | **20–40 s** |
 | **Naive worst:** 1024 cases × 50 ops × every-prefix rebuild × migrate-per-case | | | | **>15 min, often >30** |
 
-**Will default `cargo test -p datum-ledger` exceed 10 minutes?**  
+**Will default `cargo test -p wicket-ledger` exceed 10 minutes?**  
 **Yes, if** P2-every-prefix + P3-every-prefix + P8 + 256 PG cases share one command.  
 **No, if** the default target is the **fast set** below.
 
-**Default `cargo test -p datum-ledger` (must stay < 10 min, target < 2 min):**
+**Default `cargo test -p wicket-ledger` (must stay < 10 min, target < 2 min):**
 
 - All unit tests
 - In-memory proptest 256 cases, every-prefix P1–P4, P7
@@ -479,31 +479,31 @@ Tags (so shards are `cargo test --features pg -- --ignored slice_inventory` etc.
 
 `slice_inventory`, `slice_cost`, `multi_item_wo`, `mixed_uom_forbidden`, `physical`, `well_formed`, `genealogy`, `reverse`, `grants`, `concurrency`, `extremal`.
 
-**Rebuild-at-10M-rows** is a **benchmark / soak**, not a property case. Architecture §7: 10M rebuild < 10 min. That is a gated bench in `dev/` or `crates/datum-ledger/benches`, **not** `cargo test`. Putting it in the property suite guarantees a cap violation.
+**Rebuild-at-10M-rows** is a **benchmark / soak**, not a property case. Architecture §7: 10M rebuild < 10 min. That is a gated bench in `dev/` or `crates/wicket-ledger/benches`, **not** `cargo test`. Putting it in the property suite guarantees a cap violation.
 
 ---
 
 ## 8. EXECUTOR / SPLIT / TIER
 
-Protocol: *test/gate code always splits off the algorithm lane.* PLAN currently gives **one** crate directory `datum-ledger` to one Wave 2 lane. That collides with exclusive crate ownership **and** with the split rule.
+Protocol: *test/gate code always splits off the algorithm lane.* PLAN currently gives **one** crate directory `wicket-ledger` to one Wave 2 lane. That collides with exclusive crate ownership **and** with the split rule.
 
 ### Recommended split
 
 | Lane | Owns (exclusive) | Provider | Notes |
 |------|------------------|----------|--------|
-| `ledger-engine` | `crates/datum-ledger/src/**`, `migrations/**`, unit tests of the assembler | **cursor** (slice 1) or 1:1 with grok; **blind-race** after the slice keys are frozen (risky: Wave 2 does not close until this passes) | Algorithm, SQL trigger, projection, reverse, group header |
-| `ledger-proptest` | `crates/datum-ledger/tests/**` **or** (cleaner) `crates/datum-ledger-proptest/` | **the other family** (grok if engine is cursor) | Generator, model, ACs, PG harness, shards |
+| `ledger-engine` | `crates/wicket-ledger/src/**`, `migrations/**`, unit tests of the assembler | **cursor** (slice 1) or 1:1 with grok; **blind-race** after the slice keys are frozen (risky: Wave 2 does not close until this passes) | Algorithm, SQL trigger, projection, reverse, group header |
+| `ledger-proptest` | `crates/wicket-ledger/tests/**` **or** (cleaner) `crates/wicket-ledger-proptest/` | **the other family** (grok if engine is cursor) | Generator, model, ACs, PG harness, shards |
 | `spike-ledger-constraint` | `_team/reports/spike-ledger-constraint.md` + throwaway SQL | cursor | slice 1 already asked; **include empty-group trigger hole** |
-| `spike-ledger-proptest` | failing harness + this SPEC copied into `crates/datum-ledger/SPEC.md` | grok | Wave 1 optional — see §9 |
+| `spike-ledger-proptest` | failing harness + this SPEC copied into `crates/wicket-ledger/SPEC.md` | grok | Wave 1 optional — see §9 |
 
 **Do not** put costing/MRP goldens on either lane.
 
-**If PLAN will not add a crate:** amend Wave 2 law to “crate directory is exclusive **except** `tests/` which is a second lane.” File-level split is enough for worktrees if both branch from Wave 1 stubs and do not touch `Cargo.toml` members. A separate crate is still cleaner (`datum-ledger-proptest` as a workspace `dev-only` member or `[[test]]` package).
+**If PLAN will not add a crate:** amend Wave 2 law to “crate directory is exclusive **except** `tests/` which is a second lane.” File-level split is enough for worktrees if both branch from Wave 1 stubs and do not touch `Cargo.toml` members. A separate crate is still cleaner (`wicket-ledger-proptest` as a workspace `dev-only` member or `[[test]]` package).
 
 **Serial vs parallel:**  
 - Stubs freeze `Ledger::commit`, `project`, `rebuild`, `reverse`, posting types in Wave 1.  
 - Then **parallel**: engine implements, proptest writes tests against the stub signatures.  
-- Merge risk: API drift. Mitigate by putting the signatures in `datum-ledger/src/api.rs` **owned by engine**, tests compile against public API only. Proptest lane **may not** change public types; it files an escalation.
+- Merge risk: API drift. Mitigate by putting the signatures in `wicket-ledger/src/api.rs` **owned by engine**, tests compile against public API only. Proptest lane **may not** change public types; it files an escalation.
 
 **If stubs are `todo!()`:** proptest cannot even compile. That is slice 4’s problem. This slice’s requirement on Wave 1 stubs:
 
@@ -547,11 +547,11 @@ Workspace is already one human-equivalent doing toolchain, CI, compose, and ~15 
 
 1. Opus DECISION on slice keys (with slice 1/5).
 2. Wave 1 workspace stubs the four methods in §8 (real signatures, `unimplemented!()` bodies).
-3. **`spike-ledger-proptest`** (after stubs exist, still Wave 1 or Wave 1.5): lands `crates/datum-ledger/tests/proptest_ledger.rs` with:
+3. **`spike-ledger-proptest`** (after stubs exist, still Wave 1 or Wave 1.5): lands `crates/wicket-ledger/tests/proptest_ledger.rs` with:
    - `Model` + `Op` enum
    - `#[ignore]` or `#[should_panic]` / failing `proptest!` that `commit`s one Receipt and asserts P1
    - `sqlx` harness skipped if no `DATABASE_URL`
-   - this report’s AC list copied to `crates/datum-ledger/SPEC.md` (or `_team/specs/datum-ledger.md` if crate dir is not to be touched yet — **spike may write SPEC under `_team/` only** if product files stay frozen; then Wave 2 engine copies it in)
+   - this report’s AC list copied to `crates/wicket-ledger/SPEC.md` (or `_team/specs/wicket-ledger.md` if crate dir is not to be touched yet — **spike may write SPEC under `_team/` only** if product files stay frozen; then Wave 2 engine copies it in)
 4. Wave 2 `ledger-proptest` un-ignores and fills the generator; `ledger-engine` makes it green.
 
 A harness that is **red on purpose** is the only way PLAN’s “highest-value test” exists as an acceptance gate rather than a retrospective essay. Without it, Wave 2 will ship a constraint trigger and a handful of hand-written receipts and call the property-test box ticked.
@@ -564,7 +564,7 @@ If Wave 1 cannot spare a spike lane: **this file is the SPEC**. Exec-master must
 
 1. **§7 is not an acceptance criterion.** Replace the one-liner with a pointer to the ledger SPEC ACs (this §2).
 2. **§6.2 invariant is false as a scalar.** Use slice 1 / this report’s slice keys.
-3. **Wave 2 is one `datum-ledger` lane.** Split engine vs proptest (protocol + exclusive-ownership clash).
+3. **Wave 2 is one `wicket-ledger` lane.** Split engine vs proptest (protocol + exclusive-ownership clash).
 4. **Empty group hole** in a `FOR EACH ROW` deferred trigger — not in PLAN, not in ADR 0004.
 5. **Wave 1 CI Postgres** (`dev/docker-compose` + Actions `services`) is required before any ledger test runs; PLAN is silent (shared with slice 7).
 6. **`sqlx::test` rollback vs deferred triggers** — must be in the workspace/test-harness SPEC so Wave 2 does not “pass” tests that never COMMIT.
@@ -582,9 +582,9 @@ If Wave 1 cannot spare a spike lane: **this file is the SPEC**. Exec-master must
 | **VERDICT on PLAN §7** | **Revise** — missing AC, missing generator, missing shrink law, missing PG harness, missing split |
 | **EXECUTOR** | `ledger-engine`: cursor (or blind-race **after** opus freeze). `ledger-proptest`: grok (other family). **Not** the same agent. |
 | **Opus DECISION first?** | **Yes** — slice keys, empty-group header, UoM normalize, cost grain, catch-weight, isolation |
-| **SPLIT** | engine `src/`+migrations ‖ proptest `tests/` (or `datum-ledger-proptest` crate) ‖ conc shard ‖ 10M bench. **Serial** only if stubs do not freeze the API |
+| **SPLIT** | engine `src/`+migrations ‖ proptest `tests/` (or `wicket-ledger-proptest` crate) ‖ conc shard ‖ 10M bench. **Serial** only if stubs do not freeze the API |
 | **TIER** | **deep** + `audit.double: true` on both ledger lanes |
-| **SHARD** | §7.4 — default `cargo test -p datum-ledger` = fast set (<2 min target). Full gate = 4–6 `gates-shard-ledger-*` bins. 10M rebuild is **not** a test shard |
+| **SHARD** | §7.4 — default `cargo test -p wicket-ledger` = fast set (<2 min target). Full gate = 4–6 `gates-shard-ledger-*` bins. 10M rebuild is **not** a test shard |
 | **Wave 1 failing harness?** | **Yes**, as `spike-ledger-proptest` after stub API exists; **not** inside the workspace lane |
 | **Do not** | Dump costing/MRP goldens on the ledger lane |
 

@@ -6,9 +6,9 @@ machines, documents); `docs/04-module-catalog.md` Phase 0; ADRs 0001–0005, 000
 
 **Verdict: REVISE before Wave 2 fan-out.** The declared graph is a DAG. It is not
 the graph Wave 2 will be allowed to keep. The first demanded edge is
-`datum-documents → datum-statemachine`. The hypothesized `datum-ledger →
-datum-identity` is a false alarm if `Actor` stays a core newtype. The hypothesized
-`datum-statemachine → datum-ledger` is the first *cycle* risk, not the first
+`wicket-documents → wicket-statemachine`. The hypothesized `wicket-ledger →
+wicket-identity` is a false alarm if `Actor` stays a core newtype. The hypothesized
+`wicket-statemachine → wicket-ledger` is the first *cycle* risk, not the first
 *edge*, and must be inverted with a trait — events cannot substitute, because
 events are async and hooks must post in the originating transaction.
 
@@ -16,7 +16,7 @@ events are async and hooks must post in the originating transaction.
 
 ## 1. Demanded-first edge
 
-**`datum-documents → datum-statemachine`.** Add it now (amend PLAN §5).
+**`wicket-documents → wicket-statemachine`.** Add it now (amend PLAN §5).
 
 Why this one, not the two the charter hypothesized:
 
@@ -28,8 +28,8 @@ Why this one, not the two the charter hypothesized:
    ("Rather than reimplementing that per module, the kernel provides a
    declarative engine, which also means transitions are uniformly audited and
    uniformly signable").
-2. `datum-documents` is declared to depend on `core db audit identity esign` and
-   **not** on `datum-statemachine`. The documents lane therefore cannot implement
+2. `wicket-documents` is declared to depend on `core db audit identity esign` and
+   **not** on `wicket-statemachine`. The documents lane therefore cannot implement
    its own acceptance criteria without either reinventing the SM engine
    (forbidden by the kernel rationale) or escalating for the missing edge.
    That escalation happens on day one of the documents lane, in Wave 2, against
@@ -40,7 +40,7 @@ Why this one, not the two the charter hypothesized:
    crate.
 
 Close second, also missing, also demanded in the same lane:
-**`datum-documents → datum-numbering`**. Gap-free sequences exist specifically
+**`wicket-documents → wicket-numbering`**. Gap-free sequences exist specifically
 for document types (`docs/02` §2, Phase 0 "Numbering"). A documents crate that
 inserts numbered revisions will call the allocator inside the same transaction
 as the insert. That is a real edge. It is not first because a documents
@@ -51,9 +51,9 @@ sequence.
 
 ## 2. The two hypothesized edges, resolved
 
-### 2.1 Will `datum-ledger` need `datum-identity`?
+### 2.1 Will `wicket-ledger` need `wicket-identity`?
 
-**No. Do not add the edge. Invert it: `Actor` is already in `datum-core`
+**No. Do not add the edge. Invert it: `Actor` is already in `wicket-core`
 (PLAN §5).** `posted_by` is attribution, not RBAC.
 
 Evidence:
@@ -70,13 +70,13 @@ Evidence:
 - `docs/02` §8: "Role-based access control at the level of **permission, not
   table**. Permissions are declared by modules and composed into roles."
   Authorization lives at the command/API boundary, which is a module or
-  `datum-server` concern. A hook contributing a posting (`docs/03` §3.2) is
+  `wicket-server` concern. A hook contributing a posting (`docs/03` §3.2) is
   already inside a trusted transaction; re-checking RBAC inside `ledger.post`
   would be a layering bug and would force every sink call to carry a session.
 
 If an implementer types `posted_by: identity::UserId` and joins users at
 write time, the edge appears. That is the implementer being wrong, not the
-docs implying it. Freeze in the crate contract: `posted_by: datum_core::Actor`.
+docs implying it. Freeze in the crate contract: `posted_by: wicket_core::Actor`.
 Existence of that actor (user vs service principal, enabled vs disabled) is a
 database FK enforced at the composition root, or a `trait ActorDirectory` in
 core implemented by identity. It is not a Rust dependency from ledger to
@@ -86,17 +86,17 @@ Adding `ledger → identity` would **not even create a cycle** (identity does
 not depend on ledger). It would just drag sessions, RBAC, and OIDC into the
 crate PLAN §9 says everything else is waiting on. Refuse it.
 
-### 2.2 Will `datum-statemachine` need `datum-ledger`?
+### 2.2 Will `wicket-statemachine` need `wicket-ledger`?
 
 **The type dependency will be demanded. Adding the crate edge is how you
-get a cycle. Invert with a trait in `datum-core`. Do not use events.**
+get a cycle. Invert with a trait in `wicket-core`. Do not use events.**
 
 `docs/03` §3.2: a hook "runs synchronously inside the originating transaction and
 may veto" and **"may contribute postings to the same ledger group."**
 
 That sentence forces a posting sink to be visible to the hook invocation
-path. If `HookContext` lives in `datum-statemachine` and takes
-`datum_ledger::PostingDraft`, the crate edge `statemachine → ledger` is
+path. If `HookContext` lives in `wicket-statemachine` and takes
+`wicket_ledger::PostingDraft`, the crate edge `statemachine → ledger` is
 immediate.
 
 That edge, **by itself**, is still a DAG (ledger does not currently depend on
@@ -112,7 +112,7 @@ Correct inversion (keep acyclic, keep hooks transactional):
 trait PostingSink { fn contribute(&mut self, draft: PostingDraft) -> Result<()>; }
 ```
 
-lives in `datum-core` (or a tiny `datum-ledger-api` crate that ledger
+lives in `wicket-core` (or a tiny `wicket-ledger-api` crate that ledger
 implements and SM depends on — same idea, extra crate). The **command
 handler** (module / server) opens the ledger group **and** the SM
 transition, and passes `&mut dyn PostingSink` into the transition. SM does
@@ -140,23 +140,23 @@ Fifteen directories:
 
 | # | Crate | Declared deps |
 |---|---|---|
-| 1 | `datum-core` | none |
-| 2 | `datum-db` | core |
-| 3 | `datum-audit` | core db |
-| 4 | `datum-identity` | core db audit |
-| 5 | `datum-esign` | core db audit identity |
-| 6 | `datum-uom` | core db audit |
-| 7 | `datum-numbering` | core db |
-| 8 | `datum-events` | core db |
-| 9 | `datum-jobs` | core db events |
-| 10 | `datum-ledger` | core db audit uom |
-| 11 | `datum-statemachine` | core db audit identity esign |
-| 12 | `datum-documents` | core db audit identity esign |
-| 13 | `datum-customfields` | core db audit |
-| 14 | `datum-module` | core db + all of the above |
-| 15 | `datum-server` | everything |
+| 1 | `wicket-core` | none |
+| 2 | `wicket-db` | core |
+| 3 | `wicket-audit` | core db |
+| 4 | `wicket-identity` | core db audit |
+| 5 | `wicket-esign` | core db audit identity |
+| 6 | `wicket-uom` | core db audit |
+| 7 | `wicket-numbering` | core db |
+| 8 | `wicket-events` | core db |
+| 9 | `wicket-jobs` | core db events |
+| 10 | `wicket-ledger` | core db audit uom |
+| 11 | `wicket-statemachine` | core db audit identity esign |
+| 12 | `wicket-documents` | core db audit identity esign |
+| 13 | `wicket-customfields` | core db audit |
+| 14 | `wicket-module` | core db + all of the above |
+| 15 | `wicket-server` | everything |
 
-Kernel crates (not the binary): **14**. Binary: `datum-server`, owned by
+Kernel crates (not the binary): **14**. Binary: `wicket-server`, owned by
 Wave 3 (PLAN §3).
 
 ### Wave 2's thirteen lanes, listed
@@ -194,35 +194,35 @@ jobs, event bus, custom fields, reporting + print.
 
 | Count | What it is | Problem |
 |---|---|---|
-| 15 | PLAN §5 crate directories | includes `datum-server` (Wave 3) |
+| 15 | PLAN §5 crate directories | includes `wicket-server` (Wave 3) |
 | 14 | kernel crates (§5 minus server) | Wave 2 said 13 |
 | 13 | Phase 0 components / Wave 2 claim | does not match §5 |
-| 13 charitable | §5 minus server minus `datum-module` | module then has **no wave**; Wave 3 does not name it |
+| 13 charitable | §5 minus server minus `wicket-module` | module then has **no wave**; Wave 3 does not name it |
 | 12 | `docs/02` kernel box | omits module registry |
 
 **The number 13 is Phase 0's component count, not a crate-lane list.** It
-does not include `datum-core` or `datum-db` (substrate, not named as Phase 0
+does not include `wicket-core` or `wicket-db` (substrate, not named as Phase 0
 components). It does include **reporting + print**, which §5 does not have as
-a crate. It includes **module registry**, which §5 has as `datum-module` but
+a crate. It includes **module registry**, which §5 has as `wicket-module` but
 which cannot be a parallel lane (see §8).
 
 Charitable reading of "13 parallel Wave 2 lanes":
 
-1. `datum-core`
-2. `datum-db`
-3. `datum-audit`
-4. `datum-identity`
-5. `datum-esign`
-6. `datum-uom`
-7. `datum-numbering`
-8. `datum-events`
-9. `datum-jobs`
-10. `datum-ledger`
-11. `datum-statemachine`
-12. `datum-documents`
-13. `datum-customfields`
+1. `wicket-core`
+2. `wicket-db`
+3. `wicket-audit`
+4. `wicket-identity`
+5. `wicket-esign`
+6. `wicket-uom`
+7. `wicket-numbering`
+8. `wicket-events`
+9. `wicket-jobs`
+10. `wicket-ledger`
+11. `wicket-statemachine`
+12. `wicket-documents`
+13. `wicket-customfields`
 
-Then `datum-module` is an unlisted Wave 2.5 serial lane, `datum-server` is
+Then `wicket-module` is an unlisted Wave 2.5 serial lane, `wicket-server` is
 Wave 3, and **reporting + print is simply dropped.**
 
 That is the least-bad parse, and PLAN does not say it. **Amend PLAN §3 to
@@ -237,12 +237,12 @@ Present in `docs/02` §1–2 and Phase 0, **absent from PLAN §5:**
 
 | Capability | In kernel list? | In crate graph? | Call |
 |---|---|---|---|
-| reporting + print | yes (`docs/02` box; Phase 0 size M) | **no crate** | Missing. Kernel-rule in `docs/02` §2: if it cannot be retrofitted, it is kernel. Modules that each roll their own PDF will not archive identically and will not share travelers/labels/certificates. Add `datum-print` (core, db, audit, documents) or explicitly demote it with a new ADR that says print *can* be retrofitted. Silence is a PLAN bug. |
-| event bus | yes | `datum-events` | Present |
-| background jobs | yes | `datum-jobs` | Present |
-| module registry | Phase 0; `docs/03` §6 | `datum-module` | Present as a crate, but placed in the wrong wave shape (depends on all) |
+| reporting + print | yes (`docs/02` box; Phase 0 size M) | **no crate** | Missing. Kernel-rule in `docs/02` §2: if it cannot be retrofitted, it is kernel. Modules that each roll their own PDF will not archive identically and will not share travelers/labels/certificates. Add `wicket-print` (core, db, audit, documents) or explicitly demote it with a new ADR that says print *can* be retrofitted. Silence is a PLAN bug. |
+| event bus | yes | `wicket-events` | Present |
+| background jobs | yes | `wicket-jobs` | Present |
+| module registry | Phase 0; `docs/03` §6 | `wicket-module` | Present as a crate, but placed in the wrong wave shape (depends on all) |
 
-`datum-core` and `datum-db` are extra relative to Phase 0. That is correct.
+`wicket-core` and `wicket-db` are extra relative to Phase 0. That is correct.
 They are substrate. They still need Wave 2 *implementation* lanes; Wave 1 only
 ships stubs (PLAN §3, §9).
 
@@ -278,7 +278,7 @@ gap-free human numbers. Source documents do.
 Do not add `statemachine → numbering`.** Composition (module/server) is
 what allocates a number *and* posts *and* transitions in one txn.
 
-### 5.2 `datum-jobs` → `datum-identity`?
+### 5.2 `wicket-jobs` → `wicket-identity`?
 
 ADR 0005 / PLAN invariant 5: jobs "run as a named service principal."
 Declared deps: `core db events`. No identity.
@@ -293,7 +293,7 @@ edge will be demanded and should be refused. The job payload may include
 "the user who requested this run" as an `Actor` for audit context, still
 without importing identity.
 
-### 5.3 `datum-uom` vs items (cycle across the kernel/module line)
+### 5.3 `wicket-uom` vs items (cycle across the kernel/module line)
 
 `docs/02` §2: "Item-specific conversions with explicit precision and rounding
 rules. Kernel-level because a conversion bug in a module silently corrupts
@@ -309,7 +309,7 @@ conversions (in ↔ mm, and rounding/precision) live in kernel tables keyed by
 `(from_unit, to_unit)`, not by item. Item-specific conversions (1 bar of
 heat X = Y lb; stocking vs purchasing UoM) are **data supplied by the
 items module** through a kernel interface (`ConversionTable` / dimension
-key). `datum-uom` never names an item.
+key). `wicket-uom` never names an item.
 
 Declared `uom` deps (`core db audit`) are fine. **Do not add `uom → items`.
 That is a cycle** (items depends on kernel, which includes uom).
@@ -331,7 +331,7 @@ Not two crates. Not a GL.
 - Phase 1 `valuation`: "Cost layers on the inventory ledger." Module, not
   kernel crate. Same posting machinery, extra dimensions (cost element, layer).
 - ADR 0007: do **not** build a general ledger. Operational cost/labor ledgers
-  are not a GL. `gl-export` is Phase 7. Do not add `datum-gl`.
+  are not a GL. `gl-export` is Phase 7. Do not add `wicket-gl`.
 
 Two crates would duplicate group identity, deferred zero-sum, projections,
 rebuild, and property tests. Valuation sitting on a second crate would
@@ -340,12 +340,12 @@ violate ADR 0004's "same structure" consequence.
 ### 5.5 Numbering / events / jobs missing `audit`
 
 PLAN invariant 3+5 and ADR 0005: every mutation is attributable and audit is
-produced by persistence. Yet `datum-numbering`, `datum-events`, `datum-jobs`
-do not depend on `datum-audit`.
+produced by persistence. Yet `wicket-numbering`, `wicket-events`, `wicket-jobs`
+do not depend on `wicket-audit`.
 
 Two consistent stories, PLAN tells neither:
 
-1. **`datum-db` always audits** (persistence layer = db crate). Then listing
+1. **`wicket-db` always audits** (persistence layer = db crate). Then listing
    `audit` on identity/ledger/uom/SM/documents/customfields is for *query*
    APIs or `Audited` traits, and numbering's omission is fine. Then say so.
 2. **Callers must depend on audit to write.** Then numbering (gap-free
@@ -381,7 +381,7 @@ core
 | Cycle | How it forms | Prevention |
 |---|---|---|
 | **SM ↔ ledger** | Hook context takes ledger types **and** posting completion transitions source documents | Trait `PostingSink` in core; handler opens group + transition. **First cycle, if any.** |
-| **uom ↔ items** | Kernel conversion rows keyed by item_id; items module depends on kernel | Conversion tables as data; no item_id in `datum-uom` |
+| **uom ↔ items** | Kernel conversion rows keyed by item_id; items module depends on kernel | Conversion tables as data; no item_id in `wicket-uom` |
 | **documents ↔ SM** | Documents depend on SM (needed) **and** SM special-cases document rows | SM stays generic (machine id + record id + Actor). Documents *use* SM, SM does not import documents. Adding `documents → SM` is **not** a cycle. |
 | **\* → module → \*** | A kernel crate importing the registry (e.g. ledger asking "is valuation enabled?") | Module registry is a consumer of kernel crates, never a dependency of them. Feature flags at server composition. |
 | ledger → identity | **Not a cycle** (no reverse path). Still refuse; see §2.1 | `Actor` in core |
@@ -394,9 +394,9 @@ produces its audit entry as part of the same transaction").
 
 ---
 
-## 7. `datum-module` is not a Wave 2 parallel lane
+## 7. `wicket-module` is not a Wave 2 parallel lane
 
-Declared: `datum-module` depends on **all** kernel crates. Wave 2: every
+Declared: `wicket-module` depends on **all** kernel crates. Wave 2: every
 lane parallel from Wave 1 stubs.
 
 A registry that compiles against stubs can parse `module.toml`, write
@@ -407,17 +407,17 @@ in parallel, it will freeze a facade against stub signatures and then
 break when fourteen other crates land. PLAN §9's "stubs fix names" does not
 reach "stubs fix the module host."
 
-**Call: `datum-module` is serial Wave 2.5 (after the other kernel crates
+**Call: `wicket-module` is serial Wave 2.5 (after the other kernel crates
 merge), or it is split:**
 
-- `datum-module` (thin): manifest schema, installed-modules table, config
+- `wicket-module` (thin): manifest schema, installed-modules table, config
   manifest hash, enable/disable. Deps: `core db audit` only. **Can** be
   parallel.
-- Host / composition: lives in `datum-server` (Wave 3). That is the thing
+- Host / composition: lives in `wicket-server` (Wave 3). That is the thing
   that must depend on everyone.
 
-PLAN §3 Wave 3 names `datum-server`, Phase 1 modules, web shell, Tauri. It
-does not name `datum-module`. Today the crate is homeless if you take the
+PLAN §3 Wave 3 names `wicket-server`, Phase 1 modules, web shell, Tauri. It
+does not name `wicket-module`. Today the crate is homeless if you take the
 "13 = minus server minus module" reading, and wrongly parallel if you don't.
 
 ---
@@ -426,29 +426,29 @@ does not name `datum-module`. Today the crate is homeless if you take the
 
 1. **Name the Wave 2 lanes.** Stop saying "Thirteen lanes." List them.
    Recommended: the 13 charitable crates in §3, plus an explicit Wave 2.5
-   `datum-module`, plus Wave 3 `datum-server`. If print stays kernel, add
-   `datum-print` and say which wave.
-2. **Add `datum-documents → datum-statemachine`.** First demanded edge.
-3. **Add `datum-documents → datum-numbering`.**
-4. **Do not add `datum-ledger → datum-identity`.** Freeze `Actor` in core;
+   `wicket-module`, plus Wave 3 `wicket-server`. If print stays kernel, add
+   `wicket-print` and say which wave.
+2. **Add `wicket-documents → wicket-statemachine`.** First demanded edge.
+3. **Add `wicket-documents → wicket-numbering`.**
+4. **Do not add `wicket-ledger → wicket-identity`.** Freeze `Actor` in core;
    state that RBAC is not checked inside `ledger.post`.
-5. **Do not add `datum-statemachine → datum-ledger`.** Put `PostingSink`
+5. **Do not add `wicket-statemachine → wicket-ledger`.** Put `PostingSink`
    (and `PostingDraft` with core-only types: `Actor`, `Quantity`, dimension
-   newtypes) in `datum-core`. Document that events cannot carry hook
+   newtypes) in `wicket-core`. Document that events cannot carry hook
    postings.
-6. **Do not add `datum-jobs → datum-identity`.** Construct jobs with `Actor`.
-7. **Do not add `datum-uom → items`.** Charter: no `item_id` in kernel UoM.
+6. **Do not add `wicket-jobs → wicket-identity`.** Construct jobs with `Actor`.
+7. **Do not add `wicket-uom → items`.** Charter: no `item_id` in kernel UoM.
 8. **One ledger crate**, enum `inventory | cost | labor`. Valuation is Phase 1
-   module. No `datum-gl` (ADR 0007).
-9. **`datum-module`:** split thin registry vs server host, **or** move the
+   module. No `wicket-gl` (ADR 0007).
+9. **`wicket-module`:** split thin registry vs server host, **or** move the
    whole crate to serial after kernel crates. It cannot be parallel-and-real.
-10. **Reporting + print:** add `datum-print` to §5 or write the retrofit
+10. **Reporting + print:** add `wicket-print` to §5 or write the retrofit
     exception. `docs/02` currently forbids the exception.
 11. **Audit dependency rule:** one sentence. Either db auto-audits (and
     numbering's missing audit dep is OK) or numbering/events/jobs must take
-    `datum-audit`.
+    `wicket-audit`.
 12. **Wave 2 is not "all parallel" even after stubs**, except for compilation.
-    Real tests on ledger/uom/SM require a non-stub `datum-core` (and ledger
+    Real tests on ledger/uom/SM require a non-stub `wicket-core` (and ledger
     requires non-stub uom). See serial batches below. Slice 4 owns stub
     depth; this slice owns the lie that fan-out equals independent completion.
 
@@ -457,14 +457,14 @@ does not name `datum-module`. Today the crate is homeless if you take the
 ## 9. EXECUTOR / SPLIT / TIER per crate
 
 Team law: Claude does not occupy a build lane. EXECUTOR is `cursor` or
-`grok`. Anything that freezes a type in `datum-core` or a posting invariant
+`grok`. Anything that freezes a type in `wicket-core` or a posting invariant
 is `cursor` (types/invariants) with an opus **DECISION** if the slice-5
 Quantity design or the PostingSink placement is still open when the lane
 starts — decision, not a build.
 
 ### Deep (as specified, plus documents)
 
-#### `datum-core` — TIER **deep** (PLAN already). EXECUTOR **cursor**. SPLIT **serial**.
+#### `wicket-core` — TIER **deep** (PLAN already). EXECUTOR **cursor**. SPLIT **serial**.
 
 Most expensive crate to get wrong (PLAN §5). Holds `Actor`, `Money`,
 `Quantity<U>`, ids, errors, and — after this review — `PostingSink` /
@@ -479,7 +479,7 @@ or Quantity if those are still `todo!()`.
 If slice 5 concludes runtime units kill `Quantity<U>`, that decision lands
 **here** before uom and ledger write a line.
 
-#### `datum-db` — TIER **deep**. EXECUTOR **cursor**. SPLIT **serial with audit, after core**.
+#### `wicket-db` — TIER **deep**. EXECUTOR **cursor**. SPLIT **serial with audit, after core**.
 
 Pool, transactions, migration runner, application role vs migration role,
 grant model that makes audit append-only (ADR 0003, 0005). The persistence
@@ -490,7 +490,7 @@ Split internally: (1) pool + txn handle modules can hold, (2) migrations
 forward/back, (3) roles/grants. One crate, one lane. Serial after real core;
 audit cannot be tested without it.
 
-#### `datum-audit` — TIER **deep**. EXECUTOR **cursor**. SPLIT **serial after db**.
+#### `wicket-audit` — TIER **deep**. EXECUTOR **cursor**. SPLIT **serial after db**.
 
 Append-only grants, server time, produced-by-persistence. Depends on slice
 2's answer (triggers + application context vs repository wrapper vs both).
@@ -499,7 +499,7 @@ product.
 
 Do not split from db until slice 2 says the interceptor is not *in* db.
 
-#### `datum-ledger` — TIER **deep**. EXECUTOR **cursor**. SPLIT **internal only; crate is serial after core+db+audit+uom**.
+#### `wicket-ledger` — TIER **deep**. EXECUTOR **cursor**. SPLIT **internal only; crate is serial after core+db+audit+uom**.
 
 Highest-value tests in the project (PLAN §7). One crate, three ledger
 discriminants. Internal split: schema + deferred constraint, posting API,
@@ -512,13 +512,13 @@ Wave 2 does not close until this crate passes (PLAN §9). That already
 contradicts "all parallel." Treat ledger as the Wave 2 gate, not as one of
 thirteen equal lanes.
 
-#### `datum-uom` — TIER **deep**. EXECUTOR **cursor**. SPLIT **serial after core (Quantity decision), parallel with identity/customfields once core+db+audit exist**.
+#### `wicket-uom` — TIER **deep**. EXECUTOR **cursor**. SPLIT **serial after core (Quantity decision), parallel with identity/customfields once core+db+audit exist**.
 
 Engine + rounding + universal conversion tables as data. Boundary: no
 items module types. Item-specific tables are a later interface, not a kernel
 row. Wrong here silently corrupts every posting.
 
-#### `datum-statemachine` — TIER **deep**. EXECUTOR **cursor**. SPLIT **serial after identity+esign; parallel with documents only after the new edge is in the contract**.
+#### `wicket-statemachine` — TIER **deep**. EXECUTOR **cursor**. SPLIT **serial after identity+esign; parallel with documents only after the new edge is in the contract**.
 
 Declarative states, transitions, permission names (strings declared by
 modules, not identity types), signature requirements (calls esign, does not
@@ -528,7 +528,7 @@ consequences).
 **Landmine: HookContext.** Must take `dyn PostingSink`, not ledger types.
 Internal split: declaration schema vs transition engine vs hook runner.
 
-#### `datum-identity` — TIER **deep**. EXECUTOR **cursor**. SPLIT **authn vs RBAC vs service principals, one crate**.
+#### `wicket-identity` — TIER **deep**. EXECUTOR **cursor**. SPLIT **authn vs RBAC vs service principals, one crate**.
 
 Users, sessions, Argon2id, optional OIDC, permissions declared by modules,
 service principals for jobs. Depends on audit so creating a user is
@@ -537,7 +537,7 @@ audited. Does not depend on ledger, SM, or jobs.
 Internal split is three files, not three lanes: (1) principals + sessions,
 (2) RBAC composition, (3) OIDC optional feature. Serial after audit.
 
-#### `datum-esign` — TIER **deep**. EXECUTOR **cursor**. SPLIT **serial after identity**.
+#### `wicket-esign` — TIER **deep**. EXECUTOR **cursor**. SPLIT **serial after identity**.
 
 Hash of exact record version, meaning, server time, re-auth (21 CFR
 11.200, `docs/02` §8). Modules declare; this crate implements. Bound to
@@ -547,7 +547,7 @@ correct, unlike ledger.
 
 Do not merge into SM. SM *requires* a signature; esign *performs* it.
 
-#### `datum-module` — TIER **deep**. EXECUTOR **cursor**. SPLIT **serial Wave 2.5, or split thin registry (parallel, standard) vs host in server**.
+#### `wicket-module` — TIER **deep**. EXECUTOR **cursor**. SPLIT **serial Wave 2.5, or split thin registry (parallel, standard) vs host in server**.
 
 Configuration manifest is a validated-configuration artifact (`docs/03`
 §8). Getting install/enable/disable/upgrade wrong is a change-control event
@@ -558,23 +558,23 @@ lane is explicitly the thin registry only.
 
 ### Standard (unless noted)
 
-#### `datum-numbering` — TIER **standard**, with a dedicated audit check on gap-free-under-rollback. EXECUTOR **grok**. SPLIT **parallel after core+db**.
+#### `wicket-numbering` — TIER **standard**, with a dedicated audit check on gap-free-under-rollback. EXECUTOR **grok**. SPLIT **parallel after core+db**.
 
 Table allocator, not `SEQUENCE`. Transactional `next(&mut txn, series)`.
 If audit is not automatic in db, add audit dep (amend). Parallel with
 events.
 
-#### `datum-events` — TIER **standard**. EXECUTOR **grok**. SPLIT **parallel after core+db**.
+#### `wicket-events` — TIER **standard**. EXECUTOR **grok**. SPLIT **parallel after core+db**.
 
 Typed, at-least-once, idempotent subscribers (`docs/03` §3.1). Must not
 grow a sync-hook API; that is SM. Parallel with numbering.
 
-#### `datum-jobs` — TIER **standard**. EXECUTOR **grok**. SPLIT **serial after events; parallel with identity (no edge)**.
+#### `wicket-jobs` — TIER **standard**. EXECUTOR **grok**. SPLIT **serial after events; parallel with identity (no edge)**.
 
 Durable queue, named `Actor`. Does not import identity. MRP/genealogy
 "runs as a job" is Wave 3 callers.
 
-#### `datum-documents` — TIER **deep** (disagree with "standard otherwise"). EXECUTOR **cursor**. SPLIT **serial after SM + numbering + esign**.
+#### `wicket-documents` — TIER **deep** (disagree with "standard otherwise"). EXECUTOR **cursor**. SPLIT **serial after SM + numbering + esign**.
 
 Disagree with the default: this crate *is* the controlled-record primitive
 BOM/routing/DHR/DMR will sit on (`docs/02` §2, Phase 4 `doc-control` "Built
@@ -585,19 +585,19 @@ versions. Standard audit would miss the missing SM/numbering edges.
 Once PLAN adds the two edges, the lane is serial after those crates' APIs
 exist. Against stubs it can only compile.
 
-#### `datum-customfields` — TIER **standard**. EXECUTOR **grok**. SPLIT **parallel after audit**.
+#### `wicket-customfields` — TIER **standard**. EXECUTOR **grok**. SPLIT **parallel after audit**.
 
 Typed, validated, audited like native fields (`docs/03` §3.3). Must use
 audit; must not be a JSON blob. Parallel with uom/identity. Bump to deep
 only if the persistence-audit interceptor (slice 2) cannot see dynamic
 columns — then it is an audit-integrity crate and belongs on cursor.
 
-#### `datum-print` (missing) — TIER **standard** once added. EXECUTOR **grok**. SPLIT **serial after documents; Wave 2.5 or Wave 3 kernel, not a module**.
+#### `wicket-print` (missing) — TIER **standard** once added. EXECUTOR **grok**. SPLIT **serial after documents; Wave 2.5 or Wave 3 kernel, not a module**.
 
 Server-rendered PDF (`docs/02` §5). Ordinary infrastructure, but listed as
 kernel. Do not let Phase 1 inventory invent label PDFs.
 
-#### `datum-server` — TIER **deep** (Wave 3, composition root). EXECUTOR **cursor**. SPLIT **serial after kernel + module host**.
+#### `wicket-server` — TIER **deep** (Wave 3, composition root). EXECUTOR **cursor**. SPLIT **serial after kernel + module host**.
 
 Wires every crate, opens transactions that SM+ledger+numbering share,
 registers module routes. Out of Wave 2. Mentioned because this is where
@@ -617,24 +617,24 @@ implementation, not stub-compile.
 | Batch | Crates | Why serial relative to previous |
 |---|---|---|
 | **0 stubs** | all §5 crates as compiling stubs | Wave 1 `workspace` lane. Names, deps, error types. Not Quantity semantics. |
-| **1** | `datum-core` | Everything's types. One lane. No parallel partner. |
-| **2** | `datum-db` | Needs real core. Audit/ledger cannot test without a pool/txn/migration story. |
-| **3** | `datum-audit` **and** `datum-numbering` **and** `datum-events` | audit after db; numbering/events only need core+db and can run beside audit if db auto-audits. If numbering must take audit, numbering slips to batch 4. |
-| **4** | `datum-identity`, `datum-uom`, `datum-customfields`, `datum-jobs` | identity after audit; uom after core Quantity decision + audit; jobs after events; jobs ∥ identity (no edge). |
-| **5** | `datum-esign`, `datum-ledger` | esign after identity; ledger after uom+audit. **Ledger is the Wave 2 gate.** |
-| **6** | `datum-statemachine`, then `datum-documents` | SM after identity+esign. Documents **after** SM + numbering (new edges). Not parallel with each other once the edge is honest. Against *stubs* they can compile in parallel; they cannot integrate. |
-| **7** | `datum-module` (or thin registry earlier in 4, host here) | Depends on the real APIs of 1–6. |
-| **8** | `datum-print` if added | After documents. |
-| **Wave 3** | `datum-server`, Phase 1 modules, UI | Composition root. UI gate is separate (PLAN §4). |
+| **1** | `wicket-core` | Everything's types. One lane. No parallel partner. |
+| **2** | `wicket-db` | Needs real core. Audit/ledger cannot test without a pool/txn/migration story. |
+| **3** | `wicket-audit` **and** `wicket-numbering` **and** `wicket-events` | audit after db; numbering/events only need core+db and can run beside audit if db auto-audits. If numbering must take audit, numbering slips to batch 4. |
+| **4** | `wicket-identity`, `wicket-uom`, `wicket-customfields`, `wicket-jobs` | identity after audit; uom after core Quantity decision + audit; jobs after events; jobs ∥ identity (no edge). |
+| **5** | `wicket-esign`, `wicket-ledger` | esign after identity; ledger after uom+audit. **Ledger is the Wave 2 gate.** |
+| **6** | `wicket-statemachine`, then `wicket-documents` | SM after identity+esign. Documents **after** SM + numbering (new edges). Not parallel with each other once the edge is honest. Against *stubs* they can compile in parallel; they cannot integrate. |
+| **7** | `wicket-module` (or thin registry earlier in 4, host here) | Depends on the real APIs of 1–6. |
+| **8** | `wicket-print` if added | After documents. |
+| **Wave 3** | `wicket-server`, Phase 1 modules, UI | Composition root. UI gate is separate (PLAN §4). |
 
 **Stub-parallel (what PLAN actually enables):** batches 1–6 all open on
 day one of Wave 2, compiling against Wave 1 stubs, **except**
-`datum-module` (and documents' approval workflow, which will escalate).
+`wicket-module` (and documents' approval workflow, which will escalate).
 Expect rework when core's `Actor`/`Quantity`/`PostingSink` stop being
 stubs. That rework is why core, db, audit, uom, ledger, SM, identity,
 esign, module (and documents) are deep.
 
-**Do not** pretend `datum-module` is batch-3-parallel unless it is the thin
+**Do not** pretend `wicket-module` is batch-3-parallel unless it is the thin
 registry with deps reduced to `core db audit`.
 
 ---
@@ -645,7 +645,7 @@ registry with deps reduced to `core db audit`.
 |---|---|
 | Graph acyclic as declared? | Yes. |
 | Acyclic in practice? | Yes **if** PostingSink lives in core, Actor lives in core, UoM takes conversion tables as data, and module/host does not get imported downward. **No** if SM takes ledger types *and* ledger transitions states. |
-| First demanded edge | **`datum-documents → datum-statemachine`** (approval workflow). Add now. |
+| First demanded edge | **`wicket-documents → wicket-statemachine`** (approval workflow). Add now. |
 | First cycle if they slip | **SM → ledger + ledger → SM**. Invert SM→ledger; never add ledger→SM. |
 | `ledger → identity`? | **No.** ADR 0004/0005 imply `Actor` attribution, not RBAC-at-post. |
 | `statemachine → ledger`? | Demanded as a *type*, not as a crate dep. Trait in core. Events would break hooks. |
@@ -656,7 +656,7 @@ registry with deps reduced to `core db audit`.
 | Kernel crate count | **14** in §5 excluding server; Phase 0 has **13** components; Wave 2 says **13** lanes and names none. |
 | Off-by-one | "13" is Phase 0, not §5. §5 has 15 including server. Print is in Phase 0 and not in §5. Module is in §5 and cannot be parallel. |
 | Missing from graph | **reporting + print**. Event bus, jobs, module registry are present as crates. |
-| `datum-module` parallel? | **No**, unless reduced to a thin registry. Call it out; serial 2.5 or split. |
+| `wicket-module` parallel? | **No**, unless reduced to a thin registry. Call it out; serial 2.5 or split. |
 
 ---
 

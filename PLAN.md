@@ -1,4 +1,4 @@
-# PLAN — Datum ERP, foundation build (v2)
+# PLAN — Wicket ERP, foundation build (v2)
 
 Task slug: `erp` · Workdir: `/Users/jroberts/Desktop/Internal Development/Tools/ERP` · Profile: production
 Roster rev 6 · Plan author: fable · v1 2026-09-11 (shop PC, roster rev 4) · **v2 2026-09-12 (MacBook, roster rev 6)**
@@ -13,9 +13,9 @@ Read this section first if you read v1.
 
 1. **Drift fixed.** The task master flagged on 2026-09-11 23:02 that §1 still stated the two
    claims the ledger and audit decisions overturned, that §2 still called the spikes "in
-   flight", and that §5 lacked `datum-print` and two document edges. All three are corrected
+   flight", and that §5 lacked `wicket-print` and two document edges. All three are corrected
    below. The binding table is now the *amended* record, not the original.
-2. **Wave 1 split for width.** v1 put the workspace, a complete `datum-core`, the test
+2. **Wave 1 split for width.** v1 put the workspace, a complete `wicket-core`, the test
    harness, the roles SQL and CI into one lane with a doubled deep audit. That is a serial
    bottleneck on the critical path of everything. v2 runs three code lanes with disjoint
    file ownership (`ws-skeleton`, `core` as a cross-family race, `harness`) alongside six
@@ -24,7 +24,7 @@ Read this section first if you read v1.
    slice. The competitive review's warning was that this project dies by building breadth
    before anything works end to end. v2 makes the slice the target: the kernel batches are
    ordered by what the slice needs, and the four crates the slice does not need
-   (`datum-esign`, `datum-documents`, `datum-print`, `datum-customfields`) move to Wave 2b,
+   (`wicket-esign`, `wicket-documents`, `wicket-print`, `wicket-customfields`) move to Wave 2b,
    after the slice runs on real data. What is preserved is precise: the **row properties**
    built in batches 2.1–2.5 (identity lifecycle, server time, audit trigger and chain, version
    stamping, no hard deletes of records, constrained lot and serial identifiers, package
@@ -32,10 +32,10 @@ Read this section first if you read v1.
    it: 11.50(b) signature manifestation and archival print, 11.200 two-component signature
    minting, controlled documents, and custom fields. The slice is unsigned by declaration.
 4. **A second trait inversion.** `PostingSink` (from the plan audit) removes the
-   statemachine/ledger cycle. v2 adds `SignatureGate` in `datum-core` so that a state
-   transition that requires a signature asks a trait, not `datum-esign` directly. This
+   statemachine/ledger cycle. v2 adds `SignatureGate` in `wicket-core` so that a state
+   transition that requires a signature asks a trait, not `wicket-esign` directly. This
    removes the `statemachine → esign` edge, which is what lets the slice run a work order
-   before the signature crate exists. `datum-esign` implements the trait in Wave 2b; the
+   before the signature crate exists. `wicket-esign` implements the trait in Wave 2b; the
    composition root wires it. Until then the gate is `NoSignatures`, which refuses any
    transition declared as requiring one, so nothing is silently unsigned.
 5. **Build node.** Apple Silicon MacBook is the primary build node (roster design rule).
@@ -43,15 +43,15 @@ Read this section first if you read v1.
    `sqlx-cli` are on the path. The NUC (Linux) and shop PC (Windows) are CI nodes only, and
    neither has PostgreSQL yet. See §11.
 6. **Publication.** The owner authorised, then restated, a public open source repository
-   on 2026-09-12: `github.com/BlinkingSun/datum-erp` is live (Actions off, plain
-   fast-forward pushes only), with the private mirror `datum-dev` kept as backup. License
+   on 2026-09-12: `github.com/BlinkingSun/wicket-erp` is live (Actions off, plain
+   fast-forward pushes only), with the private mirror `wicket-dev` kept as backup. License
    AGPL-3.0-or-later + DCO per ADR 0006. See §12.
 7. **Multi-application posture made explicit.** See §1a.
 8. **Cycle-2 audit amendments (2026-09-12).** The placeholder-crate scheme is now enforced
    by untracked placeholders, path-checkout integration and a `git ls-tree` gate (§3,
    CONTRACT §10); the audit-persistence decision's Wave 1 obligations (§11 of that record)
    are carried into the specs: five roles, two connection URLs, a raw-SQL fence, and a real
-   `Tx::begin` in the `datum-db` stub; per-test databases from a template; two contested
+   `Tx::begin` in the `wicket-db` stub; per-test databases from a template; two contested
    points (money column scale, the application role's DELETE grant) went to the decision
    authority as `DECISION-w1-contracts.md`; invariant 19 added. The two core traits were
    completed after the traits slice: consumption edges, a group header, one finalize point,
@@ -82,13 +82,13 @@ The decisions that bind every lane, **as amended**:
 |---|---|---|
 | Shape | Modular monolith, one binary | ADR 0001 |
 | Backend | Rust, Axum, SQLx | ADR 0002 |
-| Database | PostgreSQL only, no dialect abstraction. **Installed and lifecycle-managed by the operating system; Datum never owns a database process, on any OS, in any version.** | ADR 0003 as amended, `research/decisions/install-story.md` |
+| Database | PostgreSQL only, no dialect abstraction. **Installed and lifecycle-managed by the operating system; Wicket never owns a database process, on any OS, in any version.** | ADR 0003 as amended, `research/decisions/install-story.md` |
 | Quantities and money | `Quantity<D>` with a sealed **dimension** as the type parameter and a runtime `UnitId`; `Money` is a separate type with a runtime `CurrencyId`; core never rounds | `research/decisions/core-quantity.md` (D1) |
 | Ledger | Append-only postings. **Conservation holds per balance slice** — quantity per `(group, item, unit)`, value per `(group, currency)` — never as a scalar sum over a group. Five group kinds. Every withdrawal names its source postings and the allocation must reproduce both engines' numbers. | ADR 0004 as amended, `research/decisions/ledger-invariant.md` (D2) |
 | Audit trail and signature | Kernel, not module. **Written by a row trigger attached automatically at `CREATE TABLE`, through a security-definer function.** The application role holds SELECT only on the audit table. Per-transaction hash chain anchored off the server; the honest claim is tamper *evidence*, never tamper *proof*. | ADR 0005 as amended, `research/decisions/audit-persistence.md` (D3, D4) |
 | Tenancy | Single tenant, self-hosted; residency is an installation property | ADR 0008 |
 | Interface | TypeScript, React, TanStack; one application, three interaction modes; archival documents server-rendered to PDF; Tauri is optional and never required | ADR 0009 |
-| License | **Decided by the owner 2026-09-12: AGPL-3.0-or-later, contributions under the Developer Certificate of Origin, no CLA.** Public repository `github.com/BlinkingSun/datum-erp`. | ADR 0006 (Accepted) |
+| License | **Decided by the owner 2026-09-12: AGPL-3.0-or-later, contributions under the Developer Certificate of Origin, no CLA.** Public repository `github.com/BlinkingSun/wicket-erp`. | ADR 0006 (Accepted) |
 
 ### 1a. One kernel, many kinds of shop
 
@@ -115,7 +115,7 @@ screen.* What v2 adds is an acceptance target, so the claim is tested rather tha
   and serial identifier, and the audit export. A plain shop sees none of it in its screens
   and pays for it only in storage; it is not free and the plan does not say it is. The
   profile definitions are frozen in `_team/specs/SPEC-profiles.md` (the eleven keys of
-  DECISION D-W1-5) before Wave 2.6 and consumed by `datum-module` and `server-slice`.
+  DECISION D-W1-5) before Wave 2.6 and consumed by `wicket-module` and `server-slice`.
 - Wave 3's phase-end test runs the whole-program API test under **both** profiles.
 - **No customer-specific code, ever** (invariant 18). Anything the owner's own company
   needs that another shop would not is configuration or a module, never a branch.
@@ -137,8 +137,8 @@ Not yet written: `docs/05` data model, `docs/06` regulatory, `docs/07` roadmap, 
 competitive landscape, `docs/10` API conventions, the repository files (README,
 CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, LICENSE, .gitignore), and **all code**.
 
-Repository: public `github.com/BlinkingSun/datum-erp` (remote `origin`) plus the private
-mirror `datum-dev` (remote `dev`); `main` only, plain fast-forward pushes. Author identity
+Repository: public `github.com/BlinkingSun/wicket-erp` (remote `origin`) plus the private
+mirror `wicket-dev` (remote `dev`); `main` only, plain fast-forward pushes. Author identity
 is the owner's Gmail, which is correct and stays. `_team/` is excluded via
 `.git/info/exclude`. Decisions made during this build live in `_team/reports/DECISION-*.md`
 and are promoted into `research/decisions/` at integration.
@@ -146,21 +146,21 @@ and are promoted into `research/decisions/` at integration.
 ## 3. Wave structure
 
 Four waves plus a slice. The split is dictated by real dependencies: every crate
-depends on the workspace and on `datum-core`; lanes work in isolated worktrees where
+depends on the workspace and on `wicket-core`; lanes work in isolated worktrees where
 they cannot see each other's output.
 
 ### Wave 1 — foundation and documentation (parallel, nine lanes)
 
-`datum-core` is not a stub. It ships complete in this wave, built to the frozen D1
+`wicket-core` is not a stub. It ships complete in this wave, built to the frozen D1
 contract, because every Wave 2 lane imports it and a lane cannot write a meaningful test
 against `todo!()`. Every other crate ships as a compiling stub whose public signatures are
 real (`research/audits/slice-wave1-stubs.md` §4 and §5 are normative for those stubs).
 
 | Lane | Owns (exclusive) | Kind | Audit |
 |---|---|---|---|
-| `ws-skeleton` | `Cargo.toml` (root), `rust-toolchain.toml`, `rustfmt.toml`, `.cargo/config.toml`, `justfile`, `.github/workflows/ci.yml`, `dev/compose.yml`, and `crates/<every crate except datum-core and datum-test>/**` as compiling stubs | build, long | deep |
-| `core-r1`, `core-r2` | `crates/datum-core/**` — the complete primitive crate | **cross-family blind race, two attempts** (below the production cap of four; declared here). Grok master adjudicates on the acceptance criteria; the winner gets the deep audit. | deep |
-| `harness` | `crates/datum-test/**`, `dev/sql/*.sql` (roles, grants), `.env.example` | build, short | deep |
+| `ws-skeleton` | `Cargo.toml` (root), `rust-toolchain.toml`, `rustfmt.toml`, `.cargo/config.toml`, `justfile`, `.github/workflows/ci.yml`, `dev/compose.yml`, and `crates/<every crate except wicket-core and wicket-test>/**` as compiling stubs | build, long | deep |
+| `core-r1`, `core-r2` | `crates/wicket-core/**` — the complete primitive crate | **cross-family blind race, two attempts** (below the production cap of four; declared here). Grok master adjudicates on the acceptance criteria; the winner gets the deep audit. | deep |
+| `harness` | `crates/wicket-test/**`, `dev/sql/*.sql` (roles, grants), `.env.example` | build, short | deep |
 | `doc-datamodel` | `docs/05-data-model.md` | doc | standard |
 | `doc-api` | `docs/10-api-conventions.md` | doc | standard |
 | `doc-repo` | `README.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, **`.gitignore` (whole file, including the Rust block)** | doc | standard |
@@ -187,7 +187,7 @@ Ownership rules that resolve the collisions the stub audit found:
   path checkout in a fixed order with a `git ls-tree` gate. The full recipe is
   `_team/specs/CONTRACT-workspace.md` §10 and it is mechanical; nothing in Wave 2 starts
   until its post-integration gate passes on the integrated tree.
-- The `datum-db` stub has real parts in Wave 1 (`connect`, pool hooks, `Tx::begin`), the
+- The `wicket-db` stub has real parts in Wave 1 (`connect`, pool hooks, `Tx::begin`), the
   raw-SQL fence (`clippy.toml` + `just lint-sql`) is `ws-skeleton`'s, and the five roles
   with two connection URLs are `harness`'s — all from
   `research/decisions/audit-persistence.md` §11, which binds Wave 1.
@@ -221,18 +221,18 @@ batch run in parallel.
 
 | Batch | Crates | Why here |
 |---|---|---|
-| 2.1 | `datum-db` | Everything persists through it: pool, sealed transaction with transaction-local actor, migration runner, role model, version stamping, no-cascade and no-hard-delete lints. |
-| 2.2 | `datum-audit` | Nothing else may create a table before the trigger attachment exists, or its writes go unaudited. Includes the hash chain. |
-| 2.3 | `datum-identity`, `datum-numbering`, `datum-uom`, `datum-events` | Independent of each other. Identity reserves the separable signing credential (invariant 14) now, so Wave 2b adds no column to a table with history. |
-| 2.4 | `datum-ledger` | **The gate.** Deep audit, doubled, rework race pre-declared. Wave 2 does not close until the property suite in §7 passes in commit mode with the canary armed. |
-| 2.5 | `datum-statemachine`, `datum-jobs` | The work order needs states; background work needs a named service principal. Statemachine depends on `SignatureGate`, not on `datum-esign`. **`SPEC-statemachine.md` freezes the hook ABI** (`docs/03` §3.2): topological hook order, the time budget and its loud failure, the veto shape, one sink per transaction and the mandatory `verify` call from edge metadata. |
-| 2.6 | `datum-module` (minimal composition root) | Composes every crate above; never a parallel lane. Consumes `SPEC-profiles.md` (frozen after decision D-W1-5, before this batch). |
+| 2.1 | `wicket-db` | Everything persists through it: pool, sealed transaction with transaction-local actor, migration runner, role model, version stamping, no-cascade and no-hard-delete lints. |
+| 2.2 | `wicket-audit` | Nothing else may create a table before the trigger attachment exists, or its writes go unaudited. Includes the hash chain. |
+| 2.3 | `wicket-identity`, `wicket-numbering`, `wicket-uom`, `wicket-events` | Independent of each other. Identity reserves the separable signing credential (invariant 14) now, so Wave 2b adds no column to a table with history. |
+| 2.4 | `wicket-ledger` | **The gate.** Deep audit, doubled, rework race pre-declared. Wave 2 does not close until the property suite in §7 passes in commit mode with the canary armed. |
+| 2.5 | `wicket-statemachine`, `wicket-jobs` | The work order needs states; background work needs a named service principal. Statemachine depends on `SignatureGate`, not on `wicket-esign`. **`SPEC-statemachine.md` freezes the hook ABI** (`docs/03` §3.2): topological hook order, the time budget and its loud failure, the veto shape, one sink per transaction and the mandatory `verify` call from edge metadata. |
+| 2.6 | `wicket-module` (minimal composition root) | Composes every crate above; never a parallel lane. Consumes `SPEC-profiles.md` (frozen after decision D-W1-5, before this batch). |
 
-Wave 2 specs are written one batch ahead: `SPEC-datum-db.md` and `SPEC-audit.md` at Wave 1
+Wave 2 specs are written one batch ahead: `SPEC-wicket-db.md` and `SPEC-audit.md` at Wave 1
 integration, `SPEC-identity.md`, `SPEC-numbering.md`, `SPEC-uom.md`, `SPEC-events.md` when
 2.2 lands, `SPEC-ledger.md` when 2.3 lands, and so on. No batch is dispatched on prose; every
 lane has a spec with acceptance criteria an auditor can fail. Ownership of
-`crates/datum-server/**` is per wave: `ws-skeleton` owns the stub in Wave 1 and
+`crates/wicket-server/**` is per wave: `ws-skeleton` owns the stub in Wave 1 and
 `server-slice` owns the crate from Wave 2s.
 
 ### Wave 2s — the vertical slice (the milestone that matters)
@@ -249,7 +249,7 @@ architecture and it is the screen that demonstrates the product.
 | `mod-inventory` | Receipts, issues, moves, adjustments over the ledger; on-hand / allocated / available as rebuildable projections; status (available, quarantined, rejected, hold). |
 | `mod-production-min` | Work order: create, release, issue material, complete, receive finished lot. A `TRANSFORMATION` group with allocation edges. **Not** the Phase 3 `production` module; a minimal surface the full module later subsumes. |
 | `mod-genealogy` | Forward and backward trace over the ledger's consumption edges. Read-only. Returns the tree the mockup draws. |
-| `server-slice` | `datum-server`: HTTP API + OpenAPI for exactly the slice, both installation profiles, headless test script. |
+| `server-slice` | `wicket-server`: HTTP API + OpenAPI for exactly the slice, both installation profiles, headless test script. |
 
 The slice runs in dependency order, not as one flat fan-out: 2s.1 `mod-items`,
 `mod-locations`, `mod-lots` (parallel); 2s.2 `mod-inventory`; 2s.3 `mod-production-min` and
@@ -289,8 +289,8 @@ set, and it **must assert**, not merely perform:
 
 ### Wave 2b — the remaining kernel crates (after the slice runs)
 
-`datum-esign` (implements `SignatureGate`), `datum-documents`, `datum-print`,
-`datum-customfields`. Batched as 2b.1 `esign` + `customfields`, 2b.2 `documents`, 2b.3
+`wicket-esign` (implements `SignatureGate`), `wicket-documents`, `wicket-print`,
+`wicket-customfields`. Batched as 2b.1 `esign` + `customfields`, 2b.2 `documents`, 2b.3
 `print`. Each is additive: new tables, new mechanisms, no change to any column that
 already carries history.
 
@@ -313,7 +313,7 @@ interface lane starts. The planner's read, for the owner's convenience:
 - **Item master** — clean, but far too sparse for a real office screen: a two-row BOM in
   a screen built for density. Push harder before anyone builds it: revision effectivity,
   where-used counts, inventory by location, supplier and cost panels.
-- **Icon** — the datum symbol on a dark tile. Approve.
+- **Icon** — the wicket symbol on a dark tile. Approve.
 
 The approved look is recorded in `DESIGN.md` §10 once the owner signs off.
 
@@ -324,49 +324,49 @@ name, or add a dependency edge not listed here without an escalation.
 
 ```
 crates/
-  datum-core            no kernel dependencies (thiserror serde uuid rust_decimal)
-  datum-test            no kernel dependencies (sqlx tokio)            Wave 1 harness; owned by Wave 1 for the life of the build
-  datum-db              core
-  datum-audit           core db
-  datum-identity        core db audit
-  datum-numbering       core db
-  datum-uom             core db audit
-  datum-events          core db
-  datum-jobs            core db events
-  datum-ledger          core db audit uom                              implements core::PostingSink
-  datum-statemachine    core db audit identity                         depends on core::PostingSink + core::SignatureGate, never on ledger or esign
-  datum-esign           core db audit identity                         implements core::SignatureGate            (Wave 2b)
-  datum-customfields    core db audit                                                                             (Wave 2b)
-  datum-documents       core db audit identity numbering statemachine                                             (Wave 2b)
-  datum-print           core db audit documents esign                                                             (Wave 2b)
-  datum-module          core db + all of the above (composition root; wires PostingSink and SignatureGate)
-  datum-server          everything
-modules/                (Wave 2s onward; each depends on datum-module's published interfaces only)
+  wicket-core            no kernel dependencies (thiserror serde uuid rust_decimal)
+  wicket-test            no kernel dependencies (sqlx tokio)            Wave 1 harness; owned by Wave 1 for the life of the build
+  wicket-db              core
+  wicket-audit           core db
+  wicket-identity        core db audit
+  wicket-numbering       core db
+  wicket-uom             core db audit
+  wicket-events          core db
+  wicket-jobs            core db events
+  wicket-ledger          core db audit uom                              implements core::PostingSink
+  wicket-statemachine    core db audit identity                         depends on core::PostingSink + core::SignatureGate, never on ledger or esign
+  wicket-esign           core db audit identity                         implements core::SignatureGate            (Wave 2b)
+  wicket-customfields    core db audit                                                                             (Wave 2b)
+  wicket-documents       core db audit identity numbering statemachine                                             (Wave 2b)
+  wicket-print           core db audit documents esign                                                             (Wave 2b)
+  wicket-module          core db + all of the above (composition root; wires PostingSink and SignatureGate)
+  wicket-server          everything
+modules/                (Wave 2s onward; each depends on wicket-module's published interfaces only)
 ```
 
-The graph is acyclic and that property is load-bearing. Two traits in `datum-core` keep it
+The graph is acyclic and that property is load-bearing. Two traits in `wicket-core` keep it
 that way:
 
 - **`PostingSink`** — the interface through which a state transition contributes postings
-  to the ledger group of the transaction it runs in. `datum-ledger` implements it.
+  to the ledger group of the transaction it runs in. `wicket-ledger` implements it.
   Events cannot substitute, because they are asynchronous and land in a different
   transaction, where the group could not balance.
 - **`SignatureGate`** — the interface through which a transition declared as requiring
-  a signature obtains one. `datum-esign` implements it in Wave 2b. Core ships
+  a signature obtains one. `wicket-esign` implements it in Wave 2b. Core ships
   `NoSignatures`, which refuses every signature-requiring transition with a typed error,
   so the slice can run work orders whose transitions do not require signatures while
   nothing that does can slip through unsigned.
 
-`datum-core` holds primitives with no database dependency: identifier newtypes, `Actor`,
+`wicket-core` holds primitives with no database dependency: identifier newtypes, `Actor`,
 `Money`, `Quantity<D>`, `UnitRef<D>`, `AnyQuantity`, the residual types, the
 `UnitConverter` trait, the two traits above, and the shared error types. The quantity
 contract is `research/decisions/core-quantity.md` §2, frozen, reproduced by reference in
 `_team/specs/SPEC-core.md`. Everything else depends on this crate, which is why it is
 raced and deep-audited.
 
-`datum-test` is the test harness: connects from `DATABASE_URL`, runs migrators in graph
+`wicket-test` is the test harness: connects from `DATABASE_URL`, runs migrators in graph
 order, provides **commit-mode** fixtures with per-test schema isolation and cleanup, and a
-`postgres_available()` skip helper that becomes a hard failure under `DATUM_REQUIRE_PG=1`.
+`postgres_available()` skip helper that becomes a hard failure under `WICKET_REQUIRE_PG=1`.
 It is the thing that makes the ledger property tests real (§7).
 
 ## 6. Non-negotiable invariants
@@ -461,7 +461,7 @@ Wave 1 and Wave 2.
 16. **No hard deletes of any record, and no cascade deletes.** A record — anything an
     audit trigger attests to, or that a history-bearing table references — is retired by
     state change, never by `DELETE`. This is a privilege fact, not a convention:
-    `datum_app` holds no `DELETE` on schema `app` and no `TRUNCATE` in any schema
+    `wicket_app` holds no `DELETE` on schema `app` and no `TRUNCATE` in any schema
     (D-W1-2). Working state that carries no history — sessions, idempotency keys,
     completed job rows, projection caches — lives in schema `transient`, where `DELETE`
     is granted and expected; a table qualifies for `transient` only if it has no audit
@@ -520,7 +520,7 @@ every one of the criteria above would report success while testing nothing. The 
 suite commits against a real database and cleans up afterward, and one deliberately
 failing case is kept permanently in the suite as a canary that the constraints are armed.
 
-**The harness that makes this real** is `crates/datum-test` (Wave 1, `harness` lane): commit-mode fixtures, one schema per test, cleanup after commit, `postgres_available()` that skips locally and fails hard under `DATUM_REQUIRE_PG=1`, and a permanently failing canary that proves the deferred constraints are armed. No lane writes its own harness.
+**The harness that makes this real** is `crates/wicket-test` (Wave 1, `harness` lane): commit-mode fixtures, one schema per test, cleanup after commit, `postgres_available()` that skips locally and fails hard under `WICKET_REQUIRE_PG=1`, and a permanently failing canary that proves the deferred constraints are armed. No lane writes its own harness.
 
 **This suite is also a deliverable to customers**, not only an internal artifact. Test
 names are stable from the first release, because a regulated customer attaches this
@@ -553,7 +553,7 @@ multi-threaded.
 Everything in `docs/04-module-catalog.md` from Phase 2 onward, except the minimal work
 order surface named in Wave 2s. The general ledger, per ADR 0007. Multi-tenancy, per ADR
 0008. Runtime plugin loading, deferred per `docs/03-module-system.md` §5. **A bundled or
-Datum-managed PostgreSQL lifecycle, on any OS**, per ADR 0003 as amended. Catch-weight
+Wicket-managed PostgreSQL lifecycle, on any OS**, per ADR 0003 as amended. Catch-weight
 items. The Tauri shell, until ADR 0009's revisit condition fires.
 
 ## 11. Build environment and nodes
@@ -566,9 +566,9 @@ items. The Tauri shell, until ADR 0009's revisit condition fires.
 
 Conventions every lane must follow:
 
-- Two connection URLs, named as the audit decision names them: `DATUM_DATABASE_URL`
-  (`datum_app`) and `DATUM_MIGRATE_DATABASE_URL` (`datum_migrate`), plus
-  `DATUM_BOOTSTRAP_URL` for role and database creation and `DATUM_TEST_TEMPLATE` for
+- Two connection URLs, named as the audit decision names them: `WICKET_DATABASE_URL`
+  (`wicket_app`) and `WICKET_MIGRATE_DATABASE_URL` (`wicket_migrate`), plus
+  `WICKET_BOOTSTRAP_URL` for role and database creation and `WICKET_TEST_TEMPLATE` for
   per-test database clones. Documented in `.env.example`; read from the environment, never
   from a committed `.env`. There is no bare `DATABASE_URL` in the product. `SQLX_OFFLINE=true`
   is set in `.cargo/config.toml`, never in `.env`. PostgreSQL major is pinned at 17 in the
@@ -586,12 +586,12 @@ Conventions every lane must follow:
 
 ## 12. Repository and publication
 
-- Public repository: `https://github.com/BlinkingSun/datum-erp` (remote `origin`), created
+- Public repository: `https://github.com/BlinkingSun/wicket-erp` (remote `origin`), created
   2026-09-12 after the owner restated the decision. It is never renamed, made private,
   deleted, transferred or force-pushed. Pushes are plain fast-forward only. GitHub Actions
   are **on** for the public repository since 2026-09-12 (the three-node local round went
   green first, §11); the private mirror keeps Actions off.
-- Private mirror `BlinkingSun/datum-dev` (remote `dev`) is kept as the backup remote and
+- Private mirror `BlinkingSun/wicket-dev` (remote `dev`) is kept as the backup remote and
   receives every landing first.
 - License AGPL-3.0-or-later; contributions under the DCO; `LICENSE`, `CONTRIBUTING.md` and
   the header convention are `doc-repo`'s (Wave 1).

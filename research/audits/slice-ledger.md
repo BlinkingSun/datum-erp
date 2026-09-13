@@ -6,7 +6,7 @@
 
 ## Executive verdict (first paragraph)
 
-**The thesis is only half right.** PostgreSQL can enforce a **commit-time, multi-row balance invariant** at ADR’s target volumes (5k business transactions/day, ~2–20 postings/group, 10M-row rebuild budget, revisit at ~50M rows/year) without blocking the 10-minute rebuild target—but **not** as the prose invariant “`SUM(quantity)` over all rows sharing `group_id` equals zero.” That aggregate is **wrong for any real BOM completion, mixed-UOM group, or multi-ledger atomic posting** and is the case that **forces a non-zero group-wide sum** unless the plan is narrowed. What *is* implementable is a **deferred constraint trigger** (there is no `CREATE ASSERTION`; SQL feature F521 is unimplemented per [PostgreSQL D.2](https://www.postgresql.org/docs/17/unsupported-features-sql-standard.html)) that, at `COMMIT`, asserts zero net per **balance slice**—at minimum `(group_id, ledger)` and, for inventory, per **(item_id, uom)** (and whatever dimension keys define a conservation law: location, lot, serial as required by the posting schema). Virtual locations fix **external** appearance/disappearance; they do **not** fix **unlike items** or **unlike units** in one scalar sum. Until PLAN/ADR state that slice explicitly, Wave 2 `datum-ledger` risks encoding a constraint that either rejects legitimate production or gives a false sense of safety.
+**The thesis is only half right.** PostgreSQL can enforce a **commit-time, multi-row balance invariant** at ADR’s target volumes (5k business transactions/day, ~2–20 postings/group, 10M-row rebuild budget, revisit at ~50M rows/year) without blocking the 10-minute rebuild target—but **not** as the prose invariant “`SUM(quantity)` over all rows sharing `group_id` equals zero.” That aggregate is **wrong for any real BOM completion, mixed-UOM group, or multi-ledger atomic posting** and is the case that **forces a non-zero group-wide sum** unless the plan is narrowed. What *is* implementable is a **deferred constraint trigger** (there is no `CREATE ASSERTION`; SQL feature F521 is unimplemented per [PostgreSQL D.2](https://www.postgresql.org/docs/17/unsupported-features-sql-standard.html)) that, at `COMMIT`, asserts zero net per **balance slice**—at minimum `(group_id, ledger)` and, for inventory, per **(item_id, uom)** (and whatever dimension keys define a conservation law: location, lot, serial as required by the posting schema). Virtual locations fix **external** appearance/disappearance; they do **not** fix **unlike items** or **unlike units** in one scalar sum. Until PLAN/ADR state that slice explicitly, Wave 2 `wicket-ledger` risks encoding a constraint that either rejects legitimate production or gives a false sense of safety.
 
 ---
 
@@ -142,7 +142,7 @@ CREATE CONSTRAINT TRIGGER posting_group_balance
 ## 4. SQLx + deferred constraints
 
 - **Explicit transaction:** Inserts succeed inside `tx`; **violation surfaces on `tx.commit().await?`** for deferred FK and constraint triggers (SQL standard behavior).
-- **API:** Use `&mut *tx` as `Executor` (SQLx 0.7+); map `DatabaseError::constraint()` to domain errors in `datum-ledger`.
+- **API:** Use `&mut *tx` as `Executor` (SQLx 0.7+); map `DatabaseError::constraint()` to domain errors in `wicket-ledger`.
 - **Autocommit + `RETURNING`:** SQLx tests include `test_error_handling_with_deferred_constraints` (deferred FK fails on single-statement autocommit path). Historical issue #1370 (silent drop) — **mandate explicit transactions for all multi-posting groups** and integration-test `commit()` failure; do not rely on autocommit for ledger groups.
 - **PLAN gap:** Acceptance criterion: “unbalanced group returns `LedgerBalanceError` with `group_id` on **commit**, never partial projection visible.”
 
@@ -188,7 +188,7 @@ CREATE CONSTRAINT TRIGGER posting_group_balance
 | **Acceptance criteria** | Unbalanced slice rejected at commit; balanced multi-item WO accepted; mixed-UOM rejected at insert (UOM kernel) not at obscure commit; property tests generate **per-slice** not per-group scalar |
 | **Partition / archival** | No task for 50M/year — add before revisit threshold: monthly partitions, detach/archive, rebuild job scoped per partition |
 | **Grant story** | App role: INSERT on `posting` only; no UPDATE/DELETE; constraint trigger owned by superuser/migration role |
-| **docs/05-data-model** | Must land slice definition before `datum-ledger` migrations |
+| **docs/05-data-model** | Must land slice definition before `wicket-ledger` migrations |
 
 ---
 
@@ -196,10 +196,10 @@ CREATE CONSTRAINT TRIGGER posting_group_balance
 
 | Field | Value |
 |-------|--------|
-| **EXECUTOR** | **cursor** for spike + `datum-ledger` implementation; **grok** for parallel property-test generation; **blind-race** only after slice definition is frozen |
+| **EXECUTOR** | **cursor** for spike + `wicket-ledger` implementation; **grok** for parallel property-test generation; **blind-race** only after slice definition is frozen |
 | **Opus DECISION before crates?** | **YES** — narrow balance slice (inventory vs cost/labor, WO-level cost netting, canonical UOM rule). Wrong trigger encoding is expensive to unwind and touches every module posting path |
-| **SPLIT** | (A) Opus decision + ADR amendment; (B) spike-ledger-constraint; (C) `datum-ledger` crate + migrations; (D) projection/concurrency spike separate from constraint |
-| **AUDIT TIER** | **deep** for `datum-ledger` and migrations; **standard** for ADR text-only amendment |
+| **SPLIT** | (A) Opus decision + ADR amendment; (B) spike-ledger-constraint; (C) `wicket-ledger` crate + migrations; (D) projection/concurrency spike separate from constraint |
+| **AUDIT TIER** | **deep** for `wicket-ledger` and migrations; **standard** for ADR text-only amendment |
 | **SHARD notes (property / rebuild suite)** | Shard generators by: `ledger` enum; inventory vs cost; single-item transfer vs multi-item WO; virtual location class; UOM conversion present/absent; group size 2 vs 20. Rebuild tests: shard by `posted_at` year-month partitions. Tag tests `slice_inventory`, `slice_cost`, `multi_item_wo`, `mixed_uom_forbidden` |
 
 ---

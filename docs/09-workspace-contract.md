@@ -1,4 +1,4 @@
-# CONTRACT — the Datum workspace (Wave 1, frozen)
+# CONTRACT — the Wicket workspace (Wave 1, frozen)
 
 This file is the integration contract for every code lane. Where it and
 `research/audits/slice-wave1-stubs.md` disagree, **this file wins** (it carries the v2
@@ -27,7 +27,7 @@ canonical client path is `$(brew --prefix postgresql@17)/bin`, and `/opt/homebre
 also resolves today). Server on `127.0.0.1:5432` — **never `localhost`** — with `trust`
 authentication on loopback for the login user, which is why the bootstrap URL carries no
 credentials **on this MacBook only**; the NUC and the shop PC need an explicit superuser in
-`DATUM_BOOTSTRAP_URL`. The Homebrew cluster is a LaunchAgent: it dies at logout, which is fine
+`WICKET_BOOTSTRAP_URL`. The Homebrew cluster is a LaunchAgent: it dies at logout, which is fine
 for a development laptop and is not the production story (D5).
 
 `rustfmt.toml`: `edition = "2024"`, `max_width = 100`, `use_field_init_shorthand = true`.
@@ -38,23 +38,23 @@ for a development laptop and is not the production story (D5).
 [workspace]
 resolver = "3"
 members = [
-  "crates/datum-core",
-  "crates/datum-test",
-  "crates/datum-db",
-  "crates/datum-audit",
-  "crates/datum-identity",
-  "crates/datum-numbering",
-  "crates/datum-uom",
-  "crates/datum-events",
-  "crates/datum-jobs",
-  "crates/datum-ledger",
-  "crates/datum-statemachine",
-  "crates/datum-esign",
-  "crates/datum-customfields",
-  "crates/datum-documents",
-  "crates/datum-print",
-  "crates/datum-module",
-  "crates/datum-server",
+  "crates/wicket-core",
+  "crates/wicket-test",
+  "crates/wicket-db",
+  "crates/wicket-audit",
+  "crates/wicket-identity",
+  "crates/wicket-numbering",
+  "crates/wicket-uom",
+  "crates/wicket-events",
+  "crates/wicket-jobs",
+  "crates/wicket-ledger",
+  "crates/wicket-statemachine",
+  "crates/wicket-esign",
+  "crates/wicket-customfields",
+  "crates/wicket-documents",
+  "crates/wicket-print",
+  "crates/wicket-module",
+  "crates/wicket-server",
   "modules/*",           # Wave 2s slice modules register by existing under modules/<name>/ (no member edit)
 ]
 
@@ -64,25 +64,25 @@ edition = "2024"
 rust-version = "1.98.1"
 license = "AGPL-3.0-or-later"
 publish = false
-repository = "https://github.com/BlinkingSun/datum-erp"
+repository = "https://github.com/BlinkingSun/wicket-erp"
 
 [workspace.dependencies]
-datum-core          = { path = "crates/datum-core" }
-datum-test          = { path = "crates/datum-test" }
-datum-db            = { path = "crates/datum-db" }
-datum-audit         = { path = "crates/datum-audit" }
-datum-identity      = { path = "crates/datum-identity" }
-datum-numbering     = { path = "crates/datum-numbering" }
-datum-uom           = { path = "crates/datum-uom" }
-datum-events        = { path = "crates/datum-events" }
-datum-jobs          = { path = "crates/datum-jobs" }
-datum-ledger        = { path = "crates/datum-ledger" }
-datum-statemachine  = { path = "crates/datum-statemachine" }
-datum-esign         = { path = "crates/datum-esign" }
-datum-customfields  = { path = "crates/datum-customfields" }
-datum-documents     = { path = "crates/datum-documents" }
-datum-print         = { path = "crates/datum-print" }
-datum-module        = { path = "crates/datum-module" }
+wicket-core          = { path = "crates/wicket-core" }
+wicket-test          = { path = "crates/wicket-test" }
+wicket-db            = { path = "crates/wicket-db" }
+wicket-audit         = { path = "crates/wicket-audit" }
+wicket-identity      = { path = "crates/wicket-identity" }
+wicket-numbering     = { path = "crates/wicket-numbering" }
+wicket-uom           = { path = "crates/wicket-uom" }
+wicket-events        = { path = "crates/wicket-events" }
+wicket-jobs          = { path = "crates/wicket-jobs" }
+wicket-ledger        = { path = "crates/wicket-ledger" }
+wicket-statemachine  = { path = "crates/wicket-statemachine" }
+wicket-esign         = { path = "crates/wicket-esign" }
+wicket-customfields  = { path = "crates/wicket-customfields" }
+wicket-documents     = { path = "crates/wicket-documents" }
+wicket-print         = { path = "crates/wicket-print" }
+wicket-module        = { path = "crates/wicket-module" }
 
 # Closed allow-list. A new third-party crate is an escalation, not a commit.
 sqlx          = { version = "0.9", default-features = false, features = [
@@ -126,7 +126,7 @@ at least one member so Wave 2 lockfile diffs stay small.
 
 ```toml
 [package]
-name = "datum-<name>"
+name = "wicket-<name>"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -145,7 +145,7 @@ test-utils = []
 # exactly the edges in §4, via `.workspace = true`; third-party only from the allow-list
 
 [dev-dependencies]
-datum-test.workspace = true     # db-backed crates only
+wicket-test.workspace = true     # db-backed crates only
 tokio.workspace = true
 proptest.workspace = true
 ```
@@ -157,32 +157,32 @@ crate name below, hyphenated.
 
 | Crate | Kernel deps | Notes |
 |---|---|---|
-| `datum-core` | — | thiserror, serde, uuid, rust_decimal. **No sqlx, no async, no chrono.** |
-| `datum-test` | — | sqlx, tokio, thiserror, tracing. Harness only; Wave 1 owns it for the life of the build. |
-| `datum-db` | core | **Wave 1 stub has REAL parts** (D3 §11): `connect`, the `after_connect` / `after_release` pool hooks exactly as `research/decisions/audit-persistence.md` §2.2, and `Tx::begin` implementing §2.1–§2.3 (transaction-local actor, transaction-id check, fail closed). Only DDL and the audit trigger remain `Unimplemented`. |
-| `datum-audit` | core db | |
-| `datum-identity` | core db audit | |
-| `datum-numbering` | core db | |
-| `datum-uom` | core db audit | implements `core::UnitCatalog` + `core::UnitConverter` |
-| `datum-events` | core db | |
-| `datum-jobs` | core db events | |
-| `datum-ledger` | core db audit uom | implements `core::PostingSink` |
-| `datum-statemachine` | core db audit identity | uses `core::PostingSink` + `core::SignatureGate`; **never** ledger or esign |
-| `datum-esign` | core db audit identity | implements `core::SignatureGate` (Wave 2b) |
-| `datum-customfields` | core db audit | (Wave 2b) |
-| `datum-documents` | core db audit identity numbering statemachine | (Wave 2b; events and `SignatureGate` composed in `datum-module`) |
-| `datum-print` | core db audit documents esign | (Wave 2b) |
-| `datum-module` | all of the above | composition root |
-| `datum-server` | everything | only crate allowed `axum`, `tower*`, `clap` |
+| `wicket-core` | — | thiserror, serde, uuid, rust_decimal. **No sqlx, no async, no chrono.** |
+| `wicket-test` | — | sqlx, tokio, thiserror, tracing. Harness only; Wave 1 owns it for the life of the build. |
+| `wicket-db` | core | **Wave 1 stub has REAL parts** (D3 §11): `connect`, the `after_connect` / `after_release` pool hooks exactly as `research/decisions/audit-persistence.md` §2.2, and `Tx::begin` implementing §2.1–§2.3 (transaction-local actor, transaction-id check, fail closed). Only DDL and the audit trigger remain `Unimplemented`. |
+| `wicket-audit` | core db | |
+| `wicket-identity` | core db audit | |
+| `wicket-numbering` | core db | |
+| `wicket-uom` | core db audit | implements `core::UnitCatalog` + `core::UnitConverter` |
+| `wicket-events` | core db | |
+| `wicket-jobs` | core db events | |
+| `wicket-ledger` | core db audit uom | implements `core::PostingSink` |
+| `wicket-statemachine` | core db audit identity | uses `core::PostingSink` + `core::SignatureGate`; **never** ledger or esign |
+| `wicket-esign` | core db audit identity | implements `core::SignatureGate` (Wave 2b) |
+| `wicket-customfields` | core db audit | (Wave 2b) |
+| `wicket-documents` | core db audit identity numbering statemachine | (Wave 2b; events and `SignatureGate` composed in `wicket-module`) |
+| `wicket-print` | core db audit documents esign | (Wave 2b) |
+| `wicket-module` | all of the above | composition root |
+| `wicket-server` | everything | only crate allowed `axum`, `tower*`, `clap` |
 
-## 5. Stub rules (every crate except `datum-core` and `datum-test`)
+## 5. Stub rules (every crate except `wicket-core` and `wicket-test`)
 
 - `src/lib.rs` exports the **real** public type and trait names from
   `research/audits/slice-wave1-stubs.md` §5 for that crate, amended by §4 above.
 - Fallible bodies return `Error::Unimplemented`; **zero** `todo!()` / `unimplemented!()`.
 - Each crate defines its own `Error` (`thiserror`, `#[non_exhaustive]`) with at least
-  `Unimplemented`, and `From<datum_core::Error>`; db-backed crates also `From<sqlx::Error>`
-  via `datum_db::Error`.
+  `Unimplemented`, and `From<wicket_core::Error>`; db-backed crates also `From<sqlx::Error>`
+  via `wicket_db::Error`.
 - Db-backed crates carry `migrations/00000000000000_placeholder.up.sql` and `.down.sql`
   (both a comment-only no-op), `build.rs` with `println!("cargo:rerun-if-changed=migrations")`,
   and `pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");`.
@@ -190,13 +190,13 @@ crate name below, hyphenated.
   set in `.cargo/config.toml` `[env]`, never in `.env`.
 - One `#[cfg(test)]` smoke test per stub: `Error::Unimplemented` formats; `MIGRATOR`
   has at least one migration. Nothing in a Wave 1 **lib** test needs Postgres.
-- Stubs may name only this subset of `datum-core`: `Error`, `Result`, `Actor`,
+- Stubs may name only this subset of `wicket-core`: `Error`, `Result`, `Actor`,
   `ActorKind`, `Identifier`, `ItemId`, `LotId`, `SerialId`, `LocationId`, `UnitId`,
   `CurrencyId`, `Money`, `AnyQuantity`, `DimensionKind`, `PostingSink`,
   `PostingIntent`, `SignatureGate`, `SignatureRequirement`, `SignatureToken`,
   `RecordRef`. Anything else from core is a Wave 2 concern.
-- Re-export nothing from other datum crates.
-- **`datum-db` exception:** the items marked REAL in §4 are implemented and tested in Wave 1 (against a scratch database the lane creates from `DATUM_BOOTSTRAP_URL` and drops), because thirteen Wave 2 lanes would otherwise each invent the session protocol.
+- Re-export nothing from other wicket crates.
+- **`wicket-db` exception:** the items marked REAL in §4 are implemented and tested in Wave 1 (against a scratch database the lane creates from `WICKET_BOOTSTRAP_URL` and drops), because thirteen Wave 2 lanes would otherwise each invent the session protocol.
 
 ### 5a. The raw-SQL fence (D3 §11; owned by `ws-skeleton`)
 
@@ -207,9 +207,9 @@ and `query_scalar` are allowed everywhere** (amended 2026-09-12 at batch 2.3): t
 query objects by design, so every kernel crate constructs them; the bypass the fence exists to stop — executing a
 write on a raw pool instead of through `Tx::begin` — is caught mechanically by `audit.require_context` (fail
 closed, `42501`), and every crate from batch 2.3 on carries a named test `writes_go_through_tx` proving that a
-write on a raw pool connection to one of its audited tables aborts. Reads through `ReadPool` are legitimate. `datum-db`, `datum-audit` and **`datum-test`** opt out of that list with a crate-level `#![allow(clippy::disallowed_methods, clippy::disallowed_macros)]` and a one-line justification (`datum-test` is the test harness: it creates and drops databases and probes sessions with raw SQL, and it never ships in the binary — exemption ruled 2026-09-12 at Wave 1 integration, where the fence and the harness met for the first time). The `justfile` recipe `lint-sql` runs `rg` for the same session-protocol tokens (not `sqlx::query`) outside `crates/datum-db`, `crates/datum-audit` and `crates/datum-test` and fails on any hit; CI runs it.
+write on a raw pool connection to one of its audited tables aborts. Reads through `ReadPool` are legitimate. `wicket-db`, `wicket-audit` and **`wicket-test`** opt out of that list with a crate-level `#![allow(clippy::disallowed_methods, clippy::disallowed_macros)]` and a one-line justification (`wicket-test` is the test harness: it creates and drops databases and probes sessions with raw SQL, and it never ships in the binary — exemption ruled 2026-09-12 at Wave 1 integration, where the fence and the harness met for the first time). The `justfile` recipe `lint-sql` runs `rg` for the same session-protocol tokens (not `sqlx::query`) outside `crates/wicket-db`, `crates/wicket-audit` and `crates/wicket-test` and fails on any hit; CI runs it.
 
-## 6. `datum-core` public surface (frozen)
+## 6. `wicket-core` public surface (frozen)
 
 The complete contract is `research/decisions/core-quantity.md` §2 (types, verbatim),
 §4 (numeric representation), §6 (serialization boundaries), §8 (acceptance mechanisms).
@@ -239,7 +239,7 @@ pub type Result<T> = core::result::Result<T, Error>;
 ### 6.2 `PostingSink` — how a hook contributes postings without a ledger dependency
 
 Design: a **synchronous collector with one finalize point**. A hook or transition pushes *intents*
-into the sink; `datum-ledger` implements the sink as a group builder and, at `finalize`, inserts the
+into the sink; `wicket-ledger` implements the sink as a group builder and, at `finalize`, inserts the
 group header, the postings and the consumption edges in the one database transaction the transition
 runs in. Core has no async and no database. Shapes mirror `research/decisions/ledger-invariant.md`
 §4.1, §5.1–5.3. **Ratified by DECISION D-W1-3** (`_team/reports/DECISION-traits-profiles.md`);
@@ -324,7 +324,7 @@ pub trait PostingSink {
 pub struct NoPostings;   // contribute -> Err(NoSink); finalize -> Err(NoSink)
 ```
 
-Normative rules (`datum-ledger` and `datum-statemachine` enforce them and are audited on them):
+Normative rules (`wicket-ledger` and `wicket-statemachine` enforce them and are audited on them):
 
 1. **One sink per transaction**, `&mut dyn PostingSink` to every hook in the hook order below,
    then one `finalize`. Two sinks in one transaction is a defect (D2 §9.4). A sink that received
@@ -336,7 +336,7 @@ Normative rules (`datum-ledger` and `datum-statemachine` enforce them and are au
 3. **Withdrawals are allocated, explicitly or automatically, never left unallocated.** A
    `boundary == None`, negative quantity intent must, by `finalize`, be covered by `Consumption`
    intents whose quantity and money sums reproduce it (D2 P3). Explicit picks come from hooks;
-   otherwise `datum-ledger`'s allocator produces them at `finalize` from the item's cost method
+   otherwise `wicket-ledger`'s allocator produces them at `finalize` from the item's cost method
    and layers re-derived from the ledger — never from the withdrawal's own numbers (D2 §9.2), and
    never from the consuming posting's value rows. Short layers → `AllocationRequired`; explicit
    edges that do not add up → `AllocationMismatch`; no clamping, no invented layer.
@@ -350,10 +350,10 @@ Normative rules (`datum-ledger` and `datum-statemachine` enforce them and are au
    quantity intent at a real location must be the `consuming` side of at least one `Consumption`
    edge naming the postings it was made from; else `LineageRequired`. P3 makes *withdrawals*
    total; only this rule makes the forward and backward traces of Wave 2s acceptance 8 agree.
-7. **Enum bijection.** `datum-ledger` owns the Rust↔SQL enum mapping (D2 §5.1) and carries an
+7. **Enum bijection.** `wicket-ledger` owns the Rust↔SQL enum mapping (D2 §5.1) and carries an
    exhaustive round-trip test over every variant.
 8. **Hook order** is dependency-topological over the registering modules, ties broken by module
-   id; `datum-statemachine` documents and tests it (`docs/03` §3.2). A value intent may only price
+   id; `wicket-statemachine` documents and tests it (`docs/03` §3.2). A value intent may only price
    a handle contributed earlier in that order.
 9. Boundary-matrix violations (D2 §4.2) fail at insert, i.e. at `finalize`; an implementation may
    reject earlier, never later.
@@ -361,7 +361,7 @@ Normative rules (`datum-ledger` and `datum-statemachine` enforce them and are au
 ### 6.3 `SignatureGate` — how a transition demands a signature without an esign dependency
 
 Design: **verify, never mint**. Minting (two identification components, meaning, credential check,
-the signature row carrying the record's content hash and a permission snapshot) is `datum-esign`'s
+the signature row carrying the record's content hash and a permission snapshot) is `wicket-esign`'s
 asynchronous job before the transition; the transition receives a `SignatureToken` and asks the
 gate synchronously. Core ships `NoSignatures`, which refuses every token. **Ratified by DECISION
 D-W1-4**; the text below is that ruling's, verbatim.
@@ -403,7 +403,7 @@ pub struct NoSignatures;   // verify -> Err(SignatureError::NoProvider)
 ```
 
 Normative rules: as amended, with three edits — (i) `verify` is authoritative only in
-`datum-esign` (Wave 2b), which loads the row by `token.signature` and confirms both identification
+`wicket-esign` (Wave 2b), which loads the row by `token.signature` and confirms both identification
 components at mint, the stored hash, the live record at `record.version`, the **permission
 snapshot taken at mint** (a live RBAC read would need a database in core and is rejected), the
 meaning, and the single-use claim; (ii) single use is per signature, claimed in the transition's
@@ -413,7 +413,7 @@ both the `Required` edges and the `NotRequired` ones with their reasons, in both
 
 **Executor obligation (D-W1-4 (c)).** Every transition edge of a module marked `regulated = true`
 carries a total `SignatureDeclaration`: `Required { meaning, permission }` or
-`NotRequired { reason }`; an edge with neither does not register. `datum-statemachine`, not the
+`NotRequired { reason }`; an edge with neither does not register. `wicket-statemachine`, not the
 module author, calls `verify` before the mutation on every `Required` edge and fails closed. A
 release build whose enabled set contains a `Required` edge while `NoSignatures` is bound **fails at
 startup**, and CI asserts no release profile binds `NoSignatures`. The configuration manifest
@@ -422,9 +422,9 @@ startup**, and CI asserts no release profile binds `NoSignatures`. The configura
 ## 7. `justfile` recipe names (fixed; bodies belong to `ws-skeleton`)
 
 `fmt`, `fmt-check`, `clippy`, `lint-sql` (§5a), `test`, `test-lib`, `test-db` (runs with
-`DATUM_REQUIRE_PG=1`), `db-up`, `db-down`, `db-reset` (applies `dev/sql/*.sql` in order, skipping `*-gc.sql`), `db-gc` (opt-in: drops stale `datum_t_*` case databases via `dev/sql/90-gc.sql`; see the harness creation stamp
-against `DATUM_BOOTSTRAP_URL`), `migrate` and `sqlx-prepare` (per crate, never
-`--workspace`; both export `DATABASE_URL=$DATUM_MIGRATE_DATABASE_URL` for sqlx-cli),
+`WICKET_REQUIRE_PG=1`), `db-up`, `db-down`, `db-reset` (applies `dev/sql/*.sql` in order, skipping `*-gc.sql`), `db-gc` (opt-in: drops stale `wicket_t_*` case databases via `dev/sql/90-gc.sql`; see the harness creation stamp
+against `WICKET_BOOTSTRAP_URL`), `migrate` and `sqlx-prepare` (per crate, never
+`--workspace`; both export `DATABASE_URL=$WICKET_MIGRATE_DATABASE_URL` for sqlx-cli),
 `ci` (= `fmt-check && clippy && lint-sql && test-lib`), `ci-db` (= `ci && test-db`).
 
 `db-up` uses `docker compose -f dev/compose.yml up -d` when `docker` is on PATH; otherwise it
@@ -437,13 +437,13 @@ absent.
 
 
 **§5a.1 — the fence is a law, not a grep (2026-09-12 05:36).** The fence exists to keep the session
-protocol inside `datum-db`, `datum-audit`, and `datum-test`. Circumventing the lint is a Fail-class
+protocol inside `wicket-db`, `wicket-audit`, and `wicket-test`. Circumventing the lint is a Fail-class
 finding regardless of any other merit: assembling a confined `sqlx` path from string pieces at build
 or run time; generating query code into `OUT_DIR` and `include!`-ing it; `allow(clippy::disallowed_*)`
 at any scope outside the three crates; any `sqlx` token in a `build.rs`; and running DDL, `GRANT`, or
 `CREATE EXTENSION` from Rust in a module crate (all DDL lives in migrations run by the migrator as
-`datum_migrate`). `just lint-sql` will grow greps for the mechanical subset (crate-level allows,
-`sqlx` in `build.rs`); the rest is audited. First measured on `datum-uom` attempt 1 (2026-09-12).
+`wicket_migrate`). `just lint-sql` will grow greps for the mechanical subset (crate-level allows,
+`sqlx` in `build.rs`); the rest is audited. First measured on `wicket-uom` attempt 1 (2026-09-12).
 
 ## 8. Environment
 
@@ -451,21 +451,21 @@ at any scope outside the three crates; any `sqlx` token in a `build.rs`; and run
 
 ```
 # names are D3's (research/decisions/audit-persistence.md §1.1); dev passwords only
-DATUM_DATABASE_URL=postgres://datum_app:datum@127.0.0.1:5432/datum_test?sslmode=disable
-DATUM_MIGRATE_DATABASE_URL=postgres://datum_migrate:datum@127.0.0.1:5432/datum_test?sslmode=disable
-DATUM_BOOTSTRAP_URL=postgres://127.0.0.1:5432/postgres?sslmode=disable   # MacBook loopback trust; other nodes add user:password
-DATUM_TEST_TEMPLATE=datum_test_template
-# DATUM_REQUIRE_PG=1   (CI only: a missing database is a failure, not a skip)
+WICKET_DATABASE_URL=postgres://wicket_app:wicket@127.0.0.1:5432/wicket_test?sslmode=disable
+WICKET_MIGRATE_DATABASE_URL=postgres://wicket_migrate:wicket@127.0.0.1:5432/wicket_test?sslmode=disable
+WICKET_BOOTSTRAP_URL=postgres://127.0.0.1:5432/postgres?sslmode=disable   # MacBook loopback trust; other nodes add user:password
+WICKET_TEST_TEMPLATE=wicket_test_template
+# WICKET_REQUIRE_PG=1   (CI only: a missing database is a failure, not a skip)
 ```
 
 There is no bare `DATABASE_URL` in the product; the two `just` recipes that drive sqlx-cli
-export it from `DATUM_MIGRATE_DATABASE_URL` for the duration of the command. Tests are
-ephemeral per test: a database cloned from `DATUM_TEST_TEMPLATE` and dropped afterwards
+export it from `WICKET_MIGRATE_DATABASE_URL` for the duration of the command. Tests are
+ephemeral per test: a database cloned from `WICKET_TEST_TEMPLATE` and dropped afterwards
 (D3 §11), never a shared database with a shared `audit.event`.
 
 `just db-reset`, `just db-gc`, and `just test-db` derive the standing names from
-`DATUM_TEST_TEMPLATE` (default `datum_test_template`) and `DATUM_TEST_DB` (default: the
-database path in `DATUM_DATABASE_URL`, else `datum_test`). The five roles in §8a stay
+`WICKET_TEST_TEMPLATE` (default `wicket_test_template`) and `WICKET_TEST_DB` (default: the
+database path in `WICKET_DATABASE_URL`, else `wicket_test`). The five roles in §8a stay
 cluster-wide; only the database names change. Unset, the defaults are identical to public
 CI and the three CI nodes.
 
@@ -473,32 +473,32 @@ Per-worktree isolation on a shared cluster (lanes, audits, and integration gates
 `just ci-db` concurrently) is a pair plus URLs that point at that pair:
 
 ```
-DATUM_TEST_TEMPLATE=datum_tpl_gate
-DATUM_TEST_DB=datum_gate
-DATUM_DATABASE_URL=postgres://datum_app:datum@127.0.0.1:5432/datum_gate?sslmode=disable
-DATUM_MIGRATE_DATABASE_URL=postgres://datum_migrate:datum@127.0.0.1:5432/datum_gate?sslmode=disable
-DATUM_BOOTSTRAP_URL=postgres://127.0.0.1:5432/postgres?sslmode=disable
+WICKET_TEST_TEMPLATE=wicket_tpl_gate
+WICKET_TEST_DB=wicket_gate
+WICKET_DATABASE_URL=postgres://wicket_app:wicket@127.0.0.1:5432/wicket_gate?sslmode=disable
+WICKET_MIGRATE_DATABASE_URL=postgres://wicket_migrate:wicket@127.0.0.1:5432/wicket_gate?sslmode=disable
+WICKET_BOOTSTRAP_URL=postgres://127.0.0.1:5432/postgres?sslmode=disable
 ```
 
-`just db-reset` then creates `datum_tpl_gate` / `datum_gate` and does not touch
-`datum_test_template` / `datum_test`.
+`just db-reset` then creates `wicket_tpl_gate` / `wicket_gate` and does not touch
+`wicket_test_template` / `wicket_test`.
 
 `SQLX_OFFLINE=true` lives in `.cargo/config.toml` and nowhere else.
 
 ### 8a. The five roles (verbatim from D3 §1.1; `harness` owns the file, every lane may apply it to a scratch database)
 
 ```sql
-CREATE ROLE datum_owner       NOLOGIN;
-CREATE ROLE datum_audit_row   NOLOGIN;
-CREATE ROLE datum_audit_event NOLOGIN;
-CREATE ROLE datum_migrate     LOGIN;
-CREATE ROLE datum_app         LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE;
-GRANT datum_owner TO datum_migrate;
-REVOKE SET ON PARAMETER session_replication_role FROM datum_app;  -- PG 15+
+CREATE ROLE wicket_owner       NOLOGIN;
+CREATE ROLE wicket_audit_row   NOLOGIN;
+CREATE ROLE wicket_audit_event NOLOGIN;
+CREATE ROLE wicket_migrate     LOGIN;
+CREATE ROLE wicket_app         LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE;
+GRANT wicket_owner TO wicket_migrate;
+REVOKE SET ON PARAMETER session_replication_role FROM wicket_app;  -- PG 15+
 ```
 
 Three schema classes (DECISION D-W1-2): `app` (records with history: no DELETE), `transient`
-(working state with no history: DELETE allowed), `audit` (SELECT only). `datum_app` holds TRUNCATE
+(working state with no history: DELETE allowed), `audit` (SELECT only). `wicket_app` holds TRUNCATE
 nowhere. `ON DELETE CASCADE` is banned in every schema. The grant SQL is in `SPEC-harness.md`.
 
 ## 9. Things no lane does
@@ -515,20 +515,20 @@ inherits `license.workspace = true`.
 The placeholder scheme is only safe with these rules, which the specs restate:
 
 1. **Placeholders are worktree-only and untracked.** The `ws-skeleton` branch never contains
-   `crates/datum-core/**` or `crates/datum-test/**`. Gate: `git ls-tree -r lane/ws-skeleton
-   --name-only | grep -E '^crates/datum-(core|test)/'` prints nothing.
+   `crates/wicket-core/**` or `crates/wicket-test/**`. Gate: `git ls-tree -r lane/ws-skeleton
+   --name-only | grep -E '^crates/wicket-(core|test)/'` prints nothing.
 2. **Throwaway roots are untracked.** `core-r*` and `harness` branches contain only
    `crates/<own>/**` (and for `harness` also `dev/sql/**`, `.env.example`). Gate: `git ls-tree -r
    <branch> --name-only` shows nothing else.
 3. **Merge order:** doc lanes (any order) → `ws-skeleton` (merge) → winning `core-r*` and
    `harness` by **path checkout**, never by branch merge:
-   `git checkout lane/core-rN -- crates/datum-core` and
-   `git checkout lane/harness -- crates/datum-test dev/sql .env.example`.
+   `git checkout lane/core-rN -- crates/wicket-core` and
+   `git checkout lane/harness -- crates/wicket-test dev/sql .env.example`.
 4. **One lockfile writer:** after step 3, `cargo generate-lockfile` once on the integrated
    tree; commit `Cargo.lock` once.
-5. **Post-integration gate on the integrated tree:** `head -1 crates/datum-core/src/lib.rs`
-   and `crates/datum-test/src/lib.rs` contain no `PLACEHOLDER`; `just ci` green; `just db-reset`
-   then `just ci-db` green with `DATUM_REQUIRE_PG=1`; `cargo tree -e normal` matches §4.
+5. **Post-integration gate on the integrated tree:** `head -1 crates/wicket-core/src/lib.rs`
+   and `crates/wicket-test/src/lib.rs` contain no `PLACEHOLDER`; `just ci` green; `just db-reset`
+   then `just ci-db` green with `WICKET_REQUIRE_PG=1`; `cargo tree -e normal` matches §4.
 6. Nothing in Wave 2 starts until step 5 passes.
 
 ### 10a. Wave 2 and later — lockfile and lane commits

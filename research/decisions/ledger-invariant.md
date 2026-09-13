@@ -1,11 +1,11 @@
-# DECISION — The conservation invariant of the Datum ledger
+# DECISION — The conservation invariant of the Wicket ledger
 
 **Authority:** Opus (decision lane) · **Date:** 2026-09-11 · **Status:** decided, binding
 **Inputs:** `_team/reports/sweep-plan-ledger.md`, `_team/reports/sweep-plan-typed-qty.md`,
 ADR 0003, ADR 0004, ADR 0007, `PLAN.md` §5 §6, `docs/00-erp-primer.md` §9,
 `docs/02-architecture.md` §2–§3.
 **Amends:** `docs/adr/0004-append-only-ledger.md` (in place, this cycle).
-**Binds:** `datum-ledger`, `datum-uom`, `datum-core`, all Wave 2 migrations, `docs/05-data-model.md`.
+**Binds:** `wicket-ledger`, `wicket-uom`, `wicket-core`, all Wave 2 migrations, `docs/05-data-model.md`.
 
 ---
 
@@ -703,7 +703,7 @@ Points I have reasoned about and want on the record:
   tables regardless of the caller's role or schema path.
 - **Custom SQLSTATEs in class `ZL`.** Class letters `I` through `Z` are available for
   implementation-defined conditions, so these cannot collide with a PostgreSQL code.
-  `datum-ledger` maps `ZL000`–`ZL007` to distinct typed errors. SQLx surfaces them on
+  `wicket-ledger` maps `ZL000`–`ZL007` to distinct typed errors. SQLx surfaces them on
   `tx.commit()`, which means **every multi-posting write must use an explicit
   transaction** — the autocommit path can swallow a deferred failure. That is a mandated
   integration test, not a code-review item.
@@ -777,7 +777,7 @@ posting of `0.58333333 FT`. Ever. On any code path.
 
 ### R2 — conversion happens exactly once, before any posting exists
 
-`datum-uom` converts the entered value to canonical units at the API boundary, with
+`wicket-uom` converts the entered value to canonical units at the API boundary, with
 **round-half-even** at `stock_scale`. What the operator typed is preserved as
 `entered_quantity`, `entered_uom_id` and `conversion_factor` — audited provenance, never
 summed by any invariant. The kernel owns this, not a module, per
@@ -808,7 +808,7 @@ something real:
 
 - The `ROUNDING` boundary is reachable **only** from an `ADJUSTMENT` group
   (`boundary_permitted`), which **must** carry a reason code (`reason_required`), and
-  `datum-ledger` restricts that reason code to `UOM_CONVERSION_RESIDUAL`.
+  `wicket-ledger` restricts that reason code to `UOM_CONVERSION_RESIDUAL`.
 - `rounding_is_dust` caps `abs(quantity)` on any `ROUNDING` row at the item's
   `residual_tolerance`. **Dust must actually be dust.** Writing off three whole bars as a
   rounding residual is rejected by the database, and whoever tried is forced to name a
@@ -900,7 +900,7 @@ Honesty here is worth more than a stronger-sounding claim.
    ledger must be able to record an over-receipt, because over-receipts happen.
 2. **P3's teeth depend on an architectural obligation, not on SQL.** The predicate is
    only load-bearing while the movement quantity and the layer allocation come from two
-   computations. **Binding on `datum-ledger`:** the movement request states the quantity;
+   computations. **Binding on `wicket-ledger`:** the movement request states the quantity;
    the allocator independently resolves it against open layers and returns *its own*
    total; the posting builder never derives one from the other. If a future refactor
    makes the allocator echo the request, P3 degenerates to a checksum. Tag the test
@@ -917,14 +917,14 @@ Honesty here is worth more than a stronger-sounding claim.
 
 ## 10. Consequences for downstream lanes
 
-- **`datum-uom`** owns conversion, half-even rounding at `stock_scale`, lot-pinned
-  factors, and effectivity-versioned factor history. It is already on `datum-ledger`'s
+- **`wicket-uom`** owns conversion, half-even rounding at `stock_scale`, lot-pinned
+  factors, and effectivity-versioned factor history. It is already on `wicket-ledger`'s
   dependency edge (`PLAN.md` §5). No new edges.
-- **`datum-core`** takes the `sweep-plan-typed-qty` recommendation as-is: phantom
+- **`wicket-core`** takes the `sweep-plan-typed-qty` recommendation as-is: phantom
   **dimension**, runtime `UnitId`, `Money` as its own type. Nothing here needs
   `Quantity<Foot>`. `PLAN.md` §5's sentence should be amended by that lane's decision,
   not by this one.
-- **`datum-ledger`** owns `posting_group`, `posting`, `consumption`, `stock_item`,
+- **`wicket-ledger`** owns `posting_group`, `posting`, `consumption`, `stock_item`,
   `location`, the trigger, and the `ZL000`–`ZL007` mapping to typed errors. Every
   multi-posting write uses an explicit SQLx transaction and asserts on `commit()`.
 - **Property tests (`PLAN.md` §7)** generate per **slice**, never a group-wide scalar.
@@ -937,7 +937,7 @@ Honesty here is worth more than a stronger-sounding claim.
   PG 17; P3's lateral plan at 10M postings; SQLx deferred-failure surfacing on
   `commit()`; the GUC memo, *only* if duplicate firings measure as material.
 - **`docs/05-data-model.md`** must land the slice definitions, the boundary matrix and §7
-  verbatim before any `datum-ledger` migration is written.
+  verbatim before any `wicket-ledger` migration is written.
 - **`docs/03-module-system.md` authoring guide** teaches three rules: a dimension on an
   immutable row is free and a total on a mutable row is forbidden; value that moves with
   matter goes in matter's group while value that enters the system gets its own; and the
