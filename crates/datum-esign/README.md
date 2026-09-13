@@ -16,7 +16,6 @@ Class `app`, schema `esign` (R-2s-1; kernel crate owns its schema):
 |---|---|
 | `esign.signature` | Insert-only. `datum_app` holds `SELECT`, `INSERT`, and `UPDATE (consumed_at, consumed_xid)` only (D-2b-1). A `BEFORE UPDATE` trigger refuses any other column; `consumed_at` is monotone. No `DELETE`. |
 | `esign.meaning_policy` | Reason-text policy (`requires_reason`, `permission_hint`). |
-| `esign.supersession` | Insert-only link `old → new`. `supersede` INSERTs here (SECURITY INVOKER); it does not `UPDATE esign.signature.superseded_by`. |
 
 Working state is `transient.signing_session` (D-2b-3; `DELETE` allowed, not
 audited). This crate is not on the R-2s-3 exemption list, so production Rust
@@ -100,23 +99,35 @@ is accepted only when `continuous_session = "on"` and a live
 - `manifestation_for_record(tx, record)` / `manifestation_for_record_on(pool, record)` — D-2b-2 list by record version including supersession. **Consumer: `datum-print`** (R-2s-3)
 - `supersede(tx, old, new)` (INSERT into `esign.supersession`), `close_session(tx, reason)` (actor from the bound `WriteContext`), `log_refusal`
 - `register_projection(doc_type, fn)`, default `identity_projection` for first-party machines; extra bound machines fail `Kernel::build` without a registration
+- `manifestation(&ReadPool, id)`, `manifestation_in_tx(tx, id)`, `archival_bundle(&ReadPool, id)`, `verify_bundle` (pure; `chain_ok` requires a non-empty seal chain)
+- `signature_consumed_at(tx, id)` / `signature_consumed_at_on(pool, id)` — `consumed_at`, or `None` if missing/unconsumed. **Consumer: `datum-server`** (R-2s-3)
+- `manifestation_for_record(tx, record)` / `manifestation_for_record_on(pool, record)` — D-2b-2 list by record version including live-version supersession. **Consumer: `datum-print`** (R-2s-3)
+- `close_session(tx, reason)` (actor from the bound `WriteContext`), `log_refusal`
+- `register_projection(doc_type, fn)`, default `identity_projection`
 
 Reads go through `datum_db::ReadPool` (`fetch_one` / `fetch_optional` /
-`fetch_all`) and, for the print seam, the sealed `Tx`. `archival_bundle` still
+`fetch_all`) and, for the print and server seams, the sealed `Tx`. `archival_bundle` still
 calls `datum_audit::bundle`, which takes `&Pool`; that one call uses
 `ReadPool::as_pool`.
 
-### Render read seam (`datum-print` is the consumer)
+## Published read seams
 
-Kernel crates must not SELECT `esign.*` (R-2s-3). `datum-print` is the named
-consumer of the record-keyed manifestation list. Direct SELECT of this crate's
-tables (invoker-rights; no `SECURITY DEFINER`).
+Kernel crates and `datum-server` must not SELECT `esign.*` (CONTRACT §5a /
+R-2s-3 / invariant 6). This crate is the owner. Direct SELECT of these tables
+stays here (invoker-rights; no `SECURITY DEFINER`). One D-2b-2 wire:
+`Manifestation` / `SignatureManifest` — do not invent a second.
 
-| Function | Signature | Source of truth |
-|---|---|---|
-| `manifestation` | `async fn manifestation(pool: &ReadPool, id: SignatureId) -> Result<Manifestation>` | `esign.signature` + `esign.supersession` overlay |
-| `manifestation_for_record` | `async fn manifestation_for_record(tx: &mut Tx<'_>, record: &RecordRef) -> Result<Vec<Manifestation>>` | same, filtered by `(record_table, record_id, record_version)`, oldest first |
-| `manifestation_for_record_on` | `async fn manifestation_for_record_on(pool: &ReadPool, record: &RecordRef) -> Result<Vec<Manifestation>>` | same, through `ReadPool` (no actor) |
+| Function | Signature | Source of truth | Consumer |
+|---|---|---|---|
+| `manifestation` | `async fn manifestation(pool: &ReadPool, id: SignatureId) -> Result<Manifestation>` | `esign.signature` + live `sm.instance.version` overlay (D-2b-7) | `datum-server` GET `/esign/signatures/{id}` |
+| `manifestation_in_tx` | `async fn manifestation_in_tx(tx: &mut Tx<'_>, id: SignatureId) -> Result<Manifestation>` | same, on the sealed `Tx` (mint before commit) | `datum-server` POST `/esign/signatures` |
+| `signature_consumed_at` | `async fn signature_consumed_at(tx: &mut Tx<'_>, id: SignatureId) -> Result<Option<DateTime<Utc>>>` | `esign.signature.consumed_at`; `None` if missing or unconsumed | `datum-server` Required-edge pre-check |
+| `signature_consumed_at_on` | `async fn signature_consumed_at_on(pool: &ReadPool, id: SignatureId) -> Result<Option<DateTime<Utc>>>` | same, through `ReadPool` (no actor) | ReadPool |
+| `manifestation_for_record` | `async fn manifestation_for_record(tx: &mut Tx<'_>, record: &RecordRef) -> Result<Vec<Manifestation>>` | same wire, filtered by `(record_table, record_id, record_version)`, oldest first | `datum-print` |
+| `manifestation_for_record_on` | `async fn manifestation_for_record_on(pool: &ReadPool, record: &RecordRef) -> Result<Vec<Manifestation>>` | same, through `ReadPool` (no actor) | `datum-print` |
+
+`superseded` is `true` when live `sm.instance.version > record.version`;
+`superseded_by_version` is that live version, else `null`.
 
 `record_content_hash` is SHA-256 over the canonical JSON of
 `{ projection, instance: { doc_type, doc_id, state, version } }`. The caller
