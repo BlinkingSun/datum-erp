@@ -51,7 +51,7 @@ same moment it records `module.configuration`. Do not infer the profile from
 
 ## Wire shapes (docs/10)
 
-**POST** `/api/v1/print/render` (transport in `datum-server`):
+**POST** `/api/v1/print/render` HTTP transport is deferred to Wave 3 (Tx API today):
 
 ```json
 {

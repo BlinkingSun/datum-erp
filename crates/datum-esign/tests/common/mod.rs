@@ -2,15 +2,17 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use datum_core::{
-    Actor, ActorKind, Identifier, PermissionKey, RecordRef, SignatureMeaning, SignatureRequirement,
+    Actor, ActorKind, Identifier, NoPostings, NoSignatures, PermissionKey, RecordRef,
+    SignatureMeaning, SignatureRequirement,
 };
-use datum_db::{ReadPool, WriteContext, WritePool};
+use datum_db::{ReadPool, Tx, WriteContext, WritePool};
 use datum_esign::{InstanceTriple, LiveDoc, MintRequest, SessionPolicy, Signature};
 use datum_identity::rbac::{RoleBundle, assign_role, seed_bundles};
 use datum_identity::{
     Principal, PrincipalKind, create_principal, seed_builtins, set_login_credential,
     set_signing_credential,
 };
+use datum_statemachine::{DocRef, EdgeBuilder, Engine, Machine, with_action};
 use serde_json::Value;
 use sqlx::PgPool;
 use sqlx::{query as sql_query, query_as as sql_query_as, query_scalar as sql_query_scalar};
@@ -292,4 +294,60 @@ pub fn parse_profile(slug: &'static str, id: &'static str, toml: &str) -> Profil
         }
     }
     ProfileCase { slug, id, policy }
+}
+
+/// Unsigned `wo` machine used to persist a live `sm.instance` for D-2b-7.
+pub fn unsigned_wo_engine() -> Engine {
+    let mut eng = Engine::new();
+    eng.register_machine(
+        Machine::builder("wo")
+            .state("Draft")
+            .state("Released")
+            .edge(
+                EdgeBuilder::new("Draft", "Released", "release", PERM)
+                    .not_required("unsigned bump for D-2b-7 read-back"),
+            )
+            .build()
+            .expect("machine"),
+    )
+    .expect("reg");
+    eng.freeze().expect("freeze");
+    eng
+}
+
+/// Persist the unsigned `wo` machine and spawn `doc_id` in Draft.
+pub async fn persist_and_spawn_wo(write: &WritePool, doc_id: Identifier) -> (Engine, DocRef, i64) {
+    let eng = unsigned_wo_engine();
+    let doc = DocRef {
+        doc_type: "wo".into(),
+        doc_id,
+    };
+    let mut tx = Tx::begin(write, &system_ctx("sm.persist"))
+        .await
+        .expect("persist begin");
+    eng.persist(&mut tx).await.expect("persist");
+    let spawned = eng.spawn(&mut tx, &doc, "Draft").await.expect("spawn");
+    tx.commit().await.expect("persist commit");
+    (eng, doc, spawned.version)
+}
+
+/// Advance Draft → Released (no signature) so `sm.instance.version` bumps.
+pub async fn bump_wo(write: &WritePool, eng: &Engine, principal: &Principal, doc: &DocRef) -> i64 {
+    let mut ctx = user_ctx(principal, "pending");
+    ctx = with_action(ctx, doc, "release");
+    let mut tx = Tx::begin(write, &ctx).await.expect("bump begin");
+    let inst = eng
+        .transition(
+            &mut tx,
+            Box::new(NoPostings),
+            doc,
+            "release",
+            None,
+            &NoSignatures,
+            &ctx,
+        )
+        .await
+        .expect("bump");
+    tx.commit().await.expect("bump commit");
+    inst.version
 }

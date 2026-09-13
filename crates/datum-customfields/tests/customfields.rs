@@ -6,13 +6,18 @@ mod common;
 
 use datum_core::Identifier;
 use datum_customfields::{
-    DefinitionSpec, Error, FieldType, ManifestCustomField, ManifestCustomFields, Value, define,
-    definitions_for, get, gtin_valid, register_from_manifest, retire, set, validate,
+    DOC_TYPE, DefinitionSpec, DefinitionStatus, Error, FieldType, ManifestCustomField,
+    ManifestCustomFields, Value, define, definitions_for, doc_ref, get, gtin_valid,
+    register_from_manifest, retire, set, validate,
 };
 use datum_db::Tx;
+use datum_statemachine::current_state;
 use sqlx::query_scalar;
 
-use common::{PROFILES, migrate, open_db, write_ctx, write_pool};
+use common::{
+    PROFILES, frozen_engine, grant_retire_permission, migrate, open_db, persist_engine,
+    retire_write_ctx, write_ctx, write_pool,
+};
 
 const VALID_GTIN: &str = "4006381333931";
 
@@ -307,10 +312,15 @@ async fn retired_definition_values_still_read() {
         .unwrap();
         tx.commit().await.unwrap();
 
-        let mut tx = Tx::begin(&pool, &write_ctx("mod-items.retire", profile))
+        let eng = frozen_engine(profile);
+        persist_engine(&pool, &eng, profile).await;
+        grant_retire_permission(&pool, profile).await;
+        let mut tx = Tx::begin(&pool, &retire_write_ctx(profile, id))
             .await
             .unwrap();
-        retire(&mut tx, id).await.unwrap();
+        retire(&mut tx, &eng, id, &retire_write_ctx(profile, id))
+            .await
+            .unwrap();
         tx.commit().await.unwrap();
 
         let mut tx = Tx::begin(&pool, &write_ctx("customfields.get", profile))
@@ -391,10 +401,15 @@ async fn module_column_on_kernel_table() {
         let id = defs[0].id;
         tx.commit().await.unwrap();
 
-        let mut tx = Tx::begin(&pool, &write_ctx("mod-udi.retire", profile))
+        let eng = frozen_engine(profile);
+        persist_engine(&pool, &eng, profile).await;
+        grant_retire_permission(&pool, profile).await;
+        let mut tx = Tx::begin(&pool, &retire_write_ctx(profile, id))
             .await
             .unwrap();
-        retire(&mut tx, id).await.unwrap();
+        retire(&mut tx, &eng, id, &retire_write_ctx(profile, id))
+            .await
+            .unwrap();
         tx.commit().await.unwrap();
         db.finish().await.unwrap();
     })
@@ -453,6 +468,148 @@ async fn writes_go_through_tx() {
                 .unwrap_or_default(),
             "42501"
         );
+        db.finish().await.unwrap();
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn retire_goes_through_machine() {
+    for_each_profile(|profile| async move {
+        let Some(db) = open_db("cf_retire_sm", profile).await else {
+            return;
+        };
+        migrate(&db).await;
+        let pool = write_pool(&db);
+        let eng = frozen_engine(profile);
+        persist_engine(&pool, &eng, profile).await;
+        grant_retire_permission(&pool, profile).await;
+
+        let mut tx = Tx::begin(&pool, &write_ctx("customfields.define", profile))
+            .await
+            .unwrap();
+        let id = define(
+            &mut tx,
+            DefinitionSpec {
+                entity: "items.item".into(),
+                key: "legacy_sm".into(),
+                field_type: FieldType::String,
+                label: "Legacy".into(),
+                validation_rule: String::new(),
+                required: false,
+                indexed: false,
+                owner_module: "mod-items".into(),
+            },
+        )
+        .await
+        .unwrap();
+        let doc = doc_ref(id);
+        let live = current_state(&mut tx, &doc).await.unwrap().unwrap();
+        assert_eq!(live.0, DefinitionStatus::Active.as_str());
+        tx.commit().await.unwrap();
+
+        let ctx = retire_write_ctx(profile, id);
+        let mut tx = Tx::begin(&pool, &ctx).await.unwrap();
+        retire(&mut tx, &eng, id, &ctx).await.unwrap();
+        let live = current_state(&mut tx, &doc).await.unwrap().unwrap();
+        assert_eq!(live.0, DefinitionStatus::Retired.as_str());
+        tx.commit().await.unwrap();
+
+        let snapshot: String = query_scalar(
+            "SELECT status FROM customfields.definition
+             WHERE definition_id = $1 ORDER BY version DESC LIMIT 1",
+        )
+        .bind(id.as_uuid())
+        .fetch_one(db.app_pool())
+        .await
+        .unwrap();
+        assert_eq!(
+            snapshot,
+            DefinitionStatus::Active.as_str(),
+            "status column is the insert-time snapshot; live state is the machine"
+        );
+        let closed: bool = query_scalar(
+            "SELECT effective_to IS NOT NULL FROM customfields.definition
+             WHERE definition_id = $1 ORDER BY version DESC LIMIT 1",
+        )
+        .bind(id.as_uuid())
+        .fetch_one(db.app_pool())
+        .await
+        .unwrap();
+        assert!(closed, "retire closes effectivity");
+        let n: i64 = query_scalar(
+            "SELECT count(*) FROM audit.event
+             WHERE schema_name = 'sm' AND table_name = 'instance'",
+        )
+        .fetch_one(db.app_pool())
+        .await
+        .unwrap();
+        assert!(
+            n >= 1,
+            "machine transition is audited; got {n} sm.instance rows"
+        );
+        let mut tx = Tx::begin(&pool, &write_ctx("customfields.list", profile))
+            .await
+            .unwrap();
+        assert!(
+            definitions_for(&mut tx, "items.item")
+                .await
+                .unwrap()
+                .is_empty(),
+            "retired definition is not listed as active"
+        );
+        tx.rollback().await.unwrap();
+        assert_eq!(doc.doc_type, DOC_TYPE);
+        db.finish().await.unwrap();
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn retire_twice_is_conflict() {
+    for_each_profile(|profile| async move {
+        let Some(db) = open_db("cf_retire_2x", profile).await else {
+            return;
+        };
+        migrate(&db).await;
+        let pool = write_pool(&db);
+        let eng = frozen_engine(profile);
+        persist_engine(&pool, &eng, profile).await;
+        grant_retire_permission(&pool, profile).await;
+
+        let mut tx = Tx::begin(&pool, &write_ctx("customfields.define", profile))
+            .await
+            .unwrap();
+        let id = define(
+            &mut tx,
+            DefinitionSpec {
+                entity: "items.item".into(),
+                key: "once".into(),
+                field_type: FieldType::String,
+                label: "Once".into(),
+                validation_rule: String::new(),
+                required: false,
+                indexed: false,
+                owner_module: "mod-items".into(),
+            },
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+
+        let ctx = retire_write_ctx(profile, id);
+        let mut tx = Tx::begin(&pool, &ctx).await.unwrap();
+        retire(&mut tx, &eng, id, &ctx).await.unwrap();
+        tx.commit().await.unwrap();
+
+        let ctx = retire_write_ctx(profile, id);
+        let mut tx = Tx::begin(&pool, &ctx).await.unwrap();
+        let err = retire(&mut tx, &eng, id, &ctx).await.unwrap_err();
+        assert!(
+            matches!(err, Error::AlreadyRetired),
+            "second retire must conflict; got {err:?}"
+        );
+        tx.rollback().await.unwrap();
         db.finish().await.unwrap();
     })
     .await;

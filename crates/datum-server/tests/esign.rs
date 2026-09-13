@@ -129,11 +129,15 @@ async fn dummy_token_error_code_under_both_profiles() {
         match profile.id {
             datum_module::ProfileId::RegulatedDevice => {
                 let cal = w.calibration_doc.as_ref().expect("calibration spawned");
-                let (st, body) = w
-                    .post_if_match(
+                let (st, _, body) = w
+                    .call(
+                        "POST",
                         &format!("/api/v1/calibration/certificates/{cal}/approve"),
-                        json!({}),
-                        1,
+                        Some(vec![
+                            ("if-match", "\"1\"".into()),
+                            ("x-datum-signature", Uuid::now_v7().to_string()),
+                        ]),
+                        Some(json!({})),
                     )
                     .await;
                 assert_eq!(st, StatusCode::FORBIDDEN, "dummy {body}");
@@ -180,7 +184,7 @@ async fn regulated_release_refused_without_signature_succeeds_with_two_component
         .await;
     assert_eq!(
         st,
-        StatusCode::FORBIDDEN,
+        StatusCode::UNAUTHORIZED,
         "refused without signature {refused}"
     );
     assert_eq!(refused["error"]["code"], "SIGNATURE_REQUIRED", "{refused}");
@@ -208,6 +212,309 @@ async fn regulated_release_refused_without_signature_succeeds_with_two_component
         w_plain.calibration_doc.is_none(),
         "plain-shop enables no regulated module"
     );
+}
+
+async fn quarantined_stock(w: &common::World) -> (String, String, String, i64) {
+    let hex = Uuid::now_v7().simple().to_string().to_uppercase();
+    let tag = &hex[..8];
+    let item = {
+        let (st, v) = w
+            .post(
+                "/api/v1/items",
+                json!({
+                    "number": format!("RM-SIG-{tag}"),
+                    "revision": "A",
+                    "description": "signature-edge bar",
+                    "kind": "buy",
+                    "stock_uom": 1,
+                    "stock_scale": 0,
+                    "residual_tolerance": "0",
+                    "cost_method": "FIFO",
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::CREATED, "item {v}");
+        v["id"].as_str().expect("item id").to_string()
+    };
+    let qloc = {
+        let (st, v) = w
+            .post(
+                "/api/v1/locations",
+                json!({"code": format!("WH-Q-{tag}"), "name": "Quarantine", "kind": "warehouse"}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::CREATED, "qloc {v}");
+        v["id"].as_str().expect("qloc").to_string()
+    };
+    let aloc = {
+        let (st, v) = w
+            .post(
+                "/api/v1/locations",
+                json!({"code": format!("WH-A-{tag}"), "name": "Available", "kind": "warehouse"}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::CREATED, "aloc {v}");
+        v["id"].as_str().expect("aloc").to_string()
+    };
+    let lot = {
+        let (st, v) = w
+            .post(
+                "/api/v1/lots",
+                json!({"item_id": item, "identifier": format!("LOT-SIG-{tag}")}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::CREATED, "lot {v}");
+        v["id"].as_str().expect("lot").to_string()
+    };
+    let (st, rec) = w
+        .post(
+            "/api/v1/inventory/receipts",
+            json!({
+                "item_id": item,
+                "lot_id": lot,
+                "location_id": qloc,
+                "quantity": {"amount": "100", "unit": 1, "dimension": "Count"},
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::CREATED, "receipt {rec}");
+    let version = w.get(&format!("/api/v1/lots/{lot}")).await.1["version"]
+        .as_i64()
+        .unwrap_or(1);
+    (lot, qloc, aloc, version)
+}
+
+fn mint_lot_body(record_id: &str, version: i64) -> serde_json::Value {
+    json!({
+        "meaning": "Lot released",
+        "record": {
+            "table": "sm.instance",
+            "id": record_id,
+            "version": version
+        },
+        "identification": {
+            "code": USERNAME,
+            "secret": SIGNING_SECRET
+        }
+    })
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn lot_release_without_signature_is_403_regulated() {
+    if common::skip_if_no_pg() {
+        return;
+    }
+    let w = common::boot(Profile::regulated_device().unwrap()).await;
+    let (lot, qloc, aloc, ver) = quarantined_stock(&w).await;
+    let (st, body) = w
+        .post_if_match(
+            "/api/v1/inventory/releases",
+            json!({
+                "lot_id": lot,
+                "from_location_id": qloc,
+                "to_location_id": aloc,
+                "entered": {"amount": "100", "unit": 1, "dimension": "Count"},
+            }),
+            ver,
+        )
+        .await;
+    assert_eq!(st, StatusCode::UNAUTHORIZED, "unsigned release {body}");
+    assert_eq!(body["error"]["code"], "SIGNATURE_REQUIRED", "{body}");
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("missing token"),
+        "D-2b-5 missing token, got {body}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn lot_release_consumes_minted_signature_regulated() {
+    if common::skip_if_no_pg() {
+        return;
+    }
+    let w = common::boot(Profile::regulated_device().unwrap()).await;
+    let (lot, qloc, aloc, ver) = quarantined_stock(&w).await;
+    let (st, minted) = w
+        .post("/api/v1/esign/signatures", mint_lot_body(&lot, ver))
+        .await;
+    assert_eq!(st, StatusCode::CREATED, "mint {minted}");
+    let sig_id = minted["signature"]["id"].as_str().expect("id");
+
+    let (st, _, released) = w
+        .call(
+            "POST",
+            "/api/v1/inventory/releases",
+            Some(vec![
+                ("if-match", format!("\"{ver}\"")),
+                ("x-datum-signature", sig_id.to_string()),
+            ]),
+            Some(json!({
+                "lot_id": lot,
+                "from_location_id": qloc,
+                "to_location_id": aloc,
+                "entered": {"amount": "100", "unit": 1, "dimension": "Count"},
+            })),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "signed release {released}");
+    let after = w.get(&format!("/api/v1/lots/{lot}")).await.1;
+    assert_eq!(after["status"], "available", "{after}");
+
+    let (st, _, replay) = w
+        .call(
+            "POST",
+            "/api/v1/inventory/releases",
+            Some(vec![
+                ("if-match", format!("\"{ver}\"")),
+                ("x-datum-signature", sig_id.to_string()),
+            ]),
+            Some(json!({
+                "lot_id": lot,
+                "from_location_id": qloc,
+                "to_location_id": aloc,
+                "entered": {"amount": "100", "unit": 1, "dimension": "Count"},
+            })),
+        )
+        .await;
+    assert_eq!(st, StatusCode::CONFLICT, "replay {replay}");
+    assert_eq!(replay["error"]["code"], "CONFLICT", "{replay}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn lot_release_plain_shop_needs_no_signature() {
+    if common::skip_if_no_pg() {
+        return;
+    }
+    let w = common::boot(Profile::plain_shop().unwrap()).await;
+    let (lot, qloc, aloc, ver) = quarantined_stock(&w).await;
+    let (st, released) = w
+        .post_if_match(
+            "/api/v1/inventory/releases",
+            json!({
+                "lot_id": lot,
+                "from_location_id": qloc,
+                "to_location_id": aloc,
+                "entered": {"amount": "100", "unit": 1, "dimension": "Count"},
+            }),
+            ver,
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "plain-shop release {released}");
+    let after = w.get(&format!("/api/v1/lots/{lot}")).await.1;
+    assert_eq!(after["status"], "available", "{after}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn lot_status_required_edge_consumes_signature() {
+    if common::skip_if_no_pg() {
+        return;
+    }
+    let w = common::boot(Profile::regulated_device().unwrap()).await;
+    let (lot, _qloc, _aloc, ver) = quarantined_stock(&w).await;
+    let (st, minted) = w
+        .post("/api/v1/esign/signatures", mint_lot_body(&lot, ver))
+        .await;
+    assert_eq!(st, StatusCode::CREATED, "mint {minted}");
+    let sig_id = minted["signature"]["id"].as_str().expect("id");
+
+    let (st, _, body) = w
+        .call(
+            "POST",
+            &format!("/api/v1/lots/{lot}/status"),
+            Some(vec![
+                ("if-match", format!("\"{ver}\"")),
+                ("x-datum-signature", sig_id.to_string()),
+            ]),
+            Some(json!({"status": "available", "reason": "signed release"})),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "signed status {body}");
+    assert_eq!(body["status"], "available", "{body}");
+
+    let (st, _, replay) = w
+        .call(
+            "POST",
+            &format!("/api/v1/lots/{lot}/status"),
+            Some(vec![
+                ("if-match", format!("\"{ver}\"")),
+                ("x-datum-signature", sig_id.to_string()),
+            ]),
+            Some(json!({"status": "available", "reason": "replay"})),
+        )
+        .await;
+    assert_eq!(st, StatusCode::CONFLICT, "replay {replay}");
+    assert_eq!(replay["error"]["code"], "CONFLICT", "{replay}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn missing_signature_header_reports_missing_token() {
+    if common::skip_if_no_pg() {
+        return;
+    }
+    let w = common::boot(Profile::regulated_device().unwrap()).await;
+    let cal = w.calibration_doc.as_ref().expect("calibration spawned");
+    let (st, body) = w
+        .post_if_match(
+            &format!("/api/v1/calibration/certificates/{cal}/approve"),
+            json!({}),
+            1,
+        )
+        .await;
+    assert_eq!(st, StatusCode::UNAUTHORIZED, "missing header {body}");
+    assert_eq!(body["error"]["code"], "SIGNATURE_REQUIRED", "{body}");
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("missing token"),
+        "wire message must be Invalid(missing token), got {body}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn calibration_replay_of_consumed_signature_is_409() {
+    if common::skip_if_no_pg() {
+        return;
+    }
+    let w = common::boot(Profile::regulated_device().unwrap()).await;
+    let cal = w
+        .calibration_doc
+        .clone()
+        .expect("calibration.certificate spawned at boot");
+    let rec = Uuid::parse_str(&cal).expect("uuid");
+    let (st, minted) = w.post("/api/v1/esign/signatures", mint_body(rec)).await;
+    assert_eq!(st, StatusCode::CREATED, "mint {minted}");
+    let sig_id = minted["signature"]["id"].as_str().expect("id");
+
+    let (st, _, approved) = w
+        .call(
+            "POST",
+            &format!("/api/v1/calibration/certificates/{cal}/approve"),
+            Some(vec![
+                ("if-match", "\"1\"".into()),
+                ("x-datum-signature", sig_id.to_string()),
+            ]),
+            Some(json!({})),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "signed approve {approved}");
+
+    let (st, _, replay) = w
+        .call(
+            "POST",
+            &format!("/api/v1/calibration/certificates/{cal}/approve"),
+            Some(vec![
+                ("if-match", "\"1\"".into()),
+                ("x-datum-signature", sig_id.to_string()),
+            ]),
+            Some(json!({})),
+        )
+        .await;
+    assert_eq!(st, StatusCode::CONFLICT, "replay {replay}");
+    assert_eq!(replay["error"]["code"], "CONFLICT", "{replay}");
+    assert_ne!(replay["error"]["code"], "INTERNAL", "{replay}");
 }
 
 #[test]

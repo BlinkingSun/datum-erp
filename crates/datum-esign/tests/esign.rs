@@ -10,8 +10,7 @@ use datum_core::{
 };
 use datum_db::Tx;
 use datum_esign::{
-    Error, SessionPolicy, archival_bundle, close_session, log_refusal, manifestation, mint,
-    prepare, supersede, verify_bundle,
+    Error, SessionPolicy, archival_bundle, log_refusal, manifestation, mint, prepare, verify_bundle,
 };
 use datum_identity::{
     PrincipalKind, PrincipalStatus, create_principal, deactivate_principal, rename_principal,
@@ -23,9 +22,10 @@ use serde_json::{Value, json};
 use sqlx::{query as sql_query, query_as as sql_query_as, query_scalar as sql_query_scalar};
 
 use common::{
-    LOGIN_SECRET, PERM, SIGNING_SECRET, both_profiles, instance, live_doc, migrate_esign,
-    migrate_esign_sm, mint_req, pg_code, read_pool, record, relaxation_on_profile, required,
-    secret_only, signer_with_perm, system_ctx, two_components, user_ctx, write_pool,
+    LOGIN_SECRET, PERM, SIGNING_SECRET, both_profiles, bump_wo, instance, live_doc, migrate_esign,
+    migrate_esign_sm, mint_req, persist_and_spawn_wo, pg_code, read_pool, record,
+    relaxation_on_profile, required, secret_only, signer_with_perm, system_ctx, two_components,
+    user_ctx, write_pool,
 };
 
 fn body() -> Value {
@@ -770,6 +770,7 @@ async fn manifestation_wire_shape_is_exact() {
             "credential_kind",
             "components_used",
             "superseded",
+            "superseded_by_version",
         ] {
             assert!(sigv.get(key).is_some(), "missing {key}");
         }
@@ -781,6 +782,7 @@ async fn manifestation_wire_shape_is_exact() {
         assert_eq!(sigv["signed_at_zone"], "America/New_York");
         assert_eq!(sigv["credential_kind"], "signing_password");
         assert_eq!(sigv["superseded"], false);
+        assert_eq!(sigv["superseded_by_version"], Value::Null);
         let local = sigv["signed_at_local"].as_str().unwrap();
         assert!(
             local.contains('T') && (local.contains('+') || local.contains('-')),
@@ -856,13 +858,6 @@ async fn deactivated_signer_cannot_consume_open_token() {
             .expect("begin");
         deactivate_principal(&mut tx, p.id).await.expect("deact");
         tx.commit().await.expect("commit");
-        let mut tx = Tx::begin(&write, &user_ctx(&p, "esign.close_session"))
-            .await
-            .expect("close begin");
-        close_session(&mut tx, "principal_deactivated")
-            .await
-            .expect("close");
-        tx.commit().await.expect("close commit");
         let token = sig.token(p.actor());
         let mut doc = live_doc(&sig, b, inst, &p);
         doc.signer_status = PrincipalStatus::Inactive;
@@ -880,39 +875,102 @@ async fn deactivated_signer_cannot_consume_open_token() {
 }
 
 #[tokio::test]
+async fn deactivate_closes_open_signing_session() {
+    for profile in both_profiles() {
+        let db = db_case!(&format!("es_deact_sess_{}", profile.slug));
+        migrate_esign(&db).await;
+        let write = write_pool(&db);
+        let (p, _, _, _) = mint_one_with(
+            &db,
+            &format!("deactsess-{}", profile.slug),
+            profile.policy.clone(),
+        )
+        .await;
+        let open_before: i64 = sql_query_scalar(
+            r#"SELECT count(*) FROM transient.signing_session
+            WHERE principal_id = $1 AND closed_at IS NULL"#,
+        )
+        .bind(p.id.as_uuid())
+        .fetch_one(db.app_pool())
+        .await
+        .expect("open before");
+        assert!(open_before >= 1, "mint opens a signing session");
+        let mut tx = Tx::begin(&write, &system_ctx("identity.deactivate"))
+            .await
+            .expect("begin");
+        deactivate_principal(&mut tx, p.id).await.expect("deact");
+        tx.commit().await.expect("commit");
+        let closed: i64 = sql_query_scalar(
+            r#"SELECT count(*) FROM transient.signing_session
+            WHERE principal_id = $1 AND close_reason = 'principal_deactivated'"#,
+        )
+        .bind(p.id.as_uuid())
+        .fetch_one(db.app_pool())
+        .await
+        .expect("closed");
+        assert!(
+            closed >= 1,
+            "deactivate must close the open signing session"
+        );
+        let still_open: i64 = sql_query_scalar(
+            r#"SELECT count(*) FROM transient.signing_session
+            WHERE principal_id = $1 AND closed_at IS NULL"#,
+        )
+        .bind(p.id.as_uuid())
+        .fetch_one(db.app_pool())
+        .await
+        .expect("open after");
+        assert_eq!(still_open, 0, "no open signing session after deactivate");
+        db.finish().await.expect("finish");
+    }
+}
+
+#[tokio::test]
 async fn superseded_version_reads_back_with_snapshot() {
     for profile in both_profiles() {
         let db = db_case!(&format!("es_sup_{}", profile.slug));
         migrate_esign(&db).await;
         let write = write_pool(&db);
-        let (p, old, b, inst) = mint_one_with(
-            &db,
-            &format!("sup-old-{}", profile.slug),
-            profile.policy.clone(),
-        )
-        .await;
+        let p = signer_with_perm(&write, &format!("sup-{}", profile.slug), PERM).await;
+        let doc_id = Identifier::generate();
+        let (eng, doc, version) = persist_and_spawn_wo(&write, doc_id).await;
+        let rec = record(doc_id, version);
+        let inst = instance(doc_id, version, "Draft");
+        let snapshot_body = body();
         let mut tx = Tx::begin(&write, &system_ctx("esign.mint"))
             .await
-            .expect("begin");
-        let new = mint(
+            .expect("mint begin");
+        let sig = mint(
             &mut tx,
             &mint_req(
                 p.clone(),
-                b,
-                old.record.clone(),
+                snapshot_body.clone(),
+                rec,
                 inst,
                 two_components(),
                 profile.policy.clone(),
             ),
         )
         .await
-        .expect("mint new");
-        supersede(&mut tx, old.id, new.id).await.expect("supersede");
-        tx.commit().await.expect("commit");
-        let m = manifestation(&read_pool(&db), old.id).await.expect("manif");
-        assert!(m.signature.superseded);
+        .expect("mint");
+        tx.commit().await.expect("mint commit");
+        let live = bump_wo(&write, &eng, &p, &doc).await;
+        assert!(
+            live > version,
+            "instance version must bump, live={live} signed={version}"
+        );
+        let m = manifestation(&read_pool(&db), sig.id).await.expect("manif");
+        assert!(
+            m.signature.superseded,
+            "signed version {version} live {live}"
+        );
+        assert_eq!(m.signature.superseded_by_version, Some(live));
         assert_eq!(m.signature.printed_name, "M. Reyes");
-        assert_eq!(old.record_snapshot, old.record_snapshot);
+        assert_eq!(m.signature.record.version, version);
+        assert_eq!(sig.record_snapshot, sig.record_snapshot);
+        let v = serde_json::to_value(&m).expect("json");
+        assert_eq!(v["signature"]["superseded"], true);
+        assert_eq!(v["signature"]["superseded_by_version"], live);
         db.finish().await.expect("finish");
     }
 }
@@ -947,22 +1005,6 @@ async fn signature_row_is_insert_only() {
             other => panic!("{other}"),
         }
         tx.rollback().await.expect("rollback");
-        let mut tx = Tx::begin(&write, &user_ctx(&p, "esign.tamper"))
-            .await
-            .expect("begin sup");
-        let err = tx
-            .execute(
-                sql_query("UPDATE esign.signature SET superseded_by = $1 WHERE signature_id = $1")
-                    .bind(sig.id.as_uuid()),
-            )
-            .await
-            .expect_err("update superseded_by");
-        match err {
-            datum_db::Error::Refused(_) => {}
-            datum_db::Error::Sqlx(e) => assert_eq!(pg_code(&e), "42501"),
-            other => panic!("{other}"),
-        }
-        tx.rollback().await.expect("rollback sup");
         let mut tx = Tx::begin(&write, &user_ctx(&p, "esign.claim"))
             .await
             .expect("begin claim");
@@ -1179,7 +1221,7 @@ async fn every_esign_table_is_audited() {
     for profile in both_profiles() {
         let db = db_case!(&format!("es_audtbl_{}", profile.slug));
         migrate_esign(&db).await;
-        for table in ["signature", "meaning_policy", "supersession"] {
+        for table in ["signature", "meaning_policy"] {
             let yes: bool = sql_query_scalar(
                 r#"SELECT EXISTS (
                  SELECT 1 FROM pg_trigger t
@@ -1272,12 +1314,13 @@ async fn writes_go_through_tx() {
                doc_type, record_content_hash, record_snapshot, permission_snapshot,
                credential_kind, components_used, expires_at
            ) VALUES (
-               gen_random_uuid(), gen_random_uuid(), 'Raw', 'raw',
+               gen_random_uuid(), $1, 'Raw', 'raw',
                'Released', 'UTC', 'sm.instance', gen_random_uuid(), 1,
                'wo', decode(rpad('', 64, '0'), 'hex'), '{}'::jsonb, '{}',
                'signing_password', ARRAY['code','secret'], now()
            )"#,
         )
+        .bind(datum_identity::SYSTEM_ID)
         .execute(db.app_pool())
         .await
         .expect_err("raw write must fail");

@@ -16,6 +16,12 @@ pub enum Error {
     /// Database error.
     #[error(transparent)]
     Db(#[from] datum_db::Error),
+    /// State-machine / executor error.
+    #[error(transparent)]
+    StateMachine(datum_statemachine::Error),
+    /// Unknown installation profile.
+    #[error("unknown profile: {0}")]
+    UnknownProfile(String),
     /// Unknown validation rule at define time.
     #[error("unknown validation rule: {rule}")]
     UnknownValidationRule {
@@ -63,4 +69,27 @@ pub enum Error {
     /// Definition is retired.
     #[error("custom field definition is retired")]
     Retired,
+    /// Second retire of a terminal instance (R-2s-5).
+    #[error("custom field definition already retired")]
+    AlreadyRetired,
+}
+
+impl From<sqlx::Error> for Error {
+    fn from(err: sqlx::Error) -> Self {
+        Error::Db(err.into())
+    }
+}
+
+impl From<datum_statemachine::Error> for Error {
+    fn from(err: datum_statemachine::Error) -> Self {
+        match err {
+            datum_statemachine::Error::InvalidState { ref actual, .. }
+                if actual == crate::domain::DefinitionStatus::Retired.as_str() =>
+            {
+                Error::AlreadyRetired
+            }
+            datum_statemachine::Error::InstanceNotFound { .. } => Error::NotFound,
+            other => Error::StateMachine(other),
+        }
+    }
 }

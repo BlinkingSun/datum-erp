@@ -1,7 +1,10 @@
 #![allow(dead_code)]
 
 use datum_core::{Actor, ActorKind, Identifier};
-use datum_db::{WriteContext, WritePool};
+use datum_customfields::{DefinitionId, definition_machine, retire_context};
+use datum_db::{Tx, WriteContext, WritePool};
+use datum_identity::rbac::{RoleBundle, assign_role, seed_bundles};
+use datum_statemachine::Engine;
 
 pub const PROFILES: [&str; 2] = ["plain-shop", "regulated-device"];
 
@@ -123,6 +126,51 @@ pub async fn install_privileged(db: &datum_test::TestDb) {
 
 pub fn write_pool(db: &datum_test::TestDb) -> WritePool {
     WritePool::new(db.app_pool().clone())
+}
+
+/// Engine with [`definition_machine`] registered and frozen (composition-root stand-in).
+pub fn frozen_engine(profile: &str) -> Engine {
+    let mut eng = Engine::new();
+    eng.register_machine(definition_machine(profile).expect("machine"))
+        .expect("register");
+    eng.freeze().expect("freeze");
+    eng
+}
+
+pub async fn persist_engine(write: &WritePool, eng: &Engine, profile: &str) {
+    let mut tx = Tx::begin(write, &write_ctx("customfields.boot", profile))
+        .await
+        .expect("begin persist");
+    eng.persist(&mut tx).await.expect("persist");
+    tx.commit().await.expect("commit persist");
+}
+
+/// Grant `customfields.retire` to the built-in system principal.
+pub async fn grant_retire_permission(write: &WritePool, profile: &str) {
+    let mut tx = Tx::begin(write, &write_ctx("identity.rbac", profile))
+        .await
+        .expect("begin rbac");
+    let roles = seed_bundles(
+        &mut tx,
+        &[RoleBundle {
+            name: format!("cf_retire_{}", Identifier::generate()),
+            permissions: vec!["customfields.retire".into()],
+        }],
+    )
+    .await
+    .expect("seed bundle");
+    assign_role(
+        &mut tx,
+        datum_identity::UserId(Identifier::from_uuid(datum_identity::SYSTEM_ID)),
+        roles[0],
+    )
+    .await
+    .expect("assign");
+    tx.commit().await.expect("commit rbac");
+}
+
+pub fn retire_write_ctx(profile: &str, id: DefinitionId) -> WriteContext {
+    retire_context(write_ctx("pending", profile), id)
 }
 
 /// Open a case database named `{base}_{profile_suffix}`; skips when Postgres is absent.
