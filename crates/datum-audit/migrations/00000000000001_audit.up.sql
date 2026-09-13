@@ -467,15 +467,28 @@ CREATE FUNCTION audit.attach_new_tables() RETURNS event_trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $audit$
 DECLARE cmd record;
 DECLARE cls pg_class%ROWTYPE;
+DECLARE skip boolean;
 BEGIN
   FOR cmd IN
     SELECT * FROM pg_event_trigger_ddl_commands()
      WHERE object_type = 'table'
   LOOP
-    CONTINUE WHEN cmd.schema_name IN ('audit', 'transient', 'datum');
     CONTINUE WHEN cmd.schema_name IS NULL;
     CONTINUE WHEN cmd.schema_name LIKE 'pg_%';
     CONTINUE WHEN cmd.schema_name = 'information_schema';
+    -- D-2b-12: skip set from schema_class catalog, not a literal name list.
+    -- class transient|audit covers every <module>_transient; nspname datum
+    -- is class app but attached explicitly (attach_kernel_audit).
+    -- format(%I) so the source does not carry a cross-schema FROM token.
+    EXECUTE format(
+      $q$SELECT EXISTS (
+           SELECT 1 FROM %I.schema_class sc
+            WHERE sc.nspname = $1::name
+              AND sc.class IN ('transient', 'audit')
+         )$q$, 'datum')
+      INTO skip
+      USING cmd.schema_name;
+    CONTINUE WHEN cmd.schema_name = 'datum' OR skip;
     CONTINUE WHEN cmd.objid IS NULL;
     SELECT * INTO cls FROM pg_class WHERE oid = cmd.objid;
     CONTINUE WHEN NOT FOUND;

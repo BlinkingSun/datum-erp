@@ -14,8 +14,8 @@ use std::borrow::Cow;
 
 use datum_audit::MIGRATOR;
 use datum_test::db_case;
-use sqlx::SqlSafeStr;
 use sqlx::migrate::{Migration, MigrationType, Migrator};
+use sqlx::{AssertSqlSafe, SqlSafeStr};
 
 use common::{bootstrap_pool, grant_create_on_database, migrate_and_install};
 
@@ -286,8 +286,7 @@ async fn grants_match_d3_section_1_3() {
     db.finish().await.expect("finish");
 }
 
-#[allow(dead_code)]
-fn _toy(version: i64, description: &'static str, sql: &'static str) -> Migrator {
+fn toy(version: i64, description: &'static str, sql: &'static str) -> Migrator {
     Migrator::with_migrations(vec![Migration::new(
         version,
         Cow::Borrowed(description),
@@ -295,4 +294,153 @@ fn _toy(version: i64, description: &'static str, sql: &'static str) -> Migrator 
         sql.into_sql_str(),
         false,
     )])
+}
+
+async fn has_zz_audit_row(pool: &sqlx::PgPool, schema: &str, table: &str) -> bool {
+    sqlx::query_scalar(
+        r#"
+        SELECT EXISTS (
+          SELECT 1
+            FROM pg_trigger t
+            JOIN pg_class c ON c.oid = t.tgrelid
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+           WHERE n.nspname = $1
+             AND c.relname = $2
+             AND t.tgname = 'zz_audit_row'
+             AND NOT t.tgisinternal
+        )
+        "#,
+    )
+    .bind(schema)
+    .bind(table)
+    .fetch_one(pool)
+    .await
+    .expect("zz_audit_row")
+}
+
+/// D-2b-12(1): skip set is `datum.schema_class`, not the literal name
+/// `'transient'`. A `<module>_transient` table must not acquire `zz_audit_row`.
+#[tokio::test]
+async fn event_trigger_skips_transient_class_by_catalog() {
+    let db = db_case!("audit_skip_class");
+    migrate_and_install(&db).await;
+    let pool = db.migrate_pool();
+
+    // Grant TRIGGER so a skip miss attaches (the inventory probe failure
+    // mode) instead of 42501-ing CREATE TRIGGER.
+    sqlx::raw_sql(AssertSqlSafe(
+        r#"
+        CREATE SCHEMA inventory_transient AUTHORIZATION datum_migrate;
+        GRANT USAGE, CREATE ON SCHEMA inventory_transient TO datum_migrate, datum_owner;
+        INSERT INTO datum.schema_class (nspname, class)
+          VALUES ('inventory_transient', 'transient')
+          ON CONFLICT (nspname) DO UPDATE SET class = EXCLUDED.class;
+        ALTER DEFAULT PRIVILEGES FOR ROLE datum_migrate IN SCHEMA inventory_transient
+          GRANT TRIGGER ON TABLES TO datum_owner;
+        CREATE TABLE inventory_transient.idempotency (
+          key text PRIMARY KEY,
+          created_at timestamptz NOT NULL DEFAULT now()
+        );
+        "#
+        .to_owned(),
+    ))
+    .execute(pool)
+    .await
+    .expect("inventory_transient.idempotency");
+    assert!(
+        !has_zz_audit_row(pool, "inventory_transient", "idempotency").await,
+        "class=transient must skip attach even when nspname is not the literal 'transient'"
+    );
+
+    // Catalog class, not the `_transient` suffix: class app still attaches.
+    sqlx::raw_sql(AssertSqlSafe(
+        r#"
+        CREATE SCHEMA weird_transient AUTHORIZATION datum_migrate;
+        GRANT USAGE, CREATE ON SCHEMA weird_transient TO datum_migrate, datum_owner;
+        INSERT INTO datum.schema_class (nspname, class)
+          VALUES ('weird_transient', 'app')
+          ON CONFLICT (nspname) DO UPDATE SET class = EXCLUDED.class;
+        ALTER DEFAULT PRIVILEGES FOR ROLE datum_migrate IN SCHEMA weird_transient
+          GRANT TRIGGER ON TABLES TO datum_owner;
+        CREATE TABLE weird_transient.probe (id int PRIMARY KEY);
+        "#
+        .to_owned(),
+    ))
+    .execute(pool)
+    .await
+    .expect("weird_transient.probe");
+    assert!(
+        has_zz_audit_row(pool, "weird_transient", "probe").await,
+        "class=app must attach even when nspname ends in _transient"
+    );
+
+    sqlx::raw_sql(AssertSqlSafe(
+        "CREATE TABLE app.probe_audited (id int PRIMARY KEY)".to_owned(),
+    ))
+    .execute(pool)
+    .await
+    .expect("app.probe_audited");
+    assert!(
+        has_zz_audit_row(pool, "app", "probe_audited").await,
+        "schema app (class app) must still attach"
+    );
+
+    sqlx::raw_sql(AssertSqlSafe(
+        "CREATE TABLE datum.probe_skipped (id int PRIMARY KEY)".to_owned(),
+    ))
+    .execute(pool)
+    .await
+    .expect("datum.probe_skipped");
+    assert!(
+        !has_zz_audit_row(pool, "datum", "probe_skipped").await,
+        "nspname datum must skip even though class is app"
+    );
+
+    db.finish().await.expect("finish");
+}
+
+/// D-2b-12(2): `migrate::run` sets the six GUCs so a later run records
+/// history after `datum.schema_history` is attached.
+#[tokio::test]
+async fn runner_records_history_on_an_attached_schema_history() {
+    let db = db_case!("hist_attached");
+    migrate_and_install(&db).await;
+    datum_audit::attach(db.migrate_pool(), "datum.schema_history")
+        .await
+        .expect("attach schema_history");
+    assert!(
+        has_zz_audit_row(db.migrate_pool(), "datum", "schema_history").await,
+        "schema_history must carry zz_audit_row"
+    );
+
+    let later = toy(1, "later", "SELECT 1;");
+    datum_db::migrate::run(db.migrate_pool(), &[("later-crate", &later)])
+        .await
+        .expect("run after attach");
+
+    let n: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM datum.schema_history WHERE crate = 'later-crate' AND version = 1",
+    )
+    .fetch_one(db.migrate_pool())
+    .await
+    .expect("count");
+    assert_eq!(
+        n, 1,
+        "runner must record history after schema_history is attached"
+    );
+
+    let audited: i64 = sqlx::query_scalar(
+        r#"
+        SELECT count(*) FROM audit.event
+         WHERE table_name = 'schema_history'
+           AND op = 'INSERT'
+           AND new_row->>'crate' = 'later-crate'
+        "#,
+    )
+    .fetch_one(db.migrate_pool())
+    .await
+    .expect("audit rows");
+    assert_eq!(audited, 1, "history insert must be judged by zz_audit_row");
+
+    db.finish().await.expect("finish");
 }
