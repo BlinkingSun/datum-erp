@@ -24,8 +24,8 @@ use sqlx::{query as sql_query, query_as as sql_query_as, query_scalar as sql_que
 
 use common::{
     LOGIN_SECRET, PERM, SIGNING_SECRET, both_profiles, instance, live_doc, migrate_esign,
-    migrate_esign_sm, mint_req, pg_code, record, relaxation_on_profile, required, secret_only,
-    signer_with_perm, system_ctx, two_components, user_ctx, write_pool,
+    migrate_esign_sm, mint_req, pg_code, read_pool, record, relaxation_on_profile, required,
+    secret_only, signer_with_perm, system_ctx, two_components, user_ctx, write_pool,
 };
 
 fn body() -> Value {
@@ -753,7 +753,7 @@ async fn manifestation_wire_shape_is_exact() {
             profile.policy.clone(),
         )
         .await;
-        let m = manifestation(db.app_pool(), sig.id).await.expect("manif");
+        let m = manifestation(&read_pool(&db), sig.id).await.expect("manif");
         let v = serde_json::to_value(&m).expect("json");
         let sigv = v.get("signature").expect("signature key");
         for key in [
@@ -809,7 +809,7 @@ async fn printed_name_is_a_snapshot_not_a_join() {
             .await
             .expect("rename");
         tx.commit().await.expect("commit");
-        let m = manifestation(db.app_pool(), sig.id).await.expect("manif");
+        let m = manifestation(&read_pool(&db), sig.id).await.expect("manif");
         assert_eq!(m.signature.printed_name, "M. Reyes");
         db.finish().await.expect("finish");
     }
@@ -832,7 +832,7 @@ async fn deactivated_signer_reads_back() {
             .expect("begin");
         deactivate_principal(&mut tx, p.id).await.expect("deact");
         tx.commit().await.expect("commit");
-        let m = manifestation(db.app_pool(), sig.id).await.expect("manif");
+        let m = manifestation(&read_pool(&db), sig.id).await.expect("manif");
         assert_eq!(m.signature.printed_name, "M. Reyes");
         assert_eq!(m.signature.meaning, "Released");
         db.finish().await.expect("finish");
@@ -909,7 +909,7 @@ async fn superseded_version_reads_back_with_snapshot() {
         .expect("mint new");
         supersede(&mut tx, old.id, new.id).await.expect("supersede");
         tx.commit().await.expect("commit");
-        let m = manifestation(db.app_pool(), old.id).await.expect("manif");
+        let m = manifestation(&read_pool(&db), old.id).await.expect("manif");
         assert!(m.signature.superseded);
         assert_eq!(m.signature.printed_name, "M. Reyes");
         assert_eq!(old.record_snapshot, old.record_snapshot);
@@ -1150,7 +1150,7 @@ async fn archival_bundle_verifies_offline() {
             profile.policy.clone(),
         )
         .await;
-        let bundle = archival_bundle(db.app_pool(), sig.id)
+        let bundle = archival_bundle(&read_pool(&db), sig.id)
             .await
             .expect("bundle");
         assert!(

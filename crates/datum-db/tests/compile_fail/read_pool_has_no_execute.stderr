@@ -1,0 +1,5 @@
+error[E0599]: no method named `execute` found for reference `&ReadPool` in the current scope
+ --> tests/compile_fail/read_pool_has_no_execute.rs:2:18
+  |
+2 |     let _ = pool.execute("SELECT 1");
+  |                  ^^^^^^^ method not found in `&ReadPool`

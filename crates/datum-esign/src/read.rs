@@ -83,15 +83,13 @@ type ManifestRow = (
     bool,
 );
 
-/// Read the D-2b-2 manifestation.
-///
-/// SPEC names `&ReadPool`. [`datum_db::ReadPool`] publishes `new` / `connect` /
-/// `idle` only — no `fetch_*` / `Executor` / `as_pool`. Adding that surface is a
-/// `datum-db` change (out of owns); this matches [`datum_identity::load_principal`]
-/// and takes [`datum_db::Pool`].
-pub async fn manifestation(pool: &datum_db::Pool, id: SignatureId) -> Result<Manifestation> {
-    let row: Option<ManifestRow> = sql_query_as(
-        r#"SELECT
+/// Read the D-2b-2 manifestation through the published [`datum_db::ReadPool`]
+/// fetch surface (CONTRACT §5a).
+pub async fn manifestation(pool: &datum_db::ReadPool, id: SignatureId) -> Result<Manifestation> {
+    let row: Option<ManifestRow> = pool
+        .fetch_optional(
+            sql_query_as(
+                r#"SELECT
                signature_id, signer_id, signer_printed_name, meaning, reason,
                signed_at, signed_at_zone,
                (
@@ -125,10 +123,10 @@ pub async fn manifestation(pool: &datum_db::Pool, id: SignatureId) -> Result<Man
                ) AS superseded
           FROM esign.signature
          WHERE signature_id = $1"#,
-    )
-    .bind(id.as_uuid())
-    .fetch_optional(pool)
-    .await?;
+            )
+            .bind(id.as_uuid()),
+        )
+        .await?;
     let Some(row) = row else {
         return Err(Error::NotFound);
     };
@@ -213,15 +211,17 @@ pub struct BundleVerification {
 }
 
 /// Load an archival bundle.
-pub async fn archival_bundle(pool: &datum_db::Pool, id: SignatureId) -> Result<ArchivalBundle> {
+pub async fn archival_bundle(pool: &datum_db::ReadPool, id: SignatureId) -> Result<ArchivalBundle> {
     let manifestation = manifestation(pool, id).await?;
-    let row: Option<(Value, Vec<u8>, DateTime<Utc>)> = sql_query_as(
-        r#"SELECT record_snapshot, record_content_hash, signed_at
+    let row: Option<(Value, Vec<u8>, DateTime<Utc>)> = pool
+        .fetch_optional(
+            sql_query_as(
+                r#"SELECT record_snapshot, record_content_hash, signed_at
              FROM esign.signature WHERE signature_id = $1"#,
-    )
-    .bind(id.as_uuid())
-    .fetch_optional(pool)
-    .await?;
+            )
+            .bind(id.as_uuid()),
+        )
+        .await?;
     let Some((record_snapshot, hash_bytes, signed_at)) = row else {
         return Err(Error::NotFound);
     };
@@ -262,7 +262,7 @@ pub fn verify_bundle(bundle: &ArchivalBundle) -> BundleVerification {
 }
 
 async fn load_signature_trail(
-    pool: &datum_db::Pool,
+    pool: &datum_db::ReadPool,
     id: SignatureId,
     signed_at: DateTime<Utc>,
 ) -> Result<(Vec<Uuid>, Vec<SealRef>, Option<AnchorRef>)> {
@@ -274,7 +274,7 @@ async fn load_signature_trail(
         from: Some(signed_at - chrono::Duration::seconds(1)),
         to: Some(Utc::now() + chrono::Duration::seconds(2)),
     };
-    let exported = datum_audit::bundle(pool, &selector, &dir)
+    let exported = datum_audit::bundle(pool.as_pool(), &selector, &dir)
         .await
         .map_err(|e| Error::Invariant(e.to_string()));
     let parsed = match exported {

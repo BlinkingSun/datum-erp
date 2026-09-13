@@ -8,7 +8,8 @@
 
 use datum_core::Actor;
 use serde::{Deserialize, Serialize};
-use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+use sqlx::postgres::{PgArguments, PgConnectOptions, PgPoolOptions, PgRow};
+use sqlx::{FromRow, Postgres};
 
 mod error;
 mod tx;
@@ -69,7 +70,10 @@ impl WritePool {
     }
 }
 
-/// Read pool. Never calls `set_config`.
+/// Read pool. Never calls `set_config`. Fetch-only: no `execute`.
+///
+/// Writes go through the sealed [`Tx`]. Callers construct a sqlx query and
+/// pass it to [`ReadPool::fetch_one`] / [`ReadPool::fetch_optional`] / [`ReadPool::fetch_all`].
 #[derive(Debug, Clone)]
 pub struct ReadPool(Pool);
 
@@ -87,6 +91,47 @@ impl ReadPool {
     /// Idle connections currently in the pool.
     pub fn idle(&self) -> usize {
         self.0.num_idle()
+    }
+
+    /// Borrow the inner pool for kernel read APIs that still take [`Pool`].
+    ///
+    /// [`ReadPool`] itself has no `execute`. A write issued on the returned
+    /// `&Pool` is the same fence smell this type exists to close (CONTRACT §5a).
+    pub fn as_pool(&self) -> &Pool {
+        &self.0
+    }
+
+    /// Fetch exactly one row.
+    pub async fn fetch_one<'q, T>(
+        &self,
+        query: sqlx::query::QueryAs<'q, Postgres, T, PgArguments>,
+    ) -> Result<T>
+    where
+        T: Send + Unpin + for<'r> FromRow<'r, PgRow>,
+    {
+        query.fetch_one(&self.0).await.map_err(Error::from)
+    }
+
+    /// Fetch at most one row.
+    pub async fn fetch_optional<'q, T>(
+        &self,
+        query: sqlx::query::QueryAs<'q, Postgres, T, PgArguments>,
+    ) -> Result<Option<T>>
+    where
+        T: Send + Unpin + for<'r> FromRow<'r, PgRow>,
+    {
+        query.fetch_optional(&self.0).await.map_err(Error::from)
+    }
+
+    /// Fetch every row.
+    pub async fn fetch_all<'q, T>(
+        &self,
+        query: sqlx::query::QueryAs<'q, Postgres, T, PgArguments>,
+    ) -> Result<Vec<T>>
+    where
+        T: Send + Unpin + for<'r> FromRow<'r, PgRow>,
+    {
+        query.fetch_all(&self.0).await.map_err(Error::from)
     }
 }
 
