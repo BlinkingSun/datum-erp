@@ -1,16 +1,33 @@
 -- 0001_customfields: typed extension fields (schema class app).
 -- Reversible. Audited via audit.attach. No jsonb value storage.
+-- Created by datum_migrate so CREATE TABLE can fire audit.attach_new_tables;
+-- tables are then owned by datum_owner. D-2b-11.
 
-CREATE SCHEMA IF NOT EXISTS customfields AUTHORIZATION datum_owner;
+SELECT
+  pg_catalog.set_config('datum.actor_id',      '00000000-0000-4000-8000-000000000002', true),
+  pg_catalog.set_config('datum.actor_kind',    'migration', true),
+  pg_catalog.set_config('datum.actor_display', 'migration', true),
+  pg_catalog.set_config('datum.txid',          pg_catalog.pg_current_xact_id()::text, true),
+  pg_catalog.set_config('datum.action',        'customfields.migrate', true),
+  pg_catalog.set_config('datum.source_kind',   'migration', true);
+
+CREATE SCHEMA IF NOT EXISTS customfields AUTHORIZATION datum_migrate;
 
 REVOKE ALL ON SCHEMA customfields FROM PUBLIC;
-GRANT USAGE ON SCHEMA customfields TO datum_app, datum_migrate, datum_owner;
+GRANT USAGE ON SCHEMA customfields TO datum_app;
+GRANT USAGE, CREATE ON SCHEMA customfields TO datum_migrate, datum_owner;
 
 INSERT INTO datum.schema_class (nspname, class) VALUES ('customfields', 'app')
 ON CONFLICT (nspname) DO UPDATE SET class = EXCLUDED.class;
 
+ALTER DEFAULT PRIVILEGES FOR ROLE datum_migrate IN SCHEMA customfields
+  GRANT SELECT, INSERT, UPDATE ON TABLES TO datum_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE datum_migrate IN SCHEMA customfields
+  GRANT TRIGGER ON TABLES TO datum_owner;
 ALTER DEFAULT PRIVILEGES FOR ROLE datum_owner IN SCHEMA customfields
   GRANT SELECT, INSERT, UPDATE ON TABLES TO datum_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE datum_migrate IN SCHEMA customfields
+  GRANT USAGE ON SEQUENCES TO datum_app;
 ALTER DEFAULT PRIVILEGES FOR ROLE datum_owner IN SCHEMA customfields
   GRANT USAGE ON SEQUENCES TO datum_app;
 
