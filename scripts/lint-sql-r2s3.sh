@@ -16,6 +16,8 @@ cd "$REPO_ROOT" || exit 1
 # Explicit, minimal exemption set. datum-module is not listed: KERNEL_AUDIT_RELS
 # names ledger tables as strings, which is not SQL DML (FROM/JOIN/INTO/UPDATE/TABLE).
 # datum-uom's SELECT ledger.has_postings($1) is the published function, not a table read.
+# Dynamic construction of ledger./transient. (format/quote_ident/'schema.' concat)
+# is scripts/lint-sql-dynamic.sh, same exemption list.
 R2S3_EXEMPT='datum-ledger datum-db datum-audit datum-test datum-jobs datum-events datum-identity'
 
 # Parse rg -n "file:line:text", including an optional Windows drive letter (C:).
