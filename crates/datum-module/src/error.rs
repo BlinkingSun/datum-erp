@@ -43,6 +43,9 @@ pub enum Error {
     /// Custom-fields error.
     #[error(transparent)]
     Customfields(#[from] datum_customfields::Error),
+    /// Controlled documents error.
+    #[error(transparent)]
+    Documents(#[from] datum_documents::Error),
     /// JSON error.
     #[error(transparent)]
     Json(#[from] serde_json::Error),

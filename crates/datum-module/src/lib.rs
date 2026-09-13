@@ -5,12 +5,14 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
-use datum_documents as _;
+#[cfg(test)]
+use chrono as _;
 use datum_print as _;
 #[cfg(test)]
 use rust_decimal as _;
 
 mod config;
+mod documents;
 mod error;
 mod install_graph;
 mod kernel;

@@ -20,6 +20,10 @@ use datum_statemachine::{
 use serde_json::Value;
 
 use crate::config::persist_kernel_defaults;
+use crate::documents::{
+    emit_effective, emit_revision_created, register_document_event_schemas,
+    register_document_machine,
+};
 use crate::install_graph::manifest_machines_owned_by_register;
 use crate::manifest::{
     ManifestMachine, ManifestSubscription, ModuleManifest, compiled_in, compiled_in_graph, hex,
@@ -249,6 +253,7 @@ impl Kernel {
         engine.set_module_graph(graph)?;
         let (mut routes, mut subscriptions, mut job_kinds) =
             register_enabled_from_manifests(&mut engine, &profile, &catalog)?;
+        register_document_machine(&mut engine, profile.id.as_str())?;
         for machine in extra_machines {
             engine.register_machine(machine)?;
         }
@@ -275,11 +280,14 @@ impl Kernel {
         subscriptions.extend(extra_subs);
         job_kinds.extend(extra_jobs);
 
+        let mut event_schemas = datum_events::SchemaRegistry::standard();
+        register_document_event_schemas(&mut event_schemas)?;
+
         let mut kernel = Self {
             profile,
             engine,
             events,
-            event_schemas: datum_events::SchemaRegistry::standard(),
+            event_schemas,
             jobs,
             routes,
             subscriptions,
@@ -426,6 +434,30 @@ impl Kernel {
         Ok(self.engine.spawn(tx, doc, initial).await?)
     }
 
+    /// Allocate a document master and spawn the documents machine at `Draft`.
+    pub async fn create_document(
+        &self,
+        tx: &mut Tx<'_>,
+        kind: &str,
+        title: &str,
+        retention_class: &str,
+    ) -> Result<datum_documents::DocumentId> {
+        Ok(datum_documents::create(tx, &self.engine, kind, title, retention_class).await?)
+    }
+
+    /// Insert a revision and publish `documents.revision_created` in the same `Tx`.
+    pub async fn new_document_revision(
+        &self,
+        tx: &mut Tx<'_>,
+        doc: datum_documents::DocumentId,
+        label: &str,
+        manifest: datum_documents::Manifest,
+    ) -> Result<datum_documents::RevisionId> {
+        let id = datum_documents::new_revision(tx, doc, label, manifest).await?;
+        emit_revision_created(tx, doc, id, label).await?;
+        Ok(id)
+    }
+
     /// Gate-wrapped transition: one `GroupBuilder` bound to `tx`, hooks contribute,
     /// executor `finalize`s, then [`datum_ledger::post`] writes the group in this `Tx`.
     ///
@@ -481,6 +513,9 @@ impl Kernel {
             Ok(instance) => {
                 if watch.unfinalized() {
                     datum_ledger::post(tx, watch).await?;
+                }
+                if doc.doc_type == datum_documents::DOC_TYPE && edge == "make_effective" {
+                    emit_effective(tx, datum_documents::DocumentId(doc.doc_id)).await?;
                 }
                 Ok(instance)
             }

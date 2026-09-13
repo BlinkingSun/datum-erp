@@ -13,9 +13,11 @@ Frozen public API for Wave 2s.
   `module.installed` (`docs/03` §6). Disable never drops; disabling a depended-on
   module is refused with the dependents named.
 - `KERNEL_ORDER` and `run_migrations` / `migrate_prefix` / `migrate_suffix` /
-  `install_kernel` (privileged before identity seeds). `install_slice` adds the
+  `install_kernel` (privileged before identity seeds; `datum-documents` after
+  esign, customfields, numbering, and statemachine). `install_slice` adds the
   Wave 2s slice migrators and attaches `SLICE_AUDIT_RELS` (the same list
-  `datum-server` boot consumes).
+  `datum-server` boot consumes). `KERNEL_AUDIT_RELS` includes the five
+  `documents.*` tables so `audit_trigger_matrix` covers the product migrate path.
 - Configuration manifest export/verify (`docs/03` §8).
 - The composed kernel path (ADDENDUM 1).
 
@@ -34,7 +36,9 @@ Kernel::build(pool, profile).await?      // same, compiled-in catalog only
 | Method | Role |
 |---|---|
 | `Kernel::spawn` | `Engine::spawn` after freeze |
-| `Kernel::transition` | `esign::prepare` (when a token is present) then `Engine::transition` with the prepared gate; `datum.esign_id` is stamped so every audit row of the transition carries the signature id; a refusal aborts and `esign::log_refusal` is written on a fresh Tx |
+| `Kernel::create_document` | `datum_documents::create` on the frozen engine (number allocated late) |
+| `Kernel::new_document_revision` | insert revision and publish `documents.revision_created` in the same `Tx` |
+| `Kernel::transition` | `esign::prepare` (when a token is present) then `Engine::transition` with the prepared gate; `datum.esign_id` is stamped so every audit row of the transition carries the signature id; a refusal aborts and `esign::log_refusal` is written on a fresh Tx. A successful `document.make_effective` also publishes `documents.effective` |
 | `Kernel::signature_gate` | bound sync gate: `NoSignatures` under plain-shop, esign `Invalid` (never `NoProvider`) under regulated-device; `Engine::transition` callers do not choose the provider |
 | `Kernel::signature_gate_factory` | `GateFactory` bound from the profile TOML `gate` field (`NoSignatures` or `datum-esign`) |
 | `Kernel::posting_sink` / `bind_sink` | `PostingSink` factory; unfinalized Drop poisons via `datum_ledger::commit` |
@@ -45,8 +49,11 @@ Kernel::build(pool, profile).await?      // same, compiled-in catalog only
 
 Registries (machines, routes, event subscriptions, job kinds, permissions) are
 populated from module manifests (`docs/03` §2 / §3), not from constants in this
-crate. `Kernel::build` freezes only after every enabled module has registered.
-Registration after freeze is `datum_statemachine::Error::Frozen`.
+crate, plus the kernel `document` machine (`datum_documents::document_machine`)
+so regulated `approve` / `make_effective` are `Required` and go through
+`Kernel::transition`'s prepared `GateFactory`. `Kernel::build` freezes only after
+every enabled module has registered. Registration after freeze is
+`datum_statemachine::Error::Frozen`.
 
 `enable_genealogy_bridge` is wired when `mod-genealogy` is enabled; worker ticks
 run `genealogy.refresh` under the system service principal.

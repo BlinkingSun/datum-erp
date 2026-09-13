@@ -35,7 +35,8 @@ once, outside the originating transaction, as a named service principal
 Lib: `builder_refuses_unknown_schema`, `builder_refuses_missing_required_field`,
 `schema_registry_rejects_removed_field`,
 `standard_registry_has_inventory_receipt_posted_v1`,
-`receipt_posted_rejects_lot_id`, `adjusted_round_trip`.
+`receipt_posted_rejects_lot_id`, `standard_registry_has_documents_events_v1`,
+`adjusted_round_trip`.
 
 ## Standard registry (`SchemaRegistry::standard`, `fixtures/`)
 
@@ -48,6 +49,8 @@ Payload contracts are append-only within a version. `lot_id` stays required on
 | `inventory.lot_received` | 1 | `lot_id`, `item_id` | `qty` | `fixtures/inventory.lot_received.v1.json` |
 | `inventory.receipt_posted` | 1 | `item_id`, `location_id`, `qty`, `uom`, `posting_group_id` | — | `fixtures/inventory.receipt_posted.v1.json` |
 | `inventory.adjusted` | 1 | `item_id`, `qty`, `reason_code` | — | `fixtures/inventory.adjusted.v1.json` |
+| `documents.revision_created` | 1 | `document_id`, `revision_id`, `label` | — | `fixtures/documents.revision_created.v1.json` |
+| `documents.effective` | 1 | `document_id`, `revision_id`, `effective_from` | — | `fixtures/documents.effective.v1.json` |
 | `test.ping` | 1 | — | — | `fixtures/test.ping.v1.json` |
 
 ## Frozen / seams

@@ -58,15 +58,16 @@ impl SchemaRegistry {
         Self::default()
     }
 
-    /// Kernel-known schemas: `inventory.lot_received.v1` (lot-only),
-    /// `inventory.receipt_posted.v1` (lot-less receipts, R-2s-4),
-    /// `inventory.adjusted.v1`, and `test.ping.v1`.
+    /// Kernel-known schemas: inventory v1 events, documents v1 events
+    /// (`documents.revision_created`, `documents.effective`), and `test.ping.v1`.
     pub fn standard() -> Self {
         let mut reg = Self::new();
         for json in [
             include_str!("../fixtures/inventory.lot_received.v1.json"),
             include_str!("../fixtures/inventory.receipt_posted.v1.json"),
             include_str!("../fixtures/inventory.adjusted.v1.json"),
+            include_str!("../fixtures/documents.revision_created.v1.json"),
+            include_str!("../fixtures/documents.effective.v1.json"),
             include_str!("../fixtures/test.ping.v1.json"),
         ] {
             let _ = reg.register(schema_from_fixture(json));
@@ -86,6 +87,14 @@ impl SchemaRegistry {
     /// Frozen field names for `inventory.adjusted.v1`.
     pub const INVENTORY_ADJUSTED_V1_FIELDS: &'static [&'static str] =
         &["item_id", "qty", "reason_code"];
+
+    /// Frozen field names for `documents.revision_created.v1`.
+    pub const DOCUMENTS_REVISION_CREATED_V1_FIELDS: &'static [&'static str] =
+        &["document_id", "revision_id", "label"];
+
+    /// Frozen field names for `documents.effective.v1`.
+    pub const DOCUMENTS_EFFECTIVE_V1_FIELDS: &'static [&'static str] =
+        &["document_id", "revision_id", "effective_from"];
 
     /// Register a contract. A second call for the same key must be a superset of the field names.
     pub fn register(&mut self, schema: EventSchema) -> Result<()> {
