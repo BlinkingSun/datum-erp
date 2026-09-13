@@ -46,7 +46,19 @@ nothing.
 ## Blob layout
 
 `DATUM_BLOB_ROOT/<aa>/<bb>/<hex>` where `aa`/`bb` are the first two hex pairs of
-the SHA-256. Write-once, `fsync`, `verify_blob` recomputes the digest.
+the SHA-256 and `<hex>` is the full lowercase digest. File names are hex only
+(no `:` or other Windows-reserved characters).
+
+`put` writes a sibling `*.tmp` in that directory, `fsync`s the file, and
+renames onto the content-addressed path **only if that path is absent**. An
+existing file is a dedupe (existence check, then read); the store never
+renames over a placed blob and never reopens it for write. After placement the
+file is marked read-only. `verify_blob` recomputes the digest.
+
+Rollback / orphan cleanup (`discard_uncommitted`, `discard_hash`) clears the
+read-only attribute before unlink. Windows `FILE_ATTRIBUTE_READONLY` also
+forbids delete, rename-over, and reopen-for-write; tests that must tamper with
+a placed blob do the same clear first.
 
 `attach` inserts the `documents.blob` row in the Tx, then `put`s bytes. After a
 rollback the composition root calls `BlobStore::discard_uncommitted` (or

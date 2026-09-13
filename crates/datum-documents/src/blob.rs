@@ -32,7 +32,7 @@ pub trait BlobStore: Send + Sync {
     fn keep_puts(&self);
 }
 
-/// Filesystem store: `<root>/<aa>/<bb>/<hash>` (hex), write-once, fsync.
+/// Filesystem store: `<root>/<aa>/<bb>/<hash>` (hex only), write-once, fsync.
 #[derive(Debug)]
 pub struct FsBlobStore {
     root: PathBuf,
@@ -64,6 +64,11 @@ impl FsBlobStore {
 
     fn path_for(&self, hash: BlobHash) -> PathBuf {
         let hex = hash.to_hex();
+        debug_assert_eq!(hex.len(), 64);
+        debug_assert!(
+            hex.bytes().all(|b| b.is_ascii_hexdigit()),
+            "blob names are lowercase hex; Windows reserved characters are forbidden"
+        );
         let aa = &hex[0..2];
         let bb = &hex[2..4];
         self.root.join(aa).join(bb).join(hex)
@@ -82,9 +87,28 @@ impl FsBlobStore {
     }
 
     fn remove_file(&self, hash: BlobHash) {
-        let path = self.path_for(hash);
-        let _ = fs::remove_file(&path);
+        remove_placed(&self.path_for(hash));
         self.untrack(hash);
+    }
+
+    /// If `path` is already placed, reuse it (same bytes) or refuse a collision.
+    /// Never opens the placed file for write.
+    fn dedupe_existing(
+        &self,
+        path: &Path,
+        bytes: &[u8],
+        hash: BlobHash,
+    ) -> Result<Option<BlobHash>> {
+        if !path.exists() {
+            return Ok(None);
+        }
+        let existing = fs::read(path)?;
+        if existing.as_slice() == bytes {
+            return Ok(Some(hash));
+        }
+        Err(Error::BlobWriteOnce {
+            hash: hash.to_hex(),
+        })
     }
 }
 
@@ -92,49 +116,32 @@ impl BlobStore for FsBlobStore {
     fn put(&self, bytes: &[u8]) -> Result<BlobHash> {
         let hash = hash_bytes(bytes);
         let path = self.path_for(hash);
-        if path.exists() {
-            let existing = fs::read(&path)?;
-            if existing.as_slice() == bytes {
-                return Ok(hash);
-            }
-            return Err(Error::BlobWriteOnce {
-                hash: hash.to_hex(),
-            });
+        if let Some(existing) = self.dedupe_existing(&path, bytes, hash)? {
+            return Ok(existing);
         }
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let tmp = path.with_extension("tmp");
-        {
-            let mut file = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&tmp)
-                .or_else(|e| {
-                    if e.kind() == io::ErrorKind::AlreadyExists {
-                        fs::remove_file(&tmp)?;
-                        OpenOptions::new().write(true).create_new(true).open(&tmp)
-                    } else {
-                        Err(e)
-                    }
-                })?;
-            file.write_all(bytes)?;
-            file.sync_all()?;
+        let tmp = path.with_file_name(format!("{}.tmp", hash.to_hex()));
+        if let Err(e) = write_tmp(&tmp, bytes) {
+            let _ = fs::remove_file(&tmp);
+            return Err(e.into());
+        }
+        if let Some(existing) = self.dedupe_existing(&path, bytes, hash)? {
+            let _ = fs::remove_file(&tmp);
+            return Ok(existing);
         }
         match fs::rename(&tmp, &path) {
             Ok(()) => {}
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists || path.exists() => {
+            Err(e) => {
                 let _ = fs::remove_file(&tmp);
-                let existing = fs::read(&path)?;
-                if existing.as_slice() == bytes {
-                    return Ok(hash);
+                if let Some(existing) = self.dedupe_existing(&path, bytes, hash)? {
+                    return Ok(existing);
                 }
-                return Err(Error::BlobWriteOnce {
-                    hash: hash.to_hex(),
-                });
+                return Err(e.into());
             }
-            Err(e) => return Err(e.into()),
         }
+        set_readonly(&path, true)?;
         if let Some(parent) = path.parent() {
             fsync_dir(parent)?;
         }
@@ -182,8 +189,7 @@ impl BlobStore for FsBlobStore {
             .map(|mut created| created.drain(..).collect::<Vec<_>>())
             .unwrap_or_default();
         for hash in hashes {
-            let path = self.path_for(hash);
-            let _ = fs::remove_file(path);
+            remove_placed(&self.path_for(hash));
         }
     }
 
@@ -194,12 +200,101 @@ impl BlobStore for FsBlobStore {
     }
 }
 
+/// Write `bytes` to `tmp` in the destination directory and fsync the file.
+fn write_tmp(tmp: &Path, bytes: &[u8]) -> io::Result<()> {
+    if tmp.exists() {
+        let _ = set_readonly(tmp, false);
+        fs::remove_file(tmp)?;
+    }
+    let mut file = OpenOptions::new().write(true).create_new(true).open(tmp)?;
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    Ok(())
+}
+
+/// FILE_ATTRIBUTE_READONLY / unix write-bit. Placed blobs are immutable;
+/// Windows also refuses delete, rename-over, and reopen-for-write until cleared.
+fn set_readonly(path: &Path, readonly: bool) -> io::Result<()> {
+    let mut perms = fs::metadata(path)?.permissions();
+    #[allow(clippy::permissions_set_readonly_false)]
+    {
+        perms.set_readonly(readonly);
+    }
+    fs::set_permissions(path, perms)
+}
+
+/// Rollback / orphan cleanup: clear read-only then unlink. No-op if absent.
+fn remove_placed(path: &Path) {
+    let _ = set_readonly(path, false);
+    let _ = fs::remove_file(path);
+}
+
 fn fsync_dir(dir: &Path) -> io::Result<()> {
     let file = File::open(dir)?;
-    file.sync_all()
+    match file.sync_all() {
+        Ok(()) => Ok(()),
+        // Windows: FlushFileBuffers on a directory handle is ERROR_ACCESS_DENIED (5).
+        Err(e) if e.kind() == io::ErrorKind::PermissionDenied => Ok(()),
+        Err(e) => Err(e),
+    }
 }
 
 /// Recompute and compare. Detects on-disk corruption.
 pub fn verify_blob(store: &dyn BlobStore, hash: BlobHash) -> Result<()> {
     store.verify(hash)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::OpenOptions;
+
+    fn tmp_store() -> FsBlobStore {
+        let root = std::env::temp_dir().join(format!(
+            "datum-blob-unit-{}",
+            datum_core::Identifier::generate()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        FsBlobStore::new(root)
+    }
+
+    #[test]
+    fn put_dedupes_without_opening_placed_file_for_write() {
+        let store = tmp_store();
+        let hash = store.put(b"same-bytes-twice").unwrap();
+        let again = store.put(b"same-bytes-twice").unwrap();
+        assert_eq!(hash, again);
+        let path = store.path_for(hash);
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap();
+        assert_eq!(name, hash.to_hex());
+        assert!(name.bytes().all(|b| b.is_ascii_hexdigit()));
+        assert!(
+            !name.contains(':'),
+            "Windows reserved character in blob name"
+        );
+        let write = OpenOptions::new().write(true).open(&path);
+        assert!(write.is_err(), "placed blob must not be openable for write");
+    }
+
+    #[test]
+    fn discard_uncommitted_clears_readonly_then_deletes() {
+        let store = tmp_store();
+        let hash = store.put(b"rollback-me").unwrap();
+        assert!(store.exists(hash));
+        store.discard_uncommitted();
+        assert!(!store.exists(hash));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn placed_blob_has_unix_write_bits_cleared() {
+        use std::os::unix::fs::PermissionsExt;
+        let store = tmp_store();
+        let hash = store.put(b"unix-mode").unwrap();
+        let mode = fs::metadata(store.path_for(hash))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o222, 0, "unix write bits cleared after placement");
+    }
 }
