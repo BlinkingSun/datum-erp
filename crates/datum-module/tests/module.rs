@@ -1148,3 +1148,215 @@ async fn register_events_subscription_hook_accepts_dummy_subscriber() {
     assert_eq!(n, 1);
     db.finish().await.expect("finish");
 }
+
+const SEEDED_PRINT_TEMPLATES: [&str; 3] = [
+    datum_print::TemplateId::DOCUMENT_REVISION,
+    datum_print::TemplateId::GENERIC_RECORD,
+    datum_print::TemplateId::WORK_ORDER_TRAVELER,
+];
+
+async fn print_install_profile(db: &datum_test::TestDb) -> String {
+    sqlx::query_scalar("SELECT profile_id FROM print.install WHERE singleton = 'x'")
+        .fetch_one(db.app_pool())
+        .await
+        .expect("print.install")
+}
+
+async fn print_template_rows(db: &datum_test::TestDb) -> Vec<(String, i32, Vec<u8>)> {
+    sqlx::query_as(
+        "SELECT template_id, version, body_hash FROM print.template ORDER BY template_id, version",
+    )
+    .fetch_all(db.app_pool())
+    .await
+    .expect("print.template")
+}
+
+fn assert_seeded_print_templates(label: &str, rows: &[(String, i32, Vec<u8>)]) {
+    assert_eq!(
+        rows.len(),
+        3,
+        "{label}: three built-in templates, got {rows:?}"
+    );
+    let ids: Vec<&str> = rows.iter().map(|(id, _, _)| id.as_str()).collect();
+    for expected in SEEDED_PRINT_TEMPLATES {
+        assert!(
+            ids.contains(&expected),
+            "{label}: missing template {expected} in {ids:?}"
+        );
+    }
+    assert!(
+        !ids.contains(&"item_label"),
+        "{label}: item_label is ADR 0009, not a Wave 3b template"
+    );
+    for (id, version, _) in rows {
+        assert_eq!(*version, 1, "{label}: {id} must stay at seeded version 1");
+    }
+}
+
+#[tokio::test]
+async fn kernel_build_seeds_print_templates() {
+    for (label, profile) in [
+        ("plain-shop", Profile::plain_shop().unwrap()),
+        ("regulated-device", Profile::regulated_device().unwrap()),
+    ] {
+        let db = db_case!(&format!("kprt_{}", &label[..5]));
+        migrate_and_install(&db).await;
+        let kernel = Kernel::build(db.app_pool(), profile.clone())
+            .await
+            .expect(label);
+        assert_eq!(kernel.profile_id(), profile.id);
+
+        let stamped = print_install_profile(&db).await;
+        assert_eq!(
+            stamped,
+            profile.id.as_str(),
+            "{label}: 11.50(b) stamps profile.id, not spec_version"
+        );
+        assert_ne!(
+            stamped, profile.spec_version,
+            "{label}: spec_version {} must not be the install stamp",
+            profile.spec_version
+        );
+
+        let rows = print_template_rows(&db).await;
+        assert_seeded_print_templates(label, &rows);
+
+        let retire = kernel
+            .engine
+            .edges_for_manifest()
+            .into_iter()
+            .find(|e| e.doc_type == datum_customfields::DOC_TYPE && e.edge == "retire");
+        assert!(
+            retire.is_some(),
+            "{label}: definition_machine retire edge is on the frozen engine"
+        );
+        db.finish().await.expect("finish");
+    }
+}
+
+#[tokio::test]
+async fn kernel_build_seeds_print_templates_is_idempotent_on_restart() {
+    for (label, profile) in [
+        ("plain-shop", Profile::plain_shop().unwrap()),
+        ("regulated-device", Profile::regulated_device().unwrap()),
+    ] {
+        let db = db_case!(&format!("kprtr_{}", &label[..5]));
+        migrate_and_install(&db).await;
+        Kernel::build(db.app_pool(), profile.clone())
+            .await
+            .expect(label);
+        let first_stamp = print_install_profile(&db).await;
+        let first_rows = print_template_rows(&db).await;
+        assert_eq!(first_stamp, profile.id.as_str(), "{label}");
+        assert_seeded_print_templates(label, &first_rows);
+
+        Kernel::build(db.app_pool(), profile.clone())
+            .await
+            .unwrap_or_else(|e| panic!("{label} restart Kernel::build: {e:#}"));
+        let second_stamp = print_install_profile(&db).await;
+        let second_rows = print_template_rows(&db).await;
+        assert_eq!(
+            second_stamp, first_stamp,
+            "{label}: restart restamps the same profile.id"
+        );
+        assert_eq!(
+            second_rows, first_rows,
+            "{label}: restart must not insert a second template version"
+        );
+        db.finish().await.expect("finish");
+    }
+}
+
+#[tokio::test]
+async fn kernel_assemble_registers_definition_machine() {
+    for (label, profile) in [
+        ("plain-shop", Profile::plain_shop().unwrap()),
+        ("regulated-device", Profile::regulated_device().unwrap()),
+    ] {
+        let db = db_case!(&format!("kdef_{}", &label[..5]));
+        migrate_and_install(&db).await;
+        let kernel = Kernel::build(db.app_pool(), profile.clone())
+            .await
+            .expect(label);
+
+        let edge = kernel
+            .engine
+            .edges_for_manifest()
+            .into_iter()
+            .find(|e| {
+                e.doc_type == datum_customfields::DOC_TYPE
+                    && e.edge == datum_customfields::RETIRE_EDGE
+            })
+            .unwrap_or_else(|| panic!("{label}: retire edge missing"));
+        assert_eq!(
+            edge.kind, "not_required",
+            "{label}: retire is configuration"
+        );
+        assert!(
+            kernel.profile.signature_edges.iter().any(|e| matches!(
+                e,
+                datum_module::SignatureEdge::NotRequired { module, edge, .. }
+                    if module == datum_customfields::DOC_TYPE
+                        && edge == datum_customfields::RETIRE_EDGE
+            )),
+            "{label}: generated key 3 lists definition retire as NotRequired"
+        );
+
+        let persisted: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM sm.machine WHERE doc_type = $1")
+                .bind(datum_customfields::DOC_TYPE)
+                .fetch_one(db.app_pool())
+                .await
+                .expect("sm.machine");
+        assert_eq!(persisted, 1, "{label}: definition_machine persisted");
+
+        let write = kernel.write_pool();
+        let actor = actor_with_perms(&write, &[datum_customfields::RETIRE_PERMISSION]).await;
+        let mut define_ctx = boot_ctx();
+        define_ctx.actor = actor;
+        define_ctx.actor_display = Some("Operator".into());
+        let mut tx = Tx::begin(&write, &define_ctx).await.expect("define begin");
+        let id = datum_customfields::define(
+            &mut tx,
+            datum_customfields::DefinitionSpec {
+                entity: "items.item".into(),
+                key: format!("w3b_{}", &label[..5]),
+                field_type: datum_customfields::FieldType::String,
+                label: "Wave 3b".into(),
+                validation_rule: String::new(),
+                required: false,
+                indexed: false,
+                owner_module: "mod-items".into(),
+            },
+        )
+        .await
+        .expect("define");
+        tx.commit().await.expect("define commit");
+
+        let mut retire_ctx = kernel.transition_context(
+            actor,
+            &datum_customfields::doc_ref(id),
+            datum_customfields::RETIRE_EDGE,
+        );
+        retire_ctx.actor_display = Some("Operator".into());
+        retire_ctx.reason = Some("w3b-compose".into());
+        let mut tx = Tx::begin(&write, &retire_ctx).await.expect("retire begin");
+        datum_customfields::retire(&mut tx, &kernel.engine, id, &retire_ctx)
+            .await
+            .unwrap_or_else(|e| panic!("{label} retire through kernel engine: {e:#}"));
+        tx.commit().await.expect("retire commit");
+
+        let state: String =
+            sqlx::query_scalar("SELECT state FROM sm.instance WHERE doc_type = $1 AND doc_id = $2")
+                .bind(datum_customfields::DOC_TYPE)
+                .bind(id.as_uuid())
+                .fetch_one(db.app_pool())
+                .await
+                .expect("instance");
+        assert_eq!(
+            state, "retired",
+            "{label}: retire transitioned on the kernel"
+        );
+        db.finish().await.expect("finish");
+    }
+}

@@ -266,6 +266,10 @@ impl Kernel {
         let mut tx = Tx::begin(&write, &ctx).await?;
         seed_builtins(&mut tx).await?;
         seed_profile(&mut tx, &profile, &catalog).await?;
+        // 11.50(b): stamp profile.id (never spec_version) and seed templates on
+        // assemble's first Tx. Both calls are idempotent across Kernel::build restarts.
+        datum_print::seed_templates(&mut tx).await?;
+        datum_print::set_installation_profile(&mut tx, profile.id.as_str()).await?;
         tx.commit().await?;
 
         let mut engine = Engine::new();
@@ -275,6 +279,7 @@ impl Kernel {
         let (mut routes, mut subscriptions, mut job_kinds) =
             register_enabled_from_manifests(&mut engine, &profile, &catalog)?;
         register_document_machine(&mut engine, profile.id.as_str())?;
+        engine.register_machine(datum_customfields::definition_machine(profile.id.as_str())?)?;
         for machine in extra_machines {
             engine.register_machine(machine)?;
         }
@@ -940,6 +945,7 @@ async fn abort_claim_tx(tx: &mut Tx<'_>) -> Result<()> {
 fn first_party_projection_types() -> Result<BTreeSet<String>> {
     let mut types = BTreeSet::new();
     types.insert(datum_documents::DOC_TYPE.to_owned());
+    types.insert(datum_customfields::DOC_TYPE.to_owned());
     for m in compiled_in()? {
         for machine in m.machines {
             types.insert(machine.doc_type);
