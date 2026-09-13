@@ -123,6 +123,19 @@ impl Error {
             SignatureError::Consumed | SignatureError::HashMismatch => {
                 Some(("CONFLICT", StatusCode::CONFLICT, err.to_string()))
             }
+            SignatureError::Invalid(msg) if msg == "missing token" => Some((
+                "SIGNATURE_REQUIRED",
+                StatusCode::UNAUTHORIZED,
+                err.to_string(),
+            )),
+            SignatureError::SignerNotPermitted => Some((
+                "SIGNATURE_REQUIRED",
+                StatusCode::FORBIDDEN,
+                err.to_string(),
+            )),
+            // D-2b-5 Invalid (dummy / expired / no such signature / signer mismatch)
+            // and MeaningMismatch / RecordMismatch: esign is bound, so this is
+            // not 409 SIGNATURE_NO_PROVIDER.
             _ => Some(("SIGNATURE_REQUIRED", StatusCode::FORBIDDEN, err.to_string())),
         }
     }
