@@ -1108,7 +1108,24 @@ async fn issue_wo_is_one_transaction() {
             groups, 1,
             "issue+start posts exactly one posting_group {rid} {body}"
         );
-        let wip_posts: i64 = query_scalar(
+        let source: String = query_scalar(
+            r#"SELECT g.source_kind
+                 FROM ledger.posting_group g
+                WHERE g.created_xid IN (
+                    SELECT DISTINCT e.xid
+                      FROM audit.event e
+                     WHERE e.request_id = $1
+                )"#,
+        )
+        .bind(uuid::Uuid::parse_str(rid).unwrap())
+        .fetch_one(&w.pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            source, "production.issue",
+            "group source_kind is the start edge {rid}"
+        );
+        let qty_posts: i64 = query_scalar(
             r#"SELECT count(*)::bigint
                  FROM ledger.posting p
                  JOIN ledger.posting_group g ON g.group_id = p.group_id
@@ -1117,15 +1134,15 @@ async fn issue_wo_is_one_transaction() {
                       FROM audit.event e
                      WHERE e.request_id = $1
                 )
-                  AND p.account = 'WIP'"#,
+                  AND p.measure = 'QUANTITY'"#,
         )
         .bind(uuid::Uuid::parse_str(rid).unwrap())
         .fetch_one(&w.pool)
         .await
         .unwrap();
         assert!(
-            wip_posts >= 1,
-            "production.issue hook must contribute a WIP value posting {rid} {body}"
+            qty_posts >= 2,
+            "production.issue hook must contribute stock-out and WIP quantity postings {rid} {body}"
         );
         let lines_after_ok: i64 =
             query_scalar("SELECT count(*) FROM production_min.issue_line WHERE work_order_id = $1")
