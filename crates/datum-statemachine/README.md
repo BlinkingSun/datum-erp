@@ -17,18 +17,41 @@ Declarative state machines, uniformly audited, with a frozen hook ABI. Uses
 - `HookPhase` / `HookView` / `Veto` — hook ABI
 - `ModuleNode` — module id + `depends_on` (topological order; ties by id)
 - `check_gate_binding` — release build fails if a Required edge meets `NoSignatures`
+- `current_state` / `instance_exists` / `machine_id_for` — live-state query seam (see table)
 - `Error` / `Result` — `Frozen` / `NotFrozen` / `MachineChanged` / `Veto` / `HookBudgetExceeded` / `AfterHookCannotVeto` / `StartupGate` / …
-- `MIGRATOR` — `placeholder` + `0001_statemachine`
+- `MIGRATOR` — `placeholder` + `0001_statemachine` + `0002_query_seam`
 
 `Engine` methods other crates call: `new`, `set_module_graph`, `register_machine`,
 `register_hook`, `freeze`, `hook_order`, `edges_for_manifest`, `persist`, `spawn`,
 `transition`.
+
+### Query seam (kernel crates call these; they never read `sm.instance` / `sm.machine`)
+
+Instance identity is `(doc_type, doc_id)` (`DocRef`).
+
+| Function | Signature | Source of truth |
+|---|---|---|
+| `current_state` | `async fn current_state(tx: &mut Tx<'_>, doc: &DocRef) -> Result<Option<State>>` | `sm.instance.state` via `sm.current_state(text, uuid)` |
+| `current_state_on` | `async fn current_state_on(pool: &ReadPool, doc: &DocRef) -> Result<Option<State>>` | same, through `ReadPool` (no actor) |
+| `instance_exists` | `async fn instance_exists(tx: &mut Tx<'_>, doc: &DocRef) -> Result<bool>` | `sm.instance` via `sm.instance_exists(text, uuid)` |
+| `instance_exists_on` | `async fn instance_exists_on(pool: &ReadPool, doc: &DocRef) -> Result<bool>` | same, through `ReadPool` |
+| `machine_id_for` | `async fn machine_id_for(tx: &mut Tx<'_>, doc_type: &str) -> Result<Option<MachineId>>` | `sm.machine.id` via `sm.machine_id_for(text)` |
+| `machine_id_for_on` | `async fn machine_id_for_on(pool: &ReadPool, doc_type: &str) -> Result<Option<MachineId>>` | same, through `ReadPool` |
+
+All three SQL helpers are **invoker-rights** (not `SECURITY DEFINER`; R-2s-8 does not
+exempt this crate): `datum_app` already has `SELECT` on `sm.instance` / `sm.machine`.
+`EXECUTE` is granted only to `datum_app` (`REVOKE` from `PUBLIC`). They do **not**
+call `audit.require_context`, so a `datum_db::ReadPool` fetch (no actor) succeeds.
+Transition behaviour is unchanged: only `Engine::transition` writes the state column.
 
 ## Migrations
 
 - `00000000000000_placeholder` — no-op
 - `00000000000001_statemachine` — schema `sm` (app): `sm.machine`, `sm.state`,
   `sm.edge`, `sm.instance`
+- `00000000000002_query_seam` — `sm.current_state(text, uuid)`,
+  `sm.instance_exists(text, uuid)`, `sm.machine_id_for(text)` (invoker-rights;
+  `GRANT EXECUTE` to `datum_app` only)
 
 ## Tests (`tests/`)
 
@@ -44,6 +67,8 @@ Declarative state machines, uniformly audited, with a frozen hook ABI. Uses
 - `startup_fails_when_required_edge_meets_no_signatures_in_release`
 - `build_twice_same_declaration_is_idempotent` / `changed_declaration_is_refused`
 - `migration_is_reversible` / `catalogue_accepts_sm_schema`
+- Query seam: `current_state_none_then_some_after_spawn_then_released`,
+  `query_seam_on_read_pool_under_app_and_migrate` (both LOGIN roles)
 - trybuild: `signature_declaration_has_no_default`
 
 Lib: `regulated_machine_requires_total_declaration`, `non_regulated_absence_means_none`,

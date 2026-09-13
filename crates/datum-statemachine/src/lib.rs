@@ -31,6 +31,7 @@ mod decl;
 mod engine;
 mod error;
 mod exec;
+mod query;
 
 pub use decl::{
     DocRef, Edge, EdgeBuilder, Instance, Machine, MachineBuilder, MachineId, ManifestEdge,
@@ -38,8 +39,12 @@ pub use decl::{
 };
 pub use engine::{Engine, HookPhase, HookView, ModuleNode, Veto, check_gate_binding};
 pub use error::{Error, Result};
+pub use query::{
+    current_state, current_state_on, instance_exists, instance_exists_on, machine_id_for,
+    machine_id_for_on,
+};
 
-/// Embedded migrator (`placeholder` + `0001_statemachine`).
+/// Embedded migrator (`placeholder` + `0001_statemachine` + `0002_query_seam`).
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
 #[cfg(test)]
@@ -71,7 +76,7 @@ mod tests {
 
     #[test]
     fn migrator_has_placeholder() {
-        assert!(MIGRATOR.migrations.len() >= 2);
+        assert!(MIGRATOR.migrations.len() >= 3);
     }
 
     #[test]
