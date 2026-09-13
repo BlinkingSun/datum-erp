@@ -5,7 +5,7 @@
 # No path-separator globs (negative **/owner/** fails on Windows paths).
 #
 # Globs: *.rs and *.sql. SQL includes (include_str! / sqlx::query_file!) used
-# to evade the *.rs-only scan (datum-server esign_manifest.sql / esign_consumed.sql).
+# to evade the *.rs-only scan (wicket-server esign_manifest.sql / esign_consumed.sql).
 # Production src only — kernel tests may probe audit.event / seed uom.item_stock.
 set -eu
 
@@ -19,7 +19,7 @@ command -v rg >/dev/null 2>&1 || {
 cd "$REPO_ROOT" || exit 1
 
 # Same pair list as scripts/lint-sql-dynamic.sh SCHEMA_OWNERS (Wave 2b crates included).
-SCHEMA_OWNERS='identity:datum-identity uom:datum-uom ledger:datum-ledger sm:datum-statemachine jobs:datum-jobs events:datum-events numbering:datum-numbering audit:datum-audit items:datum-mod-items locations:datum-mod-locations lots:datum-mod-lots inventory:datum-mod-inventory production_min:datum-mod-production-min genealogy:datum-mod-genealogy documents:datum-documents print:datum-print esign:datum-esign customfields:datum-customfields'
+SCHEMA_OWNERS='identity:wicket-identity uom:wicket-uom ledger:wicket-ledger sm:wicket-statemachine jobs:wicket-jobs events:wicket-events numbering:wicket-numbering audit:wicket-audit items:wicket-mod-items locations:wicket-mod-locations lots:wicket-mod-lots inventory:wicket-mod-inventory production_min:wicket-mod-production-min genealogy:wicket-mod-genealogy documents:wicket-documents print:wicket-print esign:wicket-esign customfields:wicket-customfields'
 
 fail=0
 for pair in $SCHEMA_OWNERS; do
@@ -35,7 +35,7 @@ for pair in $SCHEMA_OWNERS; do
       fi
       crate="$(basename "$crate_dir")"
       case "$crate" in
-        "$owner"|datum-module|datum-test) continue ;;
+        "$owner"|wicket-module|wicket-test) continue ;;
       esac
       if [ "$crate" = "$schema" ]; then
         continue
@@ -49,7 +49,7 @@ for pair in $SCHEMA_OWNERS; do
         "$src_dir" 2>/dev/null || true)"
       if [ -n "$hits" ]; then
         printf '%s\n' "$hits"
-        echo "lint-sql: cross-module table read of ${schema}.* outside ${owner}, datum-module, and datum-test" >&2
+        echo "lint-sql: cross-module table read of ${schema}.* outside ${owner}, wicket-module, and wicket-test" >&2
         fail=1
       fi
     done

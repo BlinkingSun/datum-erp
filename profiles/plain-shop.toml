@@ -73,10 +73,10 @@ gate = "NoSignatures"
 [validation_manifest]
 generated = true
 route = "/api/v1/iq/manifest"
-cli = "datum iq"
+cli = "wicket iq"
 permission = "validation.manifest.read"
 audit_export_route = "/api/v1/audit"
-audit_export_cli = "datum audit export"
+audit_export_cli = "wicket audit export"
 hidden_by_profile = false
 
 [navigation]

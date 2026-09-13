@@ -24,13 +24,13 @@ command -v rg >/dev/null 2>&1 || {
 cd "$REPO_ROOT" || exit 1
 
 # Same pair list as just lint-sql invariant 6 (Wave 2b crates included).
-SCHEMA_OWNERS='identity:datum-identity uom:datum-uom ledger:datum-ledger sm:datum-statemachine jobs:datum-jobs events:datum-events numbering:datum-numbering audit:datum-audit items:datum-mod-items locations:datum-mod-locations lots:datum-mod-lots inventory:datum-mod-inventory production_min:datum-mod-production-min genealogy:datum-mod-genealogy documents:datum-documents print:datum-print esign:datum-esign customfields:datum-customfields'
+SCHEMA_OWNERS='identity:wicket-identity uom:wicket-uom ledger:wicket-ledger sm:wicket-statemachine jobs:wicket-jobs events:wicket-events numbering:wicket-numbering audit:wicket-audit items:wicket-mod-items locations:wicket-mod-locations lots:wicket-mod-lots inventory:wicket-mod-inventory production_min:wicket-mod-production-min genealogy:wicket-mod-genealogy documents:wicket-documents print:wicket-print esign:wicket-esign customfields:wicket-customfields'
 
 # Explicit invariant-6 exemptions (owning crate is per-pair, not listed here).
-CROSS_EXEMPT='datum-module datum-test'
+CROSS_EXEMPT='wicket-module wicket-test'
 
 # Explicit R-2s-3 exemptions (ledger.* / transient.*).
-R2S3_EXEMPT='datum-ledger datum-db datum-audit datum-test datum-jobs datum-events datum-identity'
+R2S3_EXEMPT='wicket-ledger wicket-db wicket-audit wicket-test wicket-jobs wicket-events wicket-identity'
 R2S3_SCHEMAS='ledger transient'
 
 # Portable awk: no match(array), gensub, or interval expressions.
@@ -314,7 +314,7 @@ for tree in modules crates; do
       file="${rec%%:*}"
       case "$kind" in
         r2s3)
-          echo "lint-sql: R-2s-3: dynamic SQL schema ${schema} in ${file} (format/quote_ident/concat; use datum_ledger::has_postings / has_quantity_at; modules must not read those schemas directly)" >&2
+          echo "lint-sql: R-2s-3: dynamic SQL schema ${schema} in ${file} (format/quote_ident/concat; use wicket_ledger::has_postings / has_quantity_at; modules must not read those schemas directly)" >&2
           ;;
         *)
           echo "lint-sql: dynamic cross-module schema ${schema} in ${file} (format/quote_ident/concat; owner ${owner})" >&2
