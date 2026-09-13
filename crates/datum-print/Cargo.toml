@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "Archival print and PDF manifestation (stub API)."
+description = "Deterministic record rendering and archival print (HTML/PDF)."
 build = "build.rs"
 
 [lints]
@@ -21,12 +21,18 @@ datum-db.workspace = true
 datum-audit.workspace = true
 datum-documents.workspace = true
 datum-esign.workspace = true
+pdf-writer.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 datum-test.workspace = true
+datum-identity.workspace = true
+datum-statemachine.workspace = true
+datum-numbering.workspace = true
 tokio.workspace = true
 proptest.workspace = true
 

@@ -1,39 +1,30 @@
-//! Archival print and PDF manifestation (stub API).
+//! Deterministic record rendering and archival print (HTML/PDF).
+//!
+//! Writes go through [`datum_db::Tx`] only. Schema `print` (class `app`).
 
-/// Crate error.
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum Error {
-    /// Not implemented.
-    #[error("unimplemented")]
-    Unimplemented,
-    /// Core error.
-    #[error(transparent)]
-    Core(#[from] datum_core::Error),
-    /// Database error.
-    #[error(transparent)]
-    Db(#[from] datum_db::Error),
-}
+#![cfg_attr(
+    test,
+    allow(clippy::unwrap_used, clippy::expect_used, unused_crate_dependencies)
+)]
 
-/// Crate result alias.
-pub type Result<T> = core::result::Result<T, Error>;
+mod api;
+mod domain;
+mod error;
+mod reads;
+mod render;
+mod store;
 
-/// Embedded placeholder migrator.
+#[cfg(feature = "test-utils")]
+pub use api::set_test_blob_root;
+pub use api::{
+    archive, bump_template, log, manifestation_block, render, seed_templates,
+    set_installation_profile,
+};
+pub use domain::{Format, RenderLogRow, Rendered, TemplateId};
+pub use error::{Error, Result};
+
+/// Embedded migrator (`placeholder` + `0001_print`).
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
-
-/// Print job id.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct PrintJobId(pub datum_core::Identifier);
-
-/// Render a document. Unimplemented.
-pub async fn render(
-    _pool: &datum_db::Pool,
-    _document: datum_documents::DocumentId,
-) -> Result<Vec<u8>> {
-    let _ = core::any::type_name::<datum_audit::Error>();
-    let _ = core::any::type_name::<datum_esign::Error>();
-    Err(Error::Unimplemented)
-}
 
 #[cfg(test)]
 mod tests {
@@ -42,13 +33,8 @@ mod tests {
     use tokio as _;
 
     #[test]
-    fn unimplemented_formats() {
-        assert!(!Error::Unimplemented.to_string().is_empty());
-    }
-
-    #[test]
-    fn migrator_has_placeholder() {
-        assert!(!MIGRATOR.migrations.is_empty());
+    fn migrator_has_print_migration() {
+        assert!(MIGRATOR.migrations.len() >= 2);
     }
 
     #[test]
@@ -58,8 +44,8 @@ mod tests {
 
     proptest! {
         #[test]
-        fn unimplemented_display_is_stable(_x in 0u8..4) {
-            prop_assert!(!Error::Unimplemented.to_string().is_empty());
+        fn renderer_version_is_non_empty(_x in 0u8..2) {
+            prop_assert!(!render::renderer_version().is_empty());
         }
     }
 }
