@@ -14,10 +14,10 @@ Frozen public API for Wave 2s.
   module is refused with the dependents named.
 - `CANONICAL_ORDER` / `KERNEL_ORDER` and `install_upto` (the one harness
   entry point; `install_privileged` once after `datum-audit`, never dropped).
-  `install_kernel` is `install_upto(..., "datum-module")`; `install_slice` is
-  `install_upto(..., "datum-server")`. `KERNEL_AUDIT_RELS` includes the five
-  `documents.*` tables and the three `print.*` tables so `audit_trigger_matrix`
-  covers the product migrate path.
+  `install_kernel` is `install_upto(..., "datum-mod-lots")` (kernel + Wave
+  2s.1); `install_slice` is `install_upto(..., "datum-server")`.
+  `KERNEL_AUDIT_RELS` includes the five `documents.*` tables and the three
+  `print.*` tables so `audit_trigger_matrix` covers the product migrate path.
 - Configuration manifest export/verify (`docs/03` §8).
 - The composed kernel path (ADDENDUM 1).
 

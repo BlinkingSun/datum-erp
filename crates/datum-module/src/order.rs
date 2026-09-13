@@ -354,9 +354,11 @@ pub async fn install_upto(
     Ok(())
 }
 
-/// [`install_upto`] through [`KERNEL_ORDER`]'s last crate (`datum-module`).
+/// [`install_upto`] through Wave 2s.1 (`datum-mod-lots`). Kernel crates plus
+/// items/locations/lots; the slice (inventory / production / genealogy / server)
+/// is [`install_slice`].
 pub async fn install_kernel(migrate: &datum_db::Pool, bootstrap: &datum_db::Pool) -> Result<()> {
-    install_upto(migrate, bootstrap, "datum-module").await
+    install_upto(migrate, bootstrap, "datum-mod-lots").await
 }
 
 /// [`install_upto`] through [`CANONICAL_ORDER`]'s last crate (`datum-server`).
