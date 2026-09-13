@@ -2,8 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use datum_core::{
-    NoSignatures, RecordRef, SignatureError, SignatureGate, SignatureId, SignatureRequirement,
-    SignatureToken,
+    NoSignatures, RecordRef, SignatureError, SignatureGate, SignatureRequirement, SignatureToken,
 };
 use datum_identity::PrincipalStatus;
 use serde_json::Value;
@@ -13,7 +12,7 @@ use uuid::Uuid;
 use crate::error::map_tx;
 use crate::hash::{content_hash, snapshot};
 use crate::projection::project;
-use crate::{Error, InstanceTriple, Result};
+use crate::{InstanceTriple, Result};
 
 /// Live document the composition root read in the transition's transaction.
 #[derive(Debug, Clone)]
@@ -42,7 +41,6 @@ type SigRow = (
     Value,
     Vec<String>,
     Option<DateTime<Utc>>,
-    Option<Uuid>,
 );
 
 /// In-memory gate produced by [`prepare`]. Claims the row in `tx`.
@@ -183,7 +181,7 @@ pub async fn prepare(
                 r#"SELECT signature_id, signer_id, meaning, expires_at,
                           record_table, record_id, record_version,
                           record_content_hash, record_snapshot, permission_snapshot,
-                          consumed_at, superseded_by
+                          consumed_at
                      FROM esign.signature
                     WHERE signature_id = $1
                     FOR UPDATE"#,
@@ -259,25 +257,4 @@ pub async fn prepare(
         token_hash: token.record_content_hash,
         permission_snapshot: row.9,
     })
-}
-
-/// Mark `old` as superseded by `new`. Monotone insert into `esign.supersession`
-/// (D-2b-1 does not grant `UPDATE (superseded_by)`).
-pub async fn supersede(
-    tx: &mut datum_db::Tx<'_>,
-    old: SignatureId,
-    new: SignatureId,
-) -> Result<()> {
-    let inserted: (bool,) = tx
-        .fetch_one(
-            sql_query_as("SELECT esign.supersede_signature($1, $2)")
-                .bind(old.as_uuid())
-                .bind(new.as_uuid()),
-        )
-        .await
-        .map_err(map_tx)?;
-    if !inserted.0 {
-        return Err(Error::NotFound);
-    }
-    Ok(())
 }

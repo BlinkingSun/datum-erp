@@ -1,19 +1,17 @@
 //! Record-keyed manifestation read seam on the sealed Tx and on ReadPool
-//! under both LOGIN roles (D-2b-2, including supersession).
+//! under both LOGIN roles (D-2b-2, including live-version supersession).
 #![allow(clippy::unwrap_used, clippy::expect_used, unused_crate_dependencies)]
 
 mod common;
 
 use datum_core::{Identifier, RecordRef};
 use datum_db::Tx;
-use datum_esign::{
-    manifestation, manifestation_for_record, manifestation_for_record_on, mint, supersede,
-};
+use datum_esign::{manifestation, manifestation_for_record, manifestation_for_record_on, mint};
 use datum_test::db_case;
 
 use common::{
-    both_profiles, instance, migrate_esign, mint_req, read_pool, read_pool_migrate, record,
-    signer_with_perm, system_ctx, two_components, write_pool,
+    PERM, both_profiles, bump_wo, instance, migrate_esign, mint_req, persist_and_spawn_wo,
+    read_pool, read_pool_migrate, record, signer_with_perm, system_ctx, two_components, write_pool,
 };
 
 fn body() -> serde_json::Value {
@@ -55,6 +53,7 @@ async fn manifestation_for_record_matches_d2b2_on_tx() {
         assert_eq!(listed[0].signature.printed_name, "M. Reyes");
         assert_eq!(listed[0].signature.meaning, "Released");
         assert!(!listed[0].signature.superseded);
+        assert_eq!(listed[0].signature.superseded_by_version, None);
         assert_eq!(listed[0].signature.record.table, rec.table);
         assert_eq!(listed[0].signature.record.version, rec.version);
         let empty = manifestation_for_record(
@@ -119,6 +118,7 @@ async fn manifestation_for_record_on_read_pool_under_app_and_migrate() {
                 "{label}"
             );
             assert!(!listed[0].signature.superseded, "{label}");
+            assert_eq!(listed[0].signature.superseded_by_version, None, "{label}");
             let missing = manifestation_for_record_on(
                 pool,
                 &RecordRef {
@@ -141,10 +141,11 @@ async fn manifestation_for_record_includes_supersession_state() {
         let db = db_case!(&format!("es_rr_sup_{}", profile.slug));
         migrate_esign(&db).await;
         let write = write_pool(&db);
-        let p = signer_with_perm(&write, &format!("rr-sup-{}", profile.slug), common::PERM).await;
+        let p = signer_with_perm(&write, &format!("rr-sup-{}", profile.slug), PERM).await;
         let doc_id = Identifier::generate();
-        let rec = record(doc_id, 3);
-        let inst = instance(doc_id, 3, "Draft");
+        let (eng, doc, version) = persist_and_spawn_wo(&write, doc_id).await;
+        let rec = record(doc_id, version);
+        let inst = instance(doc_id, version, "Draft");
         let b = body();
         let mut tx = Tx::begin(&write, &system_ctx("esign.mint"))
             .await
@@ -175,14 +176,18 @@ async fn manifestation_for_record_includes_supersession_state() {
         )
         .await
         .expect("mint new");
-        supersede(&mut tx, old.id, new.id).await.expect("supersede");
-        let listed = manifestation_for_record(&mut tx, &rec).await.expect("list");
-        tx.commit().await.expect("commit");
+        tx.commit().await.expect("mint commit");
+        let live = bump_wo(&write, &eng, &p, &doc).await;
+        let listed = manifestation_for_record_on(&read_pool(&db), &rec)
+            .await
+            .expect("list");
         assert_eq!(listed.len(), 2, "oldest first");
         assert_eq!(listed[0].signature.id, old.id.to_string());
         assert!(listed[0].signature.superseded, "old is superseded");
+        assert_eq!(listed[0].signature.superseded_by_version, Some(live));
         assert_eq!(listed[1].signature.id, new.id.to_string());
-        assert!(!listed[1].signature.superseded, "new is live");
+        assert!(listed[1].signature.superseded, "same record version");
+        assert_eq!(listed[1].signature.superseded_by_version, Some(live));
         db.finish().await.expect("finish");
     }
 }

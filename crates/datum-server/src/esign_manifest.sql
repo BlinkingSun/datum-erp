@@ -25,6 +25,6 @@ SELECT
             )
        ) AS signed_at_local,
        record_table, record_id, record_version, doc_type,
-       record_content_hash, credential_kind, components_used, superseded_by
+       record_content_hash, credential_kind, components_used
   FROM esign.signature
  WHERE signature_id = $1
