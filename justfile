@@ -47,7 +47,7 @@ lint-sql:
     # Production src only - kernel tests may probe audit.event / seed uom.item_stock.
     # Scan per-crate src/ (no path-separator globs): negative **/owner/** fails on Windows paths.
     fail=0; \
-    for pair in identity:datum-identity uom:datum-uom ledger:datum-ledger sm:datum-statemachine jobs:datum-jobs events:datum-events numbering:datum-numbering audit:datum-audit items:datum-mod-items locations:datum-mod-locations lots:datum-mod-lots; do \
+    for pair in identity:datum-identity uom:datum-uom ledger:datum-ledger sm:datum-statemachine jobs:datum-jobs events:datum-events numbering:datum-numbering audit:datum-audit items:datum-mod-items locations:datum-mod-locations lots:datum-mod-lots inventory:datum-mod-inventory production_min:datum-mod-production-min genealogy:datum-mod-genealogy; do \
       schema="${pair%%:*}"; \
       owner="${pair##*:}"; \
       for tree in "{{root}}/crates" "{{root}}/modules"; do \
@@ -69,6 +69,9 @@ lint-sql:
       done; \
     done; \
     if [ "$fail" -ne 0 ]; then exit 1; fi
+    # R-2s-3: production src SQL must not DML-reference ledger.* / transient.*
+    # outside the explicit owner exemption set (see scripts/lint-sql-r2s3.sh).
+    REPO_ROOT="{{root}}" bash "{{root}}/scripts/lint-sql-r2s3.sh"
     REPO_ROOT="{{root}}" bash "{{root}}/scripts/lint-sql-migrations.sh"
 
 # Plant bad migrations and assert lint-sql-migrations fails (then remove them).
@@ -80,10 +83,16 @@ lint-sql-selftest:
     plant_create="$root/crates/datum-server/migrations/99999999999998_lint_sql_selftest_definer_create.up.sql"; \
     plant_drop="$root/crates/datum-server/migrations/99999999999999_lint_sql_selftest_definer_drop.up.sql"; \
     plant_orphan="$root/crates/datum-server/migrations/99999999999999_lint_sql_selftest_definer_orphan.up.sql"; \
-    cleanup() { rm -f "$plant_cross" "$plant_session" "$plant_create" "$plant_drop" "$plant_orphan"; }; \
+    plant_r2s3="$root/modules/items/src/_lint_sql_r2s3_selftest.rs"; \
+    plant_r2s3_ok="$root/modules/lots/src/_lint_sql_r2s3_ok.rs"; \
+    cleanup() { rm -f "$plant_cross" "$plant_session" "$plant_create" "$plant_drop" "$plant_orphan" "$plant_r2s3" "$plant_r2s3_ok"; }; \
     trap cleanup EXIT; \
     if ! REPO_ROOT="$root" bash "$root/scripts/lint-sql-migrations.sh" --selftest-hits; then \
       echo 'lint-sql-selftest: Windows-shaped hit parser/neutralization failed' >&2; \
+      exit 1; \
+    fi; \
+    if ! REPO_ROOT="$root" bash "$root/scripts/lint-sql-r2s3.sh" --selftest-hits; then \
+      echo 'lint-sql-selftest: Windows-shaped R-2s-3 hit parser failed' >&2; \
       exit 1; \
     fi; \
     run_lint() { REPO_ROOT="$root" bash "$root/scripts/lint-sql-migrations.sh" 2>/dev/null; }; \
@@ -118,7 +127,31 @@ lint-sql-selftest:
       echo 'lint-sql-selftest: expected migration lint to fail on unpaired SECURITY DEFINER' >&2; \
       exit 1; \
     fi; \
-    echo 'lint-sql-selftest: unpaired SECURITY DEFINER correctly rejected'
+    echo 'lint-sql-selftest: unpaired SECURITY DEFINER correctly rejected'; \
+    printf '%s\n' \
+      'fn _lint_sql_r2s3_selftest() { let _ = "SELECT 1 FROM ledger.posting WHERE false"; }' \
+      > "$plant_r2s3"; \
+    printf '%s\n' \
+      '/// comment FROM ledger.posting and transient.balance_projection must not trip the rule' \
+      'fn _lint_sql_r2s3_ok() {' \
+      '    let _ = "SELECT 1 FROM inventory_transient.idempotency";' \
+      '    let _ = "VALUES ($1::ledger.boundary)";' \
+      '    let _ = "SELECT ledger.has_postings($1)";' \
+      '}' \
+      > "$plant_r2s3_ok"; \
+    r2s3_out="$(REPO_ROOT="$root" bash "$root/scripts/lint-sql-r2s3.sh" 2>&1 || true)"; \
+    if ! printf '%s\n' "$r2s3_out" | grep -F 'modules/items/src/_lint_sql_r2s3_selftest.rs' >/dev/null; then \
+      echo 'lint-sql-selftest: expected R-2s-3 lint to report planted ledger.posting SQL' >&2; \
+      printf '%s\n' "$r2s3_out" >&2; \
+      exit 1; \
+    fi; \
+    if printf '%s\n' "$r2s3_out" | grep -F 'modules/lots/src/_lint_sql_r2s3_ok.rs' >/dev/null; then \
+      echo 'lint-sql-selftest: R-2s-3 lint false-positive on comment / type-cast / *_transient / published function' >&2; \
+      printf '%s\n' "$r2s3_out" >&2; \
+      exit 1; \
+    fi; \
+    echo 'lint-sql-selftest: planted R-2s-3 ledger.* SQL correctly rejected'; \
+    echo 'lint-sql-selftest: R-2s-3 negatives (comment, ::ledger.boundary, inventory_transient, has_postings) correctly allowed'
 
 # All tests, including integration.
 test:
