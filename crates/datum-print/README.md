@@ -13,6 +13,11 @@ never wall-clock time or caller identity. Footer stamps `app_version` and
 `config_version` from the bound transaction. `config_version` is the profile
 **spec** version (`1.0.0` in both shipped profiles), not the profile id.
 
+Document-revision fields and signature blocks come from the published
+`datum_documents` / `datum_esign` render reads (`revision_for_render`,
+`attachments_for_render`, `manifestation_for_record`). This crate does not
+SELECT those crates' tables (R-2s-3).
+
 ## Template versioning
 
 Bodies live as files under `templates/` and are seeded into `print.template`
@@ -40,7 +45,7 @@ same moment it records `module.configuration`. Do not infer the profile from
 |----------|---------|
 | `render` | Produce `Rendered` bytes + `output_hash`; writes `render_log` |
 | `archive` | Store bytes via caller-supplied `datum_documents::BlobStore` (same pattern as `documents::attach`); idempotent per output hash. No process-global blob root. |
-| `manifestation_block` | Snapshot manifestation rows for the record (no live identity join) |
+| `manifestation_block` | `datum_esign::manifestation_for_record` (D-2b-2 snapshots, no live identity join) |
 | `log` | List `render_log` rows for a record version |
 | `set_installation_profile` | Boot stamp for 11.50(b) gating |
 
