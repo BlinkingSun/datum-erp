@@ -14,8 +14,9 @@ Class `app`, schema `esign` (R-2s-1; kernel crate owns its schema):
 
 | Table | Notes |
 |---|---|
-| `esign.signature` | Insert-only. `datum_app` holds `SELECT`, `INSERT`, and `UPDATE (consumed_at, consumed_xid, superseded_by)` only. A `BEFORE UPDATE` trigger refuses any other column; `consumed_at` / `superseded_by` are monotone. No `DELETE`. |
+| `esign.signature` | Insert-only. `datum_app` holds `SELECT`, `INSERT`, and `UPDATE (consumed_at, consumed_xid)` only (D-2b-1). A `BEFORE UPDATE` trigger refuses any other column; `consumed_at` is monotone. No `DELETE`. |
 | `esign.meaning_policy` | Reason-text policy (`requires_reason`, `permission_hint`). |
+| `esign.supersession` | Insert-only link `old → new`. `supersede` INSERTs here (SECURITY INVOKER); it does not `UPDATE esign.signature.superseded_by`. |
 
 Working state is `transient.signing_session` (D-2b-3; `DELETE` allowed, not
 audited). This crate is not on the R-2s-3 exemption list, so production Rust
@@ -24,9 +25,9 @@ functions.
 
 Tables are owned by `datum_owner` (NOLOGIN). App-class tables are audited by
 `zz_audit_row` from `CREATE TABLE`. Hash columns are redacted through
-`audit.redact` (registered by the migrator role in tests; production
-registration is a `datum-audit` seam — this crate cannot `INSERT INTO
-audit.redact` under lint-sql-migrations).
+`audit.redact` (registered by the production migrator via a one-shot
+`esign._register_hash_redact()` function dropped in `0002`, so
+`lint-sql-migrations` treats the cross-schema insert as neutralized).
 
 ## D-2b-5 check table
 
@@ -93,11 +94,16 @@ is accepted only when `continuous_session = "on"` and a live
 ## API
 
 - `mint(tx, MintRequest) -> Signature`
-- `prepare(tx, token, doc) -> PreparedGate` (`LiveDoc.signer_status` from `load_principal`; `ReadPool` has no query surface)
+- `prepare(tx, token, doc) -> PreparedGate` (`LiveDoc.signer_status` from `load_principal`)
 - `PreparedGate: SignatureGate`, `GateFactory`, `BoundGate`
-- `manifestation(&Pool, id)`, `archival_bundle(&Pool, id)`, `verify_bundle` (pure)
-- `supersede(tx, old, new)`, `close_session(tx, principal, reason)`, `log_refusal`
+- `manifestation(&Pool, id)`, `archival_bundle(&Pool, id)`, `verify_bundle` (pure; `chain_ok` requires a non-empty seal chain)
+- `supersede(tx, old, new)` (INSERT into `esign.supersession`), `close_session(tx, reason)` (actor from the bound `WriteContext`), `log_refusal`
 - `register_projection(doc_type, fn)`, default `identity_projection`
+
+`datum_db::ReadPool` has no query surface (`new` / `connect` / `idle` only).
+`manifestation` / `archival_bundle` take `&datum_db::Pool` — the same seam as
+`datum_identity::load_principal`. Adding `ReadPool` fetch helpers is a
+`datum-db` change and is out of this crate's owns.
 
 `record_content_hash` is SHA-256 over the canonical JSON of
 `{ projection, instance: { doc_type, doc_id, state, version } }`. The caller

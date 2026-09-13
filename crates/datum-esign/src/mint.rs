@@ -15,7 +15,7 @@ use crate::error::map_tx;
 use crate::hash::{content_hash, snapshot};
 use crate::projection::project;
 use crate::session::{
-    SessionPolicy, close_session, device_changed, is_continuous, load_open, open_session,
+    SessionPolicy, close_sessions_for, device_changed, is_continuous, load_open, open_session,
     touch_session,
 };
 use crate::{Error, InstanceTriple, Result};
@@ -139,12 +139,12 @@ pub async fn mint(tx: &mut datum_db::Tx<'_>, req: &MintRequest) -> Result<Signat
             req.source_ip.as_deref(),
             &req.boot_epoch,
         ) {
-            close_session(tx, user, "device_change").await?;
+            close_sessions_for(tx, user, "device_change").await?;
         } else if let Some(login) = req.login_session_id
             && s.login_session_id.is_some()
             && s.login_session_id != Some(login)
         {
-            close_session(tx, user, "login_session_change").await?;
+            close_sessions_for(tx, user, "login_session_change").await?;
         }
     }
     let open = load_open(tx, user).await?;
@@ -171,7 +171,7 @@ pub async fn mint(tx: &mut datum_db::Tx<'_>, req: &MintRequest) -> Result<Signat
     match reauth_signing(tx, user, &req.secret).await {
         Ok(()) => {}
         Err(datum_identity::Error::InvalidCredentials) => {
-            let _ = close_session(tx, user, "failed_signing").await;
+            let _ = close_sessions_for(tx, user, "failed_signing").await;
             if verify_login_secret(tx, user, &req.secret).await? {
                 return Err(Error::Validation {
                     field: Some("identification.secret".into()),

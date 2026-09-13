@@ -7,7 +7,7 @@ use datum_core::{
 };
 use datum_identity::PrincipalStatus;
 use serde_json::Value;
-use sqlx::{query as sql_query, query_as as sql_query_as};
+use sqlx::query_as as sql_query_as;
 use uuid::Uuid;
 
 use crate::error::map_tx;
@@ -49,6 +49,7 @@ type SigRow = (
 #[derive(Debug, Clone)]
 pub struct PreparedGate {
     first: Option<SignatureError>,
+    claim_ok: bool,
     meaning: String,
     record_table: String,
     record_id: Uuid,
@@ -91,6 +92,9 @@ impl SignatureGate for PreparedGate {
             .any(|k| k == &required.permission.0)
         {
             return Err(SignatureError::SignerNotPermitted);
+        }
+        if !self.claim_ok {
+            return Err(SignatureError::Consumed);
         }
         Ok(())
     }
@@ -192,6 +196,7 @@ pub async fn prepare(
     let Some(row) = row else {
         return Ok(PreparedGate {
             first: Some(SignatureError::Invalid("no such signature".into())),
+            claim_ok: false,
             meaning: String::new(),
             record_table: String::new(),
             record_id: Uuid::nil(),
@@ -229,9 +234,7 @@ pub async fn prepare(
         )
         .await
         .map_err(map_tx)?;
-    if first.is_none() && claimed.is_none() {
-        first = Some(SignatureError::Consumed);
-    }
+    let claim_ok = claimed.is_some();
 
     let mut row_hash = [0u8; 32];
     if row.7.len() == 32 {
@@ -246,6 +249,7 @@ pub async fn prepare(
 
     Ok(PreparedGate {
         first,
+        claim_ok,
         meaning: row.2,
         record_table: row.4,
         record_id: row.5,
@@ -257,25 +261,22 @@ pub async fn prepare(
     })
 }
 
-/// Mark `old` as superseded by `new`. Monotone (`NULL` → once).
+/// Mark `old` as superseded by `new`. Monotone insert into `esign.supersession`
+/// (D-2b-1 does not grant `UPDATE (superseded_by)`).
 pub async fn supersede(
     tx: &mut datum_db::Tx<'_>,
     old: SignatureId,
     new: SignatureId,
 ) -> Result<()> {
-    let n = tx
-        .execute(
-            sql_query(
-                r#"UPDATE esign.signature
-                      SET superseded_by = $2
-                    WHERE signature_id = $1 AND superseded_by IS NULL"#,
-            )
-            .bind(old.as_uuid())
-            .bind(new.as_uuid()),
+    let inserted: (bool,) = tx
+        .fetch_one(
+            sql_query_as("SELECT esign.supersede_signature($1, $2)")
+                .bind(old.as_uuid())
+                .bind(new.as_uuid()),
         )
         .await
         .map_err(map_tx)?;
-    if n.rows_affected() == 0 {
+    if !inserted.0 {
         return Err(Error::NotFound);
     }
     Ok(())

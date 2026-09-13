@@ -1,5 +1,8 @@
 -- Reverse of 0001_esign.
 
+DROP FUNCTION IF EXISTS esign._register_hash_redact();
+DROP FUNCTION IF EXISTS esign.supersede_signature(uuid, uuid);
+DROP TABLE IF EXISTS esign.supersession;
 DROP FUNCTION IF EXISTS esign.close_signing_sessions(uuid, text);
 DROP FUNCTION IF EXISTS esign.touch_signing_session(uuid);
 DROP FUNCTION IF EXISTS esign.open_signing_session(uuid, uuid, uuid, text, text, text);
