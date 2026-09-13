@@ -232,7 +232,7 @@ pub struct Document {
     pub status: Status,
     /// Retention class, stamped onto every revision.
     pub retention_class: String,
-    /// When true, Obsolete and retention actions are refused.
+    /// When true, Obsolete, Superseded, and retention actions are refused.
     pub legal_hold: bool,
 }
 

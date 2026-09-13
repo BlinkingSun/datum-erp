@@ -7,9 +7,10 @@ use uuid::Uuid;
 
 use datum_core::Identifier;
 use datum_db::Tx;
+use datum_statemachine::{DocRef, current_state};
 
 use crate::domain::{
-    BlobHash, DatePrecision, Document, DocumentId, Manifest, Revision, RevisionId, Status,
+    BlobHash, DOC_TYPE, DatePrecision, Document, DocumentId, Manifest, Revision, RevisionId, Status,
 };
 use crate::error::{Error, Result};
 
@@ -135,23 +136,28 @@ pub(crate) async fn load_document(tx: &mut Tx<'_>, id: DocumentId) -> Result<Doc
             .bind(id.as_uuid()),
         )
         .await?;
-    row.map(row_to_doc).transpose()?.ok_or(Error::NotFound)
+    let mut doc = row.map(row_to_doc).transpose()?.ok_or(Error::NotFound)?;
+    overlay_live_status(tx, &mut doc).await?;
+    Ok(doc)
 }
 
-pub(crate) async fn set_document_status(
-    tx: &mut Tx<'_>,
-    id: DocumentId,
-    status: &str,
-) -> Result<()> {
-    let n = tx
-        .execute(
-            query("UPDATE documents.document SET status = $2 WHERE document_id = $1")
-                .bind(id.as_uuid())
-                .bind(status),
-        )
-        .await?;
-    if n.rows_affected() == 0 {
-        return Err(Error::NotFound);
+/// Live status is the machine. The column is the insert-time snapshot.
+async fn overlay_live_status(tx: &mut Tx<'_>, doc: &mut Document) -> Result<()> {
+    let live = current_state(
+        tx,
+        &DocRef {
+            doc_type: DOC_TYPE.into(),
+            doc_id: doc.id.0,
+        },
+    )
+    .await?;
+    if let Some(state) = live {
+        doc.status = Status::parse(&state.0).ok_or_else(|| {
+            Error::Core(datum_core::Error::Invariant(format!(
+                "bad machine state {}",
+                state.0
+            )))
+        })?;
     }
     Ok(())
 }
@@ -254,22 +260,14 @@ pub(crate) async fn latest_revision_id(
     Ok(row.map(|r| RevisionId(Identifier::from_uuid(r.0))))
 }
 
-pub(crate) async fn set_revision_status(
-    tx: &mut Tx<'_>,
-    id: RevisionId,
-    status: &str,
-) -> Result<()> {
-    let n = tx
-        .execute(
-            query("UPDATE documents.revision SET status = $2 WHERE revision_id = $1")
-                .bind(id.as_uuid())
-                .bind(status),
+pub(crate) async fn blob_row_exists(tx: &mut Tx<'_>, hash: BlobHash) -> Result<bool> {
+    let row: Option<(bool,)> = tx
+        .fetch_optional(
+            query_as("SELECT true FROM documents.blob WHERE hash = $1")
+                .bind(hash.as_bytes().as_slice()),
         )
         .await?;
-    if n.rows_affected() == 0 {
-        return Err(Error::NotFound);
-    }
-    Ok(())
+    Ok(row.is_some())
 }
 
 pub(crate) async fn insert_blob(tx: &mut Tx<'_>, hash: BlobHash, byte_size: i64) -> Result<()> {
@@ -336,18 +334,61 @@ pub(crate) async fn insert_link(
     Ok(())
 }
 
+/// Half-open window bound. `None` on `effective_until` is unbounded future;
+/// `None` on `effective_from` is unbounded past. Both `None` is not a window.
+#[derive(Clone, Copy)]
+enum Bound {
+    Unbounded,
+    At(DateTime<Utc>),
+}
+
+fn window(from: Option<DateTime<Utc>>, until: Option<DateTime<Utc>>) -> Option<(Bound, Bound)> {
+    match (from, until) {
+        (None, None) => None,
+        (from, until) => Some((
+            from.map(Bound::At).unwrap_or(Bound::Unbounded),
+            until.map(Bound::At).unwrap_or(Bound::Unbounded),
+        )),
+    }
+}
+
+fn start_before_end(start: Bound, end: Bound) -> bool {
+    match (start, end) {
+        (_, Bound::Unbounded) => true,
+        (Bound::Unbounded, Bound::At(_)) => true,
+        (Bound::At(s), Bound::At(e)) => s < e,
+    }
+}
+
+/// Half-open `[from, until)` overlap. Unbounded ends are explicit, never a
+/// sentinel timestamp. A row with both bounds NULL is not in force and does
+/// not overlap.
 pub(crate) fn ranges_overlap(
     a_from: Option<DateTime<Utc>>,
     a_until: Option<DateTime<Utc>>,
     b_from: Option<DateTime<Utc>>,
     b_until: Option<DateTime<Utc>>,
 ) -> bool {
-    let (Some(a0), Some(b0)) = (a_from, b_from) else {
+    let Some(a) = window(a_from, a_until) else {
         return false;
     };
-    let open =
-        DateTime::<Utc>::from_timestamp(4_102_444_800, 0).unwrap_or(DateTime::<Utc>::UNIX_EPOCH);
-    let a1 = a_until.unwrap_or(open);
-    let b1 = b_until.unwrap_or(open);
-    a0 < b1 && b0 < a1
+    let Some(b) = window(b_from, b_until) else {
+        return false;
+    };
+    start_before_end(a.0, b.1) && start_before_end(b.0, a.1)
+}
+
+/// `[effective_from, effective_until)` contains `ts`. `NULL` from is unbounded
+/// past; `NULL` until is unbounded future; both `NULL` is not in force.
+pub(crate) fn in_force(
+    from: Option<DateTime<Utc>>,
+    until: Option<DateTime<Utc>>,
+    ts: DateTime<Utc>,
+) -> bool {
+    match (from, until) {
+        (None, None) => false,
+        (None, Some(until)) => ts < until,
+        (Some(from), None) => from <= ts,
+        (Some(from), Some(until)) => from <= ts && ts < until,
+    }
 }

@@ -196,7 +196,7 @@ pub fn dummy_token(
         },
         meaning: SignatureMeaning(meaning.into()),
         record: datum_core::RecordRef {
-            table: "sm.instance".into(),
+            table: "document".into(),
             id: doc.0,
             version,
         },

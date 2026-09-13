@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use datum_core::{Identifier, NoPostings, PostingSink, SignatureGate, SignatureToken};
 use datum_db::{Tx, WriteContext};
 use datum_numbering::{ResetPolicy, define, next_number};
-use datum_statemachine::{DocRef, Engine, with_action};
+use datum_statemachine::{DocRef, Engine, current_state, instance_exists, with_action};
 
 use crate::blob::BlobStore;
 use crate::domain::{
@@ -40,6 +40,11 @@ pub async fn create(
         doc_id: id.0,
     };
     engine.spawn(tx, &doc, Status::Draft.as_str()).await?;
+    if !instance_exists(tx, &doc).await? {
+        return Err(Error::Core(datum_core::Error::Invariant(
+            "spawn did not persist a machine instance".into(),
+        )));
+    }
     Ok(id)
 }
 
@@ -86,6 +91,11 @@ pub async fn new_revision(
 }
 
 /// Store bytes in the blob store and insert an attachment row. Same bytes reuse one blob.
+///
+/// The `documents.blob` row is inserted before bytes hit disk. If `put` fails after
+/// creating a new object, that object is removed. After a transaction rollback the
+/// composition root calls [`crate::BlobStore::discard_uncommitted`] so a rolled-back
+/// row cannot leave an orphan file.
 pub async fn attach(
     tx: &mut Tx<'_>,
     store: &dyn BlobStore,
@@ -95,7 +105,8 @@ pub async fn attach(
     media_type: &str,
 ) -> Result<AttachmentId> {
     let _ = store::load_revision(tx, rev).await?;
-    let hash = store.put(bytes)?;
+    let hash = crate::blob::hash_bytes(bytes);
+    let already_on_disk = store.exists(hash);
     store::insert_blob(tx, hash, bytes.len() as i64).await?;
     let id = AttachmentId::generate();
     store::insert_attachment(
@@ -108,6 +119,12 @@ pub async fn attach(
         bytes.len() as i64,
     )
     .await?;
+    if let Err(e) = store.put(bytes) {
+        if !already_on_disk {
+            store.discard_hash(hash);
+        }
+        return Err(e);
+    }
     Ok(id)
 }
 
@@ -125,7 +142,8 @@ pub async fn link(
     Ok(id)
 }
 
-/// Drive the registered machine. Status columns are written only here.
+/// Drive the registered machine. Live status is [`current_state`] after the
+/// engine returns; the `status` column is the insert-time snapshot (immutable).
 ///
 /// `tx` must have been begun with [`with_action`] for `(document, edge)`.
 /// `approve` / `make_effective` honour the profile's signature declaration.
@@ -139,7 +157,7 @@ pub async fn transition(
     signature: Option<&SignatureToken>,
 ) -> Result<Document> {
     let current = store::load_document(tx, doc).await?;
-    if current.legal_hold && (edge == "obsolete") {
+    if current.legal_hold && (edge == "obsolete" || edge == "supersede") {
         return Err(Error::LegalHold);
     }
     let doc_ref = DocRef {
@@ -150,9 +168,16 @@ pub async fn transition(
     let instance = engine
         .transition(tx, sink, &doc_ref, edge, signature, gate, ctx)
         .await?;
-    store::set_document_status(tx, doc, &instance.state.0).await?;
-    if let Some(rev) = store::latest_revision_id(tx, doc).await? {
-        store::set_revision_status(tx, rev, &instance.state.0).await?;
+    let live = current_state(tx, &doc_ref).await?;
+    match live {
+        Some(state) if state.0 == instance.state.0 => {}
+        other => {
+            return Err(Error::Core(datum_core::Error::Invariant(format!(
+                "machine state {:?} after transition to {}",
+                other.map(|s| s.0),
+                instance.state.0
+            ))));
+        }
     }
     store::load_document(tx, doc).await
 }
@@ -181,13 +206,9 @@ pub async fn effective_at(
     ts: DateTime<Utc>,
 ) -> Result<Option<Revision>> {
     let rows = store::list_revisions(tx, doc).await?;
-    Ok(rows.into_iter().find(|r| match r.manifest.effective_from {
-        Some(from) if from <= ts => match r.manifest.effective_until {
-            Some(until) => ts < until,
-            None => true,
-        },
-        _ => false,
-    }))
+    Ok(rows
+        .into_iter()
+        .find(|r| store::in_force(r.manifest.effective_from, r.manifest.effective_until, ts)))
 }
 
 /// Set or clear legal hold. `true` refuses subsequent Obsolete transitions.
@@ -195,9 +216,22 @@ pub async fn set_legal_hold(tx: &mut Tx<'_>, doc: DocumentId, hold: bool) -> Res
     store::set_legal_hold_row(tx, doc, hold).await
 }
 
-/// Load the master.
+/// Load the master. `status` is the live machine state (`current_state`).
 pub async fn load(tx: &mut Tx<'_>, id: DocumentId) -> Result<Document> {
     store::load_document(tx, id).await
+}
+
+/// Remove on-disk bytes for `hash` when no `documents.blob` row is visible.
+/// Composition root calls this (or [`BlobStore::discard_uncommitted`]) after rollback.
+pub async fn discard_unreferenced_blob(
+    tx: &mut Tx<'_>,
+    store: &dyn BlobStore,
+    hash: crate::domain::BlobHash,
+) -> Result<()> {
+    if !store::blob_row_exists(tx, hash).await? {
+        store.discard_hash(hash);
+    }
+    Ok(())
 }
 
 pub(crate) fn rebuild_chain(rows: &[Revision]) -> Vec<Revision> {
