@@ -16,13 +16,15 @@ use datum_identity::{
     rbac::{assign_role, seed_bundles},
     set_login_credential, set_signing_credential,
 };
-use datum_print::{Format, TemplateId, archive, bump_template, log, render};
+use datum_print::{
+    Format, TemplateId, archive, bump_template, list_templates, list_templates_on, log, render,
+};
 use serde_json::json;
 use sqlx::query;
 
 use common::{
-    PROFILES, SPEC_VERSION, blob_store, frozen_engine, migrate, open_db, persist_engine, write_ctx,
-    write_pool,
+    PROFILES, SPEC_VERSION, blob_store, frozen_engine, migrate, open_db, persist_engine, read_pool,
+    write_ctx, write_pool,
 };
 
 async fn for_each_profile<F, Fut>(f: F)
@@ -520,6 +522,64 @@ async fn golden_work_order_traveler() {
         db.finish().await.unwrap();
     })
     .await;
+}
+
+#[tokio::test]
+async fn list_templates_latest_effective_both_profiles() {
+    for_each_profile(|profile| async move {
+        let Some(db) = open_db("list_tpl", profile).await else {
+            return;
+        };
+        migrate(&db, profile).await;
+        let write = write_pool(&db);
+        let mut tx = Tx::begin(&write, &write_ctx("print.templates"))
+            .await
+            .unwrap();
+        let via_tx = list_templates(&mut tx, profile).await.unwrap();
+        tx.commit().await.unwrap();
+        let via_pool = list_templates_on(&read_pool(&db), profile).await.unwrap();
+        assert_eq!(via_tx, via_pool);
+        let ids: Vec<&str> = via_tx.iter().map(|t| t.template_id.as_str()).collect();
+        assert_eq!(
+            ids,
+            [
+                TemplateId::DOCUMENT_REVISION,
+                TemplateId::GENERIC_RECORD,
+                TemplateId::WORK_ORDER_TRAVELER
+            ]
+        );
+        assert!(
+            via_tx.iter().all(|t| t.template_id != "item_label"),
+            "labels are ADR 0009; no item_label template"
+        );
+        assert!(
+            via_tx
+                .iter()
+                .all(|t| t.version == 1 && t.body_hash.len() == 64)
+        );
+        db.finish().await.unwrap();
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn list_templates_unknown_profile() {
+    let Some(db) = open_db("list_bad", "plain-shop").await else {
+        return;
+    };
+    migrate(&db, "plain-shop").await;
+    let write = write_pool(&db);
+    let mut tx = Tx::begin(&write, &write_ctx("print.templates"))
+        .await
+        .unwrap();
+    let err = list_templates(&mut tx, "not-a-profile").await.unwrap_err();
+    tx.rollback().await.ok();
+    assert!(matches!(err, datum_print::Error::UnknownProfile(_)));
+    let err = list_templates_on(&read_pool(&db), "not-a-profile")
+        .await
+        .unwrap_err();
+    assert!(matches!(err, datum_print::Error::UnknownProfile(_)));
+    db.finish().await.unwrap();
 }
 
 #[tokio::test]

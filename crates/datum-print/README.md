@@ -49,9 +49,31 @@ same moment it records `module.configuration`. Do not infer the profile from
 | `log` | List `render_log` rows for a record version |
 | `set_installation_profile` | Boot stamp for 11.50(b) gating |
 
+## Published read seams
+
+Kernel crates and `datum-server` must not SELECT `print.*` (CONTRACT §5a /
+R-2s-3 / invariant 6). This crate is the owner. Direct SELECT of these tables
+stays here (invoker-rights; no `SECURITY DEFINER`).
+
+| Function | Signature | Source of truth | Consumer |
+|---|---|---|---|
+| `list_templates` | `async fn list_templates(tx: &mut Tx<'_>, profile: &str) -> Result<Vec<TemplateSummary>>` | latest effective `print.template` row per id | sealed `Tx` |
+| `list_templates_on` | `async fn list_templates_on(pool: &ReadPool, profile: &str) -> Result<Vec<TemplateSummary>>` | same, through `ReadPool` (no actor) | `datum-server` GET `/api/v1/print/templates` |
+
+`profile` is a shipped installation profile id (`plain-shop` /
+`regulated-device`). Built-in templates are the same in both profiles
+(document revision, generic record, work-order traveler). Labels are ADR 0009
+territory and are not in this wave (no `item_label` template). Unknown profile
+ids are `Error::UnknownProfile`.
+
 ## Wire shapes (docs/10)
 
-**POST** `/api/v1/print/render` HTTP transport is deferred to Wave 3 (Tx API today):
+**GET** `/api/v1/print/templates` (permission `print.templates`) is the published
+read of [`list_templates_on`]. **POST** `/api/v1/print/render` and **POST**
+`/api/v1/print/archive` are mounted as two routes (traveler render; labels are
+ADR 0009 and are not in this wave).
+
+**POST** `/api/v1/print/render`:
 
 ```json
 {

@@ -7,14 +7,17 @@ use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
 use datum_core::{Actor, ActorKind, Identifier};
 use datum_db::{Tx, WriteContext, WritePool};
+use datum_documents::FsBlobStore;
 use datum_identity::rbac::{RoleBundle, assign_role, seed_bundles};
 use datum_identity::{
     PrincipalKind, create_principal, set_login_credential, set_signing_credential,
 };
 use datum_module::{Profile, ProfileId};
-use datum_server::{App, AppState, router};
+use datum_server::{App, AppState, install_test_blob_root, router};
 use serde_json::{Value, json};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::path::PathBuf;
+use std::sync::Once;
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -34,8 +37,50 @@ pub const SIGNING_SECRET: &str = "signing-secret-ok";
 pub const NOPERM_USER: &str = "noperm";
 pub const NOPERM_PASSWORD: &str = "noperm-login";
 
+/// Per-test filesystem blob root. Removed on drop.
+pub struct BlobRoot {
+    path: PathBuf,
+}
+
+impl Drop for BlobRoot {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+impl BlobRoot {
+    /// Unique writable directory under the test harness temp dir.
+    pub fn new(tag: &str) -> Self {
+        let path =
+            std::env::temp_dir().join(format!("datum-server-blobs-{}-{}", tag, Uuid::now_v7()));
+        std::fs::create_dir_all(&path).expect("per-test blob root");
+        Self { path }
+    }
+
+    /// Configured path.
+    pub fn path(&self) -> &PathBuf {
+        &self.path
+    }
+
+    /// Store rooted at this directory.
+    pub fn store(&self) -> FsBlobStore {
+        FsBlobStore::new(self.path.clone())
+    }
+}
+
+fn pin_process_blob_root_for_app_boot() {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        let path =
+            std::env::temp_dir().join(format!("datum-server-blobs-process-{}", std::process::id()));
+        std::fs::create_dir_all(&path).expect("process blob root");
+        install_test_blob_root(path);
+    });
+}
+
 /// Skip cleanly when Postgres is absent and `DATUM_REQUIRE_PG` is not set.
 pub fn skip_if_no_pg() -> bool {
+    pin_process_blob_root_for_app_boot();
     if std::env::var("DATUM_REQUIRE_PG").ok().as_deref() == Some("1") {
         datum_test::require_postgres();
         return false;
@@ -56,6 +101,7 @@ pub struct World {
     pub calibration_doc: Option<String>,
     pub state: AppState,
     _db: datum_test::TestDb,
+    _blob_root: BlobRoot,
 }
 
 pub async fn boot(profile: Profile) -> World {
@@ -69,6 +115,7 @@ pub async fn boot(profile: Profile) -> World {
     let bind = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
     let base = std::env::var("DATUM_DATABASE_URL").expect("DATUM_DATABASE_URL");
     let app_url = rewrite_db(&base, db.database());
+    let blob_root = BlobRoot::new("srv");
     let app = App::boot_pools(
         profile.clone(),
         db.app_pool().clone(),
@@ -76,6 +123,7 @@ pub async fn boot(profile: Profile) -> World {
         &boot,
         bind,
         app_url,
+        blob_root.store(),
     )
     .await
     .unwrap_or_else(|e| panic!("boot: {e:#}"));
@@ -93,6 +141,7 @@ pub async fn boot(profile: Profile) -> World {
         calibration_doc,
         state,
         _db: db,
+        _blob_root: blob_root,
     };
     world.login().await;
     boot.close().await;

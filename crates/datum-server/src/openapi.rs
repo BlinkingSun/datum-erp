@@ -366,6 +366,27 @@ pub const MOUNTED: &[Mounted] = &[
         state_transition: true,
     },
     // w3b:print
+    Mounted {
+        method: "GET",
+        path: "/api/v1/print/templates",
+        operation_id: "listPrintTemplates",
+        permission: "print.templates",
+        state_transition: false,
+    },
+    Mounted {
+        method: "POST",
+        path: "/api/v1/print/render",
+        operation_id: "renderPrint",
+        permission: "print.render",
+        state_transition: false,
+    },
+    Mounted {
+        method: "POST",
+        path: "/api/v1/print/archive",
+        operation_id: "archivePrint",
+        permission: "print.archive",
+        state_transition: false,
+    },
 ];
 
 /// Merge kernel + mounted routes into one OpenAPI 3 document.

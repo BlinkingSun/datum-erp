@@ -16,7 +16,13 @@ datum manifest export
 
 Configuration is a TOML file (`--config` / `DATUM_CONFIG`) plus environment.
 Database URLs are D3's names: `DATUM_DATABASE_URL`, `DATUM_MIGRATE_DATABASE_URL`,
-`DATUM_BOOTSTRAP_URL`. There is no bundled database (D5).
+`DATUM_BOOTSTRAP_URL`. The content-addressed blob store root is `DATUM_BLOB_ROOT`
+(the same name `datum_documents::FsBlobStore::from_env` already uses). It is
+required on both `plain-shop` and `regulated-device` and must name a writable
+directory; archived print renders (11.50(b) records) live there. Missing, empty,
+or unusable values fail `App::boot` with `BootError::BlobRootMissing` /
+`BootError::BlobRootNotWritable` (process exits non-zero). There is no temp-dir
+fallback and no bundled database (D5).
 
 ## Service files (`dist/`)
 

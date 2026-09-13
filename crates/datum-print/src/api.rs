@@ -1,15 +1,36 @@
 //! Public API on the sealed [`datum_db::Tx`].
 
 use datum_core::{Identifier, RecordRef};
-use datum_db::Tx;
+use datum_db::{ReadPool, Tx};
 use datum_documents::{BlobHash, BlobStore};
 use datum_esign::Manifestation;
+use sqlx::query_as;
 
-use crate::domain::{Format, RenderLogRow, Rendered, TemplateId};
+use crate::domain::{Format, RenderLogRow, Rendered, TemplateId, TemplateSummary};
 use crate::error::{Error, Result};
 use crate::reads;
 use crate::render as render_util;
 use crate::store;
+
+/// Latest effective template per id on the sealed [`Tx`].
+///
+/// `profile` is a shipped installation profile id (`plain-shop` /
+/// `regulated-device`). Built-in templates are the same in both profiles
+/// (traveler render; no `item_label`). Unknown ids are [`Error::UnknownProfile`].
+pub async fn list_templates(tx: &mut Tx<'_>, profile: &str) -> Result<Vec<TemplateSummary>> {
+    store::require_known_profile(profile)?;
+    let rows: Vec<store::TemplateListRow> =
+        tx.fetch_all(query_as(store::LIST_TEMPLATES_SQL)).await?;
+    Ok(rows.into_iter().map(store::row_to_summary).collect())
+}
+
+/// [`list_templates`] through a [`ReadPool`] (no actor bound on the connection).
+pub async fn list_templates_on(pool: &ReadPool, profile: &str) -> Result<Vec<TemplateSummary>> {
+    store::require_known_profile(profile)?;
+    let rows: Vec<store::TemplateListRow> =
+        pool.fetch_all(query_as(store::LIST_TEMPLATES_SQL)).await?;
+    Ok(rows.into_iter().map(store::row_to_summary).collect())
+}
 
 /// Load manifestation blocks for a record (esign snapshot columns, no identity join).
 pub async fn manifestation_block(tx: &mut Tx<'_>, record: RecordRef) -> Result<Vec<Manifestation>> {
