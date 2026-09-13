@@ -301,6 +301,41 @@ pub const MOUNTED: &[Mounted] = &[
         state_transition: false,
     },
     // w3b:customfields
+    Mounted {
+        method: "POST",
+        path: "/api/v1/customfields/definitions",
+        operation_id: "defineCustomField",
+        permission: "customfields.define",
+        state_transition: false,
+    },
+    Mounted {
+        method: "GET",
+        path: "/api/v1/customfields/definitions",
+        operation_id: "listCustomFieldDefinitions",
+        permission: "customfields.view",
+        state_transition: false,
+    },
+    Mounted {
+        method: "POST",
+        path: "/api/v1/customfields/definitions/{id}/retire",
+        operation_id: "retireCustomField",
+        permission: "customfields.retire",
+        state_transition: true,
+    },
+    Mounted {
+        method: "PUT",
+        path: "/api/v1/items/{id}/custom-fields",
+        operation_id: "setItemCustomFields",
+        permission: "customfields.set",
+        state_transition: false,
+    },
+    Mounted {
+        method: "GET",
+        path: "/api/v1/items/{id}/custom-fields",
+        operation_id: "getItemCustomFields",
+        permission: "customfields.view",
+        state_transition: false,
+    },
     // w3b:documents
     // w3b:print
 ];
