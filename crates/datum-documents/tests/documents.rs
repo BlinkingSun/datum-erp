@@ -539,12 +539,12 @@ async fn regulated_approve_refused_under_no_signatures_nothing_written() {
         let eng = frozen_engine("regulated-device");
         persist_engine(&write, &eng, profile).await;
         let id = create_in_review(&write, &eng, profile, &NoSignatures).await;
-        let before: String =
-            query_scalar("SELECT status FROM documents.document WHERE document_id = $1")
-                .bind(id.as_uuid())
-                .fetch_one(db.app_pool())
-                .await
-                .unwrap();
+        let mut tx = Tx::begin(&write, &write_ctx("documents.view", profile))
+            .await
+            .unwrap();
+        let before = load(&mut tx, id).await.unwrap();
+        tx.rollback().await.unwrap();
+        assert_eq!(before.status, Status::InReview);
         let audit_before: i64 =
             query_scalar("SELECT count(*) FROM audit.event WHERE table_name = 'document'")
                 .fetch_one(db.app_pool())
@@ -573,14 +573,13 @@ async fn regulated_approve_refused_under_no_signatures_nothing_written() {
             "got {err:?}"
         );
         tx.rollback().await.unwrap();
-        let after: String =
-            query_scalar("SELECT status FROM documents.document WHERE document_id = $1")
-                .bind(id.as_uuid())
-                .fetch_one(db.app_pool())
-                .await
-                .unwrap();
-        assert_eq!(before, after);
-        assert_eq!(before, "InReview");
+        let mut tx = Tx::begin(&write, &write_ctx("documents.view", profile))
+            .await
+            .unwrap();
+        let after = load(&mut tx, id).await.unwrap();
+        tx.rollback().await.unwrap();
+        assert_eq!(after.status, before.status);
+        assert_eq!(after.status, Status::InReview);
         let audit_after: i64 =
             query_scalar("SELECT count(*) FROM audit.event WHERE table_name = 'document'")
                 .fetch_one(db.app_pool())
