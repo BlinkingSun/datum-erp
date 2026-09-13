@@ -4,7 +4,7 @@
 use datum_core::{
     Actor, ActorKind, Identifier, PermissionKey, RecordRef, SignatureMeaning, SignatureRequirement,
 };
-use datum_db::{WriteContext, WritePool};
+use datum_db::{ReadPool, WriteContext, WritePool};
 use datum_esign::{InstanceTriple, LiveDoc, MintRequest, SessionPolicy, Signature};
 use datum_identity::rbac::{RoleBundle, assign_role, seed_bundles};
 use datum_identity::{
@@ -103,6 +103,10 @@ pub async fn migrate_esign_sm(db: &datum_test::TestDb) {
 
 pub fn write_pool(db: &datum_test::TestDb) -> WritePool {
     WritePool::new(db.app_pool().clone())
+}
+
+pub fn read_pool(db: &datum_test::TestDb) -> ReadPool {
+    ReadPool::new(db.app_pool().clone())
 }
 
 pub async fn signer_with_perm(write: &WritePool, username: &str, perm: &str) -> Principal {

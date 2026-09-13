@@ -96,14 +96,13 @@ is accepted only when `continuous_session = "on"` and a live
 - `mint(tx, MintRequest) -> Signature`
 - `prepare(tx, token, doc) -> PreparedGate` (`LiveDoc.signer_status` from `load_principal`)
 - `PreparedGate: SignatureGate`, `GateFactory`, `BoundGate`
-- `manifestation(&Pool, id)`, `archival_bundle(&Pool, id)`, `verify_bundle` (pure; `chain_ok` requires a non-empty seal chain)
+- `manifestation(&ReadPool, id)`, `archival_bundle(&ReadPool, id)`, `verify_bundle` (pure; `chain_ok` requires a non-empty seal chain)
 - `supersede(tx, old, new)` (INSERT into `esign.supersession`), `close_session(tx, reason)` (actor from the bound `WriteContext`), `log_refusal`
 - `register_projection(doc_type, fn)`, default `identity_projection`
 
-`datum_db::ReadPool` has no query surface (`new` / `connect` / `idle` only).
-`manifestation` / `archival_bundle` take `&datum_db::Pool` — the same seam as
-`datum_identity::load_principal`. Adding `ReadPool` fetch helpers is a
-`datum-db` change and is out of this crate's owns.
+Reads go through `datum_db::ReadPool` (`fetch_one` / `fetch_optional` /
+`fetch_all`). `archival_bundle` still calls `datum_audit::bundle`, which takes
+`&Pool`; that one call uses `ReadPool::as_pool`.
 
 `record_content_hash` is SHA-256 over the canonical JSON of
 `{ projection, instance: { doc_type, doc_id, state, version } }`. The caller
