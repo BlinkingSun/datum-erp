@@ -120,6 +120,9 @@ impl Error {
                 StatusCode::CONFLICT,
                 "This transition requires a signature and no signature provider is bound.".into(),
             )),
+            SignatureError::Consumed | SignatureError::HashMismatch => {
+                Some(("CONFLICT", StatusCode::CONFLICT, err.to_string()))
+            }
             _ => Some(("SIGNATURE_REQUIRED", StatusCode::FORBIDDEN, err.to_string())),
         }
     }
@@ -258,5 +261,36 @@ impl Error {
 impl From<sqlx::Error> for Error {
     fn from(err: sqlx::Error) -> Self {
         Error::Db(err.into())
+    }
+}
+
+impl From<datum_esign::Error> for Error {
+    fn from(err: datum_esign::Error) -> Self {
+        match err {
+            datum_esign::Error::SignatureRequired { field } => Self::http(
+                "SIGNATURE_REQUIRED",
+                format!("signature required: {field}"),
+                Some(&field),
+                StatusCode::UNAUTHORIZED,
+            ),
+            datum_esign::Error::Validation { field, message } => {
+                Self::validation(message, field.as_deref())
+            }
+            datum_esign::Error::Conflict { message } => Self::conflict(message, None),
+            datum_esign::Error::NotFound => Self::not_found("signature not found"),
+            datum_esign::Error::Signature(sig) => {
+                let fallback = sig.to_string();
+                let (code, status, message) = Self::from_signature(&sig).unwrap_or((
+                    "INTERNAL",
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    fallback,
+                ));
+                Self::http(code, message, None, status)
+            }
+            datum_esign::Error::Identity(e) => Self::Identity(e),
+            datum_esign::Error::Db(e) => Self::Db(e),
+            datum_esign::Error::Core(e) => Self::Core(e),
+            other => Self::Config(other.to_string()),
+        }
     }
 }

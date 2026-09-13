@@ -1594,6 +1594,10 @@ async fn get_handlers_are_read_only() {
         "genealogy_trace",
         "trace_inner",
         "health",
+        "esign_manifestation",
+        "esign_manifestation_inner",
+        "esign_bundle",
+        "esign_bundle_inner",
     ];
     let src = include_str!("../src/handlers.rs");
     for name in GET_FNS {

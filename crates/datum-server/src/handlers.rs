@@ -1995,6 +1995,272 @@ async fn reverse_inner(
 }
 
 /// Health.
+
+#[derive(Deserialize)]
+struct EsignMintBody {
+    meaning: String,
+    #[serde(default)]
+    reason: Option<String>,
+    record: EsignRecordBody,
+    identification: EsignIdentBody,
+    #[serde(default)]
+    doc_type: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct EsignRecordBody {
+    table: String,
+    id: String,
+    version: i64,
+}
+
+#[derive(Deserialize)]
+struct EsignIdentBody {
+    #[serde(default)]
+    code: Option<String>,
+    #[serde(default)]
+    secret: Option<String>,
+}
+
+fn permission_for_meaning(meaning: &str) -> datum_core::PermissionKey {
+    datum_core::PermissionKey(
+        match meaning {
+            "Approved" => "calibration.approve",
+            "Released" => "wo.release",
+            "Lot released" => "lots.release",
+            other => other,
+        }
+        .into(),
+    )
+}
+
+/// POST /api/v1/esign/challenges
+pub async fn esign_challenge(State(state): State<AppState>, headers: H) -> Response {
+    let request_id = rid(&headers);
+    match esign_challenge_inner(&state, &headers, &request_id).await {
+        Ok(v) => json_status(200, v),
+        Err(e) => error_response(e, &request_id),
+    }
+}
+
+async fn esign_challenge_inner(state: &AppState, headers: &H, request_id: &str) -> Result<Value> {
+    let session = extract::require_mutation(state, headers, request_id, "identity.session").await?;
+    let write = fresh_write(state).await?;
+    let ctx = session::write_context(
+        &session,
+        "esign.challenge",
+        request_id,
+        headers,
+        &state.kernel().profile.spec_version,
+    );
+    let mut tx = Tx::begin(&write, &ctx).await?;
+    let challenge = datum_esign::challenge(
+        &mut tx,
+        session.principal,
+        &state.kernel().profile.session_policy,
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(serde_json::to_value(challenge)?)
+}
+
+/// POST /api/v1/esign/signatures
+pub async fn esign_mint(State(state): State<AppState>, headers: H, body: Bytes) -> Response {
+    let request_id = rid(&headers);
+    match esign_mint_inner(&state, &headers, &request_id, &body).await {
+        Ok((st, v)) => json_status(st, v),
+        Err(e) => error_response(e, &request_id),
+    }
+}
+
+async fn esign_mint_inner(
+    state: &AppState,
+    headers: &H,
+    request_id: &str,
+    raw: &[u8],
+) -> Result<(u16, Value)> {
+    let session = extract::require_mutation(state, headers, request_id, "identity.session").await?;
+    let key = idempotency::require_key(headers)?;
+    let hash = idempotency::body_hash(raw);
+    let body: EsignMintBody = parse_json(raw)?;
+    let write = fresh_write(state).await?;
+    let ctx = session::write_context(
+        &session,
+        "esign.mint",
+        request_id,
+        headers,
+        &state.kernel().profile.spec_version,
+    );
+    let mut tx = Tx::begin(&write, &ctx).await?;
+    if let Some(replay) = idempotency::replay(&mut tx, key, &hash).await? {
+        tx.commit().await?;
+        return Ok(replay);
+    }
+    let principal = datum_identity::load_principal(state.pool(), session.principal).await?;
+    let doc_id = parse_uuid(&body.record.id, "record.id", Identifier::from_uuid)?;
+    let rec = RecordRef {
+        table: body.record.table.clone(),
+        id: doc_id,
+        version: body.record.version,
+    };
+    let meaning = body.meaning.clone();
+    let fallback_type = body
+        .doc_type
+        .clone()
+        .unwrap_or_else(|| body.record.table.clone());
+    let (doc_type, inst) = if body.record.table == "sm.instance" {
+        match state.kernel().load_sm_instance(&mut tx, doc_id).await? {
+            Some((live_type, state_name, version)) => (
+                body.doc_type.unwrap_or(live_type.clone()),
+                datum_esign::InstanceTriple {
+                    doc_type: live_type,
+                    doc_id,
+                    state: state_name,
+                    version,
+                },
+            ),
+            None => (
+                fallback_type.clone(),
+                datum_esign::InstanceTriple {
+                    doc_type: fallback_type.clone(),
+                    doc_id,
+                    state: String::new(),
+                    version: body.record.version,
+                },
+            ),
+        }
+    } else {
+        (
+            fallback_type.clone(),
+            datum_esign::InstanceTriple {
+                doc_type: fallback_type.clone(),
+                doc_id,
+                state: String::new(),
+                version: body.record.version,
+            },
+        )
+    };
+    let mut components = Vec::new();
+    if body
+        .identification
+        .code
+        .as_ref()
+        .is_some_and(|c| !c.is_empty())
+    {
+        components.push("code".into());
+    }
+    if body
+        .identification
+        .secret
+        .as_ref()
+        .is_some_and(|s| !s.is_empty())
+    {
+        components.push("secret".into());
+    }
+    let sig = datum_esign::mint(
+        &mut tx,
+        &datum_esign::MintRequest {
+            components,
+            code: body.identification.code.clone(),
+            secret: body.identification.secret.clone().unwrap_or_default(),
+            meaning: SignatureMeaning(meaning.clone()),
+            reason: body.reason,
+            record: rec,
+            doc_type,
+            projection: serde_json::json!({}),
+            instance: inst,
+            permission: permission_for_meaning(&meaning),
+            signed_at_zone: state
+                .kernel()
+                .profile
+                .seeded_permissions
+                .display_timezone
+                .clone(),
+            policy: state.kernel().profile.session_policy.clone(),
+            principal,
+            login_session_id: Some(session.id),
+            device_fingerprint: headers
+                .get("user-agent")
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_string),
+            source_ip: headers
+                .get("x-forwarded-for")
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.split(',').next().unwrap_or(s).trim().to_string()),
+            boot_epoch: "1".into(),
+            credential_kind: "signing_password".into(),
+        },
+    )
+    .await?;
+    let sig_id = sig.id;
+    tx.commit().await?;
+    let body = serde_json::to_value(datum_esign::manifestation(state.pool(), sig_id).await?)?;
+    let write = fresh_write(state).await?;
+    let ctx = session::write_context(
+        &session,
+        "esign.mint",
+        request_id,
+        headers,
+        &state.kernel().profile.spec_version,
+    );
+    let mut tx = Tx::begin(&write, &ctx).await?;
+    idempotency::remember(&mut tx, key, &hash, 201, &body).await?;
+    tx.commit().await?;
+    Ok((201, body))
+}
+
+/// GET /api/v1/esign/signatures/{id}
+pub async fn esign_manifestation(
+    State(state): State<AppState>,
+    headers: H,
+    Path(id): Path<String>,
+) -> Response {
+    let request_id = rid(&headers);
+    match esign_manifestation_inner(&state, &headers, &request_id, &id).await {
+        Ok(v) => json_status(200, v),
+        Err(e) => error_response(e, &request_id),
+    }
+}
+
+async fn esign_manifestation_inner(
+    state: &AppState,
+    headers: &H,
+    request_id: &str,
+    id: &str,
+) -> Result<Value> {
+    let _session =
+        extract::require_permission(state, headers, request_id, "identity.session").await?;
+    let sig_id = parse_uuid(id, "id", datum_core::SignatureId::from_uuid)?;
+    let body = datum_esign::manifestation(state.pool(), sig_id).await?;
+    Ok(serde_json::to_value(body)?)
+}
+
+/// GET /api/v1/esign/signatures/{id}/bundle
+pub async fn esign_bundle(
+    State(state): State<AppState>,
+    headers: H,
+    Path(id): Path<String>,
+) -> Response {
+    let request_id = rid(&headers);
+    match esign_bundle_inner(&state, &headers, &request_id, &id).await {
+        Ok(v) => json_status(200, v),
+        Err(e) => error_response(e, &request_id),
+    }
+}
+
+async fn esign_bundle_inner(
+    state: &AppState,
+    headers: &H,
+    request_id: &str,
+    id: &str,
+) -> Result<Value> {
+    let _session =
+        extract::require_permission(state, headers, request_id, "esign.bundle.read").await?;
+    let sig_id = parse_uuid(id, "id", datum_core::SignatureId::from_uuid)?;
+    let body = datum_esign::archival_bundle(state.pool(), sig_id).await?;
+    Ok(serde_json::to_value(body)?)
+}
+
 pub async fn health() -> &'static str {
     crate::version()
 }

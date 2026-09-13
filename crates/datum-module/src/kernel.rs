@@ -299,6 +299,23 @@ impl Kernel {
         self.gate
     }
 
+    /// Live `sm.instance` triple for minting (composition-root read; esign does not `SELECT sm.*`).
+    pub async fn load_sm_instance(
+        &self,
+        tx: &mut Tx<'_>,
+        doc_id: Identifier,
+    ) -> Result<Option<(String, String, i64)>> {
+        Ok(tx
+            .fetch_optional(
+                sqlx::query_as(
+                    r#"SELECT doc_type, state, version FROM sm.instance
+                        WHERE doc_id = $1"#,
+                )
+                .bind(doc_id.as_uuid()),
+            )
+            .await?)
+    }
+
     /// Sync [`SignatureGate`] for callers that still pass a gate into `Engine::transition`.
     ///
     /// `Kernel::transition` prepares a per-transaction gate from [`Self::signature_gate_factory`].

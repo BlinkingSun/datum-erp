@@ -272,6 +272,34 @@ pub const MOUNTED: &[Mounted] = &[
         permission: "calibration.approve",
         state_transition: true,
     },
+    Mounted {
+        method: "POST",
+        path: "/api/v1/esign/challenges",
+        operation_id: "esignChallenge",
+        permission: "identity.session",
+        state_transition: false,
+    },
+    Mounted {
+        method: "POST",
+        path: "/api/v1/esign/signatures",
+        operation_id: "esignMint",
+        permission: "identity.session",
+        state_transition: false,
+    },
+    Mounted {
+        method: "GET",
+        path: "/api/v1/esign/signatures/{id}",
+        operation_id: "getEsignSignature",
+        permission: "identity.session",
+        state_transition: false,
+    },
+    Mounted {
+        method: "GET",
+        path: "/api/v1/esign/signatures/{id}/bundle",
+        operation_id: "getEsignBundle",
+        permission: "esign.bundle.read",
+        state_transition: false,
+    },
 ];
 
 /// Merge kernel + mounted routes into one OpenAPI 3 document.
