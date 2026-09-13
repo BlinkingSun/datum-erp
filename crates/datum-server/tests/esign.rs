@@ -517,6 +517,105 @@ async fn calibration_replay_of_consumed_signature_is_409() {
     assert_ne!(replay["error"]["code"], "INTERNAL", "{replay}");
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn consumed_signature_replay_is_409_via_published_seam() {
+    if common::skip_if_no_pg() {
+        return;
+    }
+    let w = common::boot(Profile::regulated_device().unwrap()).await;
+    let cal = w
+        .calibration_doc
+        .clone()
+        .expect("calibration.certificate spawned at boot");
+    let rec = Uuid::parse_str(&cal).expect("uuid");
+    let (st, minted) = w.post("/api/v1/esign/signatures", mint_body(rec)).await;
+    assert_eq!(st, StatusCode::CREATED, "mint {minted}");
+    let sig_id = minted["signature"]["id"].as_str().expect("id");
+
+    let (st, _, approved) = w
+        .call(
+            "POST",
+            &format!("/api/v1/calibration/certificates/{cal}/approve"),
+            Some(vec![
+                ("if-match", "\"1\"".into()),
+                ("x-datum-signature", sig_id.to_string()),
+            ]),
+            Some(json!({})),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "signed approve {approved}");
+
+    let (st, _, replay) = w
+        .call(
+            "POST",
+            &format!("/api/v1/calibration/certificates/{cal}/approve"),
+            Some(vec![
+                ("if-match", "\"1\"".into()),
+                ("x-datum-signature", sig_id.to_string()),
+            ]),
+            Some(json!({})),
+        )
+        .await;
+    assert_eq!(st, StatusCode::CONFLICT, "replay {replay}");
+    assert_eq!(replay["error"]["code"], "CONFLICT", "{replay}");
+    assert_ne!(replay["error"]["code"], "INTERNAL", "{replay}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn server_manifest_matches_crate_wire_after_version_bump() {
+    if common::skip_if_no_pg() {
+        return;
+    }
+    let w = common::boot(Profile::regulated_device().unwrap()).await;
+    let cal = w
+        .calibration_doc
+        .clone()
+        .expect("calibration.certificate spawned at boot");
+    let rec = Uuid::parse_str(&cal).expect("uuid");
+    let (st, minted) = w.post("/api/v1/esign/signatures", mint_body(rec)).await;
+    assert_eq!(st, StatusCode::CREATED, "mint {minted}");
+    let sig_id = minted["signature"]["id"].as_str().expect("id");
+    assert_eq!(minted["signature"]["superseded"], false, "{minted}");
+    assert!(
+        minted["signature"]["superseded_by_version"].is_null(),
+        "{minted}"
+    );
+
+    let (st, _, approved) = w
+        .call(
+            "POST",
+            &format!("/api/v1/calibration/certificates/{cal}/approve"),
+            Some(vec![
+                ("if-match", "\"1\"".into()),
+                ("x-datum-signature", sig_id.to_string()),
+            ]),
+            Some(json!({})),
+        )
+        .await;
+    assert_eq!(st, StatusCode::OK, "bump via approve {approved}");
+
+    let (st, got) = w.get(&format!("/api/v1/esign/signatures/{sig_id}")).await;
+    assert_eq!(st, StatusCode::OK, "get {got}");
+    assert_eq!(got["signature"]["superseded"], true, "{got}");
+    let live = got["signature"]["superseded_by_version"]
+        .as_i64()
+        .expect("superseded_by_version");
+    let record_version = got["signature"]["record"]["version"]
+        .as_i64()
+        .expect("record.version");
+    assert!(
+        live > record_version,
+        "live {live} must exceed record {record_version}: {got}"
+    );
+
+    let sid = datum_core::SignatureId::from_uuid(Uuid::parse_str(sig_id).expect("uuid"));
+    let crate_wire = datum_esign::manifestation(&datum_db::ReadPool::new(w.pool.clone()), sid)
+        .await
+        .expect("crate manifestation");
+    let crate_json = serde_json::to_value(&crate_wire).expect("crate json");
+    assert_eq!(got, crate_json, "HTTP GET is the crate D-2b-2 wire");
+}
+
 #[test]
 fn esign_mint_remembers_in_the_mint_transaction() {
     let src = include_str!("../src/handlers.rs");
@@ -542,4 +641,20 @@ fn esign_mint_remembers_in_the_mint_transaction() {
         remember < commit,
         "remember must run before commit in the mint Tx"
     );
+}
+
+#[test]
+fn server_src_does_not_select_esign_schema() {
+    let handlers = include_str!("../src/handlers.rs");
+    assert!(
+        !handlers.contains("include_str!(\"esign_"),
+        "sql includes must be deleted"
+    );
+    assert!(
+        !handlers.contains("FROM esign."),
+        "no FROM esign.* in handlers"
+    );
+    assert!(handlers.contains("datum_esign::signature_consumed_at"));
+    assert!(handlers.contains("datum_esign::manifestation_in_tx"));
+    assert!(handlers.contains("datum_esign::manifestation("));
 }

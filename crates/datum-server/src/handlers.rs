@@ -520,11 +520,10 @@ fn bind_esign_header(ctx: &mut WriteContext, headers: &H) {
     }
 }
 
+/// Pre-transition Consumed check (w2b-c1-server). Reads `consumed_at`
+/// through the published esign seam — never `SELECT esign.*` here (R-2s-3).
 async fn signature_row_consumed(tx: &mut Tx<'_>, id: SignatureId) -> Result<bool> {
-    let row: Option<(Option<chrono::DateTime<chrono::Utc>>,)> = tx
-        .fetch_optional(sqlx::query_as(include_str!("esign_consumed.sql")).bind(id.as_uuid()))
-        .await?;
-    Ok(matches!(row, Some((Some(_),))))
+    Ok(datum_esign::signature_consumed_at(tx, id).await?.is_some())
 }
 
 fn consumed_conflict() -> Error {
@@ -573,57 +572,9 @@ async fn required_edge_token(
     )))
 }
 
+/// Mint response is the crate D-2b-2 wire (including live-version supersession).
 async fn manifestation_via_tx(tx: &mut Tx<'_>, id: SignatureId) -> Result<Value> {
-    type ManifestRow = (
-        Uuid,
-        Uuid,
-        String,
-        String,
-        Option<String>,
-        chrono::DateTime<chrono::Utc>,
-        String,
-        String,
-        String,
-        Uuid,
-        i64,
-        String,
-        Vec<u8>,
-        String,
-        Vec<String>,
-    );
-    let row: Option<ManifestRow> = tx
-        .fetch_optional(sqlx::query_as(include_str!("esign_manifest.sql")).bind(id.as_uuid()))
-        .await?;
-    let Some(row) = row else {
-        return Err(Error::not_found("signature not found"));
-    };
-    let mut hash = [0u8; 32];
-    if row.12.len() == 32 {
-        hash.copy_from_slice(&row.12);
-    }
-    let body = datum_esign::Manifestation {
-        signature: datum_esign::SignatureManifest {
-            id: row.0.to_string(),
-            signer_id: row.1.to_string(),
-            printed_name: row.2,
-            meaning: row.3,
-            reason: row.4,
-            signed_at: row.5.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
-            signed_at_zone: row.6,
-            signed_at_local: row.7,
-            record: datum_esign::ManifestRecord {
-                table: row.8,
-                doc_type: row.11,
-                id: row.9.to_string(),
-                version: row.10,
-            },
-            record_content_hash: datum_audit::sha256::hex(&hash),
-            credential_kind: row.13,
-            components_used: row.14,
-            superseded: false,
-            superseded_by_version: None,
-        },
-    };
+    let body = datum_esign::manifestation_in_tx(tx, id).await?;
     Ok(serde_json::to_value(body)?)
 }
 

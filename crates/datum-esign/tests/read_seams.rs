@@ -4,14 +4,19 @@
 
 mod common;
 
-use datum_core::{Identifier, RecordRef};
+use datum_core::{Identifier, RecordRef, SignatureId};
 use datum_db::Tx;
-use datum_esign::{manifestation, manifestation_for_record, manifestation_for_record_on, mint};
+use datum_esign::{
+    manifestation, manifestation_for_record, manifestation_for_record_on, manifestation_in_tx,
+    mint, prepare, signature_consumed_at, signature_consumed_at_on,
+};
 use datum_test::db_case;
+use uuid::Uuid;
 
 use common::{
-    PERM, both_profiles, bump_wo, instance, migrate_esign, mint_req, persist_and_spawn_wo,
-    read_pool, read_pool_migrate, record, signer_with_perm, system_ctx, two_components, write_pool,
+    PERM, both_profiles, bump_wo, instance, live_doc, migrate_esign, mint_req,
+    persist_and_spawn_wo, read_pool, read_pool_migrate, record, signer_with_perm, system_ctx,
+    two_components, user_ctx, write_pool,
 };
 
 fn body() -> serde_json::Value {
@@ -188,6 +193,114 @@ async fn manifestation_for_record_includes_supersession_state() {
         assert_eq!(listed[1].signature.id, new.id.to_string());
         assert!(listed[1].signature.superseded, "same record version");
         assert_eq!(listed[1].signature.superseded_by_version, Some(live));
+        db.finish().await.expect("finish");
+    }
+}
+
+#[tokio::test]
+async fn manifestation_in_tx_matches_pool_wire() {
+    for profile in both_profiles() {
+        let db = db_case!(&format!("es_tx_wire_{}", profile.slug));
+        migrate_esign(&db).await;
+        let write = write_pool(&db);
+        let p = signer_with_perm(&write, &format!("tx-wire-{}", profile.slug), PERM).await;
+        let doc_id = Identifier::generate();
+        let rec = record(doc_id, 3);
+        let inst = instance(doc_id, 3, "Draft");
+        let b = body();
+        let mut tx = Tx::begin(&write, &system_ctx("esign.mint"))
+            .await
+            .expect("begin");
+        let sig = mint(
+            &mut tx,
+            &mint_req(
+                p.clone(),
+                b,
+                rec,
+                inst,
+                two_components(),
+                profile.policy.clone(),
+            ),
+        )
+        .await
+        .expect("mint");
+        let in_tx = manifestation_in_tx(&mut tx, sig.id)
+            .await
+            .expect("in-tx before commit");
+        assert_eq!(in_tx.signature.id, sig.id.to_string());
+        assert!(!in_tx.signature.superseded);
+        assert_eq!(in_tx.signature.superseded_by_version, None);
+        tx.commit().await.expect("commit");
+        let on_pool = manifestation(&read_pool(&db), sig.id)
+            .await
+            .expect("pool after commit");
+        assert_eq!(in_tx, on_pool, "one D-2b-2 wire");
+        db.finish().await.expect("finish");
+    }
+}
+
+#[tokio::test]
+async fn signature_consumed_at_none_until_claimed() {
+    for profile in both_profiles() {
+        let db = db_case!(&format!("es_cons_{}", profile.slug));
+        migrate_esign(&db).await;
+        let write = write_pool(&db);
+        let p = signer_with_perm(&write, &format!("cons-{}", profile.slug), PERM).await;
+        let doc_id = Identifier::generate();
+        let rec = record(doc_id, 3);
+        let inst = instance(doc_id, 3, "Draft");
+        let b = body();
+        let mut tx = Tx::begin(&write, &system_ctx("esign.mint"))
+            .await
+            .expect("begin");
+        let sig = mint(
+            &mut tx,
+            &mint_req(
+                p.clone(),
+                b.clone(),
+                rec,
+                inst.clone(),
+                two_components(),
+                profile.policy.clone(),
+            ),
+        )
+        .await
+        .expect("mint");
+        let open = signature_consumed_at(&mut tx, sig.id)
+            .await
+            .expect("open in-tx");
+        assert_eq!(open, None, "mint leaves consumed_at NULL");
+        let missing = signature_consumed_at(&mut tx, SignatureId::from_uuid(Uuid::now_v7()))
+            .await
+            .expect("missing");
+        assert_eq!(missing, None, "missing row is None, not NotFound");
+        tx.commit().await.expect("mint commit");
+
+        let app = read_pool(&db);
+        let mig = read_pool_migrate(&db);
+        for (label, pool) in [("datum_app", &app), ("datum_migrate", &mig)] {
+            let at = signature_consumed_at_on(pool, sig.id)
+                .await
+                .unwrap_or_else(|e| panic!("{label} open: {e}"));
+            assert_eq!(at, None, "{label} unconsumed");
+        }
+
+        let token = sig.token(p.actor());
+        let doc = live_doc(&sig, b, inst, &p);
+        let mut tx = Tx::begin(&write, &user_ctx(&p, "wo.release"))
+            .await
+            .expect("claim begin");
+        prepare(&mut tx, &token, &doc).await.expect("claim");
+        let claimed = signature_consumed_at(&mut tx, sig.id)
+            .await
+            .expect("claimed in-tx")
+            .expect("consumed_at set");
+        tx.commit().await.expect("claim commit");
+        let on_pool = signature_consumed_at_on(&read_pool(&db), sig.id)
+            .await
+            .expect("pool after claim")
+            .expect("consumed_at visible");
+        assert_eq!(claimed, on_pool);
         db.finish().await.expect("finish");
     }
 }
