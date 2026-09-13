@@ -1,7 +1,24 @@
 //! Content-addressed immutable blob store.
+//!
+//! Windows filesystem rules this store satisfies (unix is a subset):
+//!
+//! 1. A file cannot be deleted or renamed-over while any handle is open.
+//!    Drop/close every `File` (temp writer and any hash/verify reader)
+//!    before `rename` or `remove_file`.
+//! 2. `FILE_ATTRIBUTE_READONLY` survives rename and also denies delete.
+//!    Set it on the exact final path after placement; clear it on that
+//!    same path with `std::fs::set_permissions` +
+//!    `Permissions::set_readonly(false)` before any `remove_file`.
+//! 3. A placed read-only file is never opened with write/append/truncate.
+//!    Dedupe is an existence check (`Path::exists` / `fs::metadata`). The
+//!    placed blob is only ever opened read-only (`get` / `verify`).
+//! 4. Directory deletion requires the directory to be empty and no open
+//!    handles inside. This store never deletes directories.
+//! 5. `File::sync_all` the temp writer before rename. Rename into place
+//!    must not target an existing file (existence check first).
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -91,24 +108,28 @@ impl FsBlobStore {
         self.untrack(hash);
     }
 
-    /// If `path` is already placed, reuse it (same bytes) or refuse a collision.
-    /// Never opens the placed file for write.
-    fn dedupe_existing(
-        &self,
-        path: &Path,
-        bytes: &[u8],
-        hash: BlobHash,
-    ) -> Result<Option<BlobHash>> {
-        if !path.exists() {
-            return Ok(None);
-        }
-        let existing = fs::read(path)?;
-        if existing.as_slice() == bytes {
-            return Ok(Some(hash));
-        }
-        Err(Error::BlobWriteOnce {
-            hash: hash.to_hex(),
-        })
+    /// Rule 3 / 5: dedupe is an existence check. Never opens the placed file.
+    fn already_placed(path: &Path) -> bool {
+        fs::metadata(path).is_ok()
+    }
+
+    /// Rule 3: open the placed blob read-only. Never write/append/truncate.
+    fn read_placed(&self, hash: BlobHash) -> Result<Vec<u8>> {
+        let path = self.path_for(hash);
+        let mut file = File::open(&path).map_err(|e| {
+            if e.kind() == io::ErrorKind::NotFound {
+                Error::BlobMissing {
+                    hash: hash.to_hex(),
+                }
+            } else {
+                e.into()
+            }
+        })?;
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)?;
+        // Rule 1: close the reader before any later rename/remove.
+        drop(file);
+        Ok(bytes)
     }
 }
 
@@ -116,31 +137,33 @@ impl BlobStore for FsBlobStore {
     fn put(&self, bytes: &[u8]) -> Result<BlobHash> {
         let hash = hash_bytes(bytes);
         let path = self.path_for(hash);
-        if let Some(existing) = self.dedupe_existing(&path, bytes, hash)? {
-            return Ok(existing);
+        if Self::already_placed(&path) {
+            return Ok(hash);
         }
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
         let tmp = path.with_file_name(format!("{}.tmp", hash.to_hex()));
         if let Err(e) = write_tmp(&tmp, bytes) {
+            // write_tmp dropped the File before returning.
             let _ = fs::remove_file(&tmp);
             return Err(e.into());
         }
-        if let Some(existing) = self.dedupe_existing(&path, bytes, hash)? {
+        if Self::already_placed(&path) {
             let _ = fs::remove_file(&tmp);
-            return Ok(existing);
+            return Ok(hash);
         }
         match fs::rename(&tmp, &path) {
             Ok(()) => {}
             Err(e) => {
                 let _ = fs::remove_file(&tmp);
-                if let Some(existing) = self.dedupe_existing(&path, bytes, hash)? {
-                    return Ok(existing);
+                if Self::already_placed(&path) {
+                    return Ok(hash);
                 }
                 return Err(e.into());
             }
         }
+        // Rule 2: readonly survives rename — set it on the exact final path.
         set_readonly(&path, true)?;
         if let Some(parent) = path.parent() {
             fsync_dir(parent)?;
@@ -150,20 +173,11 @@ impl BlobStore for FsBlobStore {
     }
 
     fn get(&self, hash: BlobHash) -> Result<Vec<u8>> {
-        let path = self.path_for(hash);
-        fs::read(&path).map_err(|e| {
-            if e.kind() == io::ErrorKind::NotFound {
-                Error::BlobMissing {
-                    hash: hash.to_hex(),
-                }
-            } else {
-                e.into()
-            }
-        })
+        self.read_placed(hash)
     }
 
     fn verify(&self, hash: BlobHash) -> Result<()> {
-        let bytes = self.get(hash)?;
+        let bytes = self.read_placed(hash)?;
         let got = datum_audit::sha256::digest(&bytes);
         if got == hash.0 {
             Ok(())
@@ -175,7 +189,7 @@ impl BlobStore for FsBlobStore {
     }
 
     fn exists(&self, hash: BlobHash) -> bool {
-        self.path_for(hash).exists()
+        Self::already_placed(&self.path_for(hash))
     }
 
     fn discard_hash(&self, hash: BlobHash) {
@@ -200,7 +214,7 @@ impl BlobStore for FsBlobStore {
     }
 }
 
-/// Write `bytes` to `tmp` in the destination directory and fsync the file.
+/// Write `bytes` to `tmp`, fsync, and close the handle (rule 1 and 5).
 fn write_tmp(tmp: &Path, bytes: &[u8]) -> io::Result<()> {
     if tmp.exists() {
         let _ = set_readonly(tmp, false);
@@ -209,6 +223,8 @@ fn write_tmp(tmp: &Path, bytes: &[u8]) -> io::Result<()> {
     let mut file = OpenOptions::new().write(true).create_new(true).open(tmp)?;
     file.write_all(bytes)?;
     file.sync_all()?;
+    // Rule 1: the temp writer must be closed before rename / remove_file.
+    drop(file);
     Ok(())
 }
 
@@ -223,20 +239,37 @@ fn set_readonly(path: &Path, readonly: bool) -> io::Result<()> {
     fs::set_permissions(path, perms)
 }
 
-/// Rollback / orphan cleanup: clear read-only then unlink. No-op if absent.
+/// Rollback / orphan cleanup: clear read-only on the exact final path, then unlink.
+/// No-op if absent. No handle may be open (rule 1). Directories are left in place (rule 4).
 fn remove_placed(path: &Path) {
-    let _ = set_readonly(path, false);
+    if let Ok(meta) = fs::metadata(path) {
+        let mut perms = meta.permissions();
+        #[allow(clippy::permissions_set_readonly_false)]
+        {
+            perms.set_readonly(false);
+        }
+        let _ = fs::set_permissions(path, perms);
+    }
     let _ = fs::remove_file(path);
 }
 
 fn fsync_dir(dir: &Path) -> io::Result<()> {
-    let file = File::open(dir)?;
-    match file.sync_all() {
+    // Windows: `File::open` on a directory is ERROR_ACCESS_DENIED (5) unless
+    // FILE_FLAG_BACKUP_SEMANTICS is set; FlushFileBuffers on a directory
+    // handle is the same error. File durability is `sync_all` before rename
+    // (rule 5). Close the directory handle before returning (rule 4).
+    let file = match File::open(dir) {
+        Ok(f) => f,
+        Err(e) if e.kind() == io::ErrorKind::PermissionDenied => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    let result = match file.sync_all() {
         Ok(()) => Ok(()),
-        // Windows: FlushFileBuffers on a directory handle is ERROR_ACCESS_DENIED (5).
         Err(e) if e.kind() == io::ErrorKind::PermissionDenied => Ok(()),
         Err(e) => Err(e),
-    }
+    };
+    drop(file);
+    result
 }
 
 /// Recompute and compare. Detects on-disk corruption.
@@ -283,6 +316,25 @@ mod tests {
         assert!(store.exists(hash));
         store.discard_uncommitted();
         assert!(!store.exists(hash));
+    }
+
+    #[test]
+    fn put_syncs_tmp_then_renames_onto_absent_readonly_path() {
+        let store = tmp_store();
+        let hash = store.put(b"place-once").unwrap();
+        let path = store.path_for(hash);
+        let tmp = path.with_file_name(format!("{}.tmp", hash.to_hex()));
+        assert!(path.is_file());
+        assert!(
+            !tmp.exists(),
+            "tmp must be gone after the handle is closed and renamed"
+        );
+        assert!(
+            fs::metadata(&path).unwrap().permissions().readonly(),
+            "readonly is set on the exact final path after placement"
+        );
+        store.verify(hash).unwrap();
+        assert_eq!(store.get(hash).unwrap(), b"place-once");
     }
 
     #[cfg(unix)]
