@@ -1,9 +1,9 @@
 //! Hooks. This module does not register in-transaction hooks in Wave 2s.1:
 //! inventory posts quarantine/available movements; lots only records status.
 //!
-//! Registration, when needed, goes through [`datum_module::KernelBuilder::register_hook`].
+//! Registration, when needed, goes through [`wicket_module::KernelBuilder::register_hook`].
 
-use datum_module::KernelBuilder;
+use wicket_module::KernelBuilder;
 
 use crate::error::Result;
 

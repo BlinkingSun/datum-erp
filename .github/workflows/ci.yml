@@ -35,7 +35,7 @@ jobs:
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: ci
-          POSTGRES_DB: datum_test
+          POSTGRES_DB: wicket_test
           POSTGRES_HOST_AUTH_METHOD: trust
         ports:
           - 5432:5432
@@ -45,11 +45,11 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     env:
-      DATUM_REQUIRE_PG: "1"
-      DATUM_BOOTSTRAP_URL: postgres://postgres:ci@127.0.0.1:5432/postgres?sslmode=disable
-      DATUM_DATABASE_URL: postgres://datum_app:datum@127.0.0.1:5432/datum_test?sslmode=disable
-      DATUM_MIGRATE_DATABASE_URL: postgres://datum_migrate:datum@127.0.0.1:5432/datum_test?sslmode=disable
-      DATUM_TEST_TEMPLATE: datum_test_template
+      WICKET_REQUIRE_PG: "1"
+      WICKET_BOOTSTRAP_URL: postgres://postgres:ci@127.0.0.1:5432/postgres?sslmode=disable
+      WICKET_DATABASE_URL: postgres://wicket_app:wicket@127.0.0.1:5432/wicket_test?sslmode=disable
+      WICKET_MIGRATE_DATABASE_URL: postgres://wicket_migrate:wicket@127.0.0.1:5432/wicket_test?sslmode=disable
+      WICKET_TEST_TEMPLATE: wicket_test_template
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master

@@ -1,4 +1,4 @@
-# Plan audit slice 5 — Typed quantities in `datum-core`
+# Plan audit slice 5 — Typed quantities in `wicket-core`
 
 **Role:** adversarial researcher  
 **Date:** 2026-09-11  
@@ -20,19 +20,19 @@ This conflates three distinct things:
 
 If `Quantity<Foot>` and `Quantity<Inch>` are different type parameters, you still cannot express “this item’s stocking UoM is `UnitId(42)`” without either exploding the type system (infinite unit types) or lying (everything is `Quantity<Unknown>`).
 
-**crates `uom` / `measurements` (option C):** Useful for **closed** SI/imperial kernels and compile-time rational conversions. They do **not** survive customer-defined units or item-specific factors without reimplementing your own layer on top. Persistence is always `{ numeric, unit_code }`; the phantom type is erased at the boundary. **Reject as the foundation**; optional internal helper for universal length/mass constants only, behind `datum-uom`.
+**crates `uom` / `measurements` (option C):** Useful for **closed** SI/imperial kernels and compile-time rational conversions. They do **not** survive customer-defined units or item-specific factors without reimplementing your own layer on top. Persistence is always `{ numeric, unit_code }`; the phantom type is erased at the boundary. **Reject as the foundation**; optional internal helper for universal length/mass constants only, behind `wicket-uom`.
 
 **Option B (fully runtime):** Honest for DB and serde, but throws away the one Rust advantage ADR 0002 cites unless you reintroduce dimension markers elsewhere.
 
 **Option E (tagged `Decimal` + `convert()` only):** Same as B with nicer API; dimension mistakes become runtime bugs — unacceptable for “silent corruption for months.”
 
-**Winner: A + D hybrid** — phantom **dimension** (not UoM), runtime `UnitId`, item-scoped `StockQuantity` / `ConversionContext` in `datum-uom`.
+**Winner: A + D hybrid** — phantom **dimension** (not UoM), runtime `UnitId`, item-scoped `StockQuantity` / `ConversionContext` in `wicket-uom`.
 
 ---
 
-## 2. Recommended `datum-core` signatures (sketches)
+## 2. Recommended `wicket-core` signatures (sketches)
 
-`datum-core` has **no `sqlx`**. It defines newtypes, dimensions, quantities, money, errors. DB mapping lives in `datum-db` / `datum-ledger`.
+`wicket-core` has **no `sqlx`**. It defines newtypes, dimensions, quantities, money, errors. DB mapping lives in `wicket-db` / `wicket-ledger`.
 
 ```rust
 // --- Identifiers (opaque, Copy, Hash, Eq) ---
@@ -82,12 +82,12 @@ pub struct InventoryPostingQty {
 }
 ```
 
-Kernel guard: `dimension` must match the dimension implied by `unit` when validated through `UnitRegistry` trait (implemented in `datum-uom`, trait **defined** in core as interface).
+Kernel guard: `dimension` must match the dimension implied by `unit` when validated through `UnitRegistry` trait (implemented in `wicket-uom`, trait **defined** in core as interface).
 
 **Conversion is not on `Quantity` in core:**
 
 ```rust
-// datum-core — trait only, no DB
+// wicket-core — trait only, no DB
 pub struct ConversionContext {
     item: ItemId,
     lot: Option<LotId>,
@@ -129,7 +129,7 @@ ADR 0007 defers GL; **cost ledger** still posts `Money`. Currency is runtime lik
 |------|----------|-----------------|
 | Receive 10 ft | PO receipt | Group: `+10 @ U_FT` → `RECEIVING`, `-10 @ U_FT` → `SUPPLIER`. All lines same `item`, same `unit_id`. |
 | Issue 36 in to WO | Backflush / issue | `convert(36 @ U_IN → U_FT, ctx{item})` → `3 @ U_FT`. Group: `-3 @ U_FT` from `STOCK`, `+3 @ U_FT` to `WIP` (locations). |
-| Scrap 0.2 lb chips | By-product loss | **Different dimension** (Mass). Not added to foot balance. Either: (a) post to scrap item `CHIPS` in `U_LB`, or (b) `datum-uom` item rule: `length_remaining → mass` with lot density. Group balances **per (item, unit_id)** — scrap group uses `U_LB` only. |
+| Scrap 0.2 lb chips | By-product loss | **Different dimension** (Mass). Not added to foot balance. Either: (a) post to scrap item `CHIPS` in `U_LB`, or (b) `wicket-uom` item rule: `length_remaining → mass` with lot density. Group balances **per (item, unit_id)** — scrap group uses `U_LB` only. |
 
 Compile-time: `Quantity<LengthDim> + Quantity<MassDim>` does not compile.  
 Runtime: `10 FT + 36 IN` without `convert` returns `UnitMismatch` / `DimensionMismatch`.
@@ -153,7 +153,7 @@ pub struct QuantityWire {
 }
 ```
 
-`sqlx::FromRow` maps to `QuantityWire` or ledger struct in `datum-ledger`, then `try_into_quantity<D>()` using `UnitConverter::dimension_of`.
+`sqlx::FromRow` maps to `QuantityWire` or ledger struct in `wicket-ledger`, then `try_into_quantity<D>()` using `UnitConverter::dimension_of`.
 
 ### 4.2 Generic ledger posting table, mixed items
 
@@ -165,7 +165,7 @@ One table, many items per `group_id` (e.g. multi-line receipt). Each row:
 - `signed_amount` **numeric**
 - `unit_id` **not null**
 
-**Zero-sum rule (coordinate with ADR 0004):** Deferrable constraint on **`SUM(signed_amount) GROUP BY group_id, ledger, item_id, unit_id`** (and same dimension keys that define the balance bucket). Mixed items in one group: each `(item_id, unit_id)` bucket must sum to zero. **Never** sum across different `unit_id` in SQL — conversion is application/`datum-uom` duty **before** insert.
+**Zero-sum rule (coordinate with ADR 0004):** Deferrable constraint on **`SUM(signed_amount) GROUP BY group_id, ledger, item_id, unit_id`** (and same dimension keys that define the balance bucket). Mixed items in one group: each `(item_id, unit_id)` bucket must sum to zero. **Never** sum across different `unit_id` in SQL — conversion is application/`wicket-uom` duty **before** insert.
 
 Cost ledger rows use `Money` columns (`amount_minor`, `currency_id`), same `group_id`, separate bucket — **do not mix quantity and money in one numeric column**.
 
@@ -186,11 +186,11 @@ If a developer posts `+10 FT` and `-3 FT` and one stray `-36 IN` in the same `(g
 
 | Layer | Owns |
 |-------|------|
-| `datum-core` | `Decimal` usage policy, `QuantityError`, dimension seals, **no rounding rules** |
-| `datum-uom` | Unit catalog, conversion paths, **rounding mode per operation** (issue vs receive vs count), item/lot factors, property tests |
-| `datum-ledger` | “post only in allowed unit for this movement type” orchestration |
+| `wicket-core` | `Decimal` usage policy, `QuantityError`, dimension seals, **no rounding rules** |
+| `wicket-uom` | Unit catalog, conversion paths, **rounding mode per operation** (issue vs receive vs count), item/lot factors, property tests |
+| `wicket-ledger` | “post only in allowed unit for this movement type” orchestration |
 
-Runtime UoM means rounding lives in **`datum-uom`** with rules keyed by `(item, operation, unit)` from DB seed/migrations — not in const generics.
+Runtime UoM means rounding lives in **`wicket-uom`** with rules keyed by `(item, operation, unit)` from DB seed/migrations — not in const generics.
 
 ---
 
@@ -227,7 +227,7 @@ Replace PLAN.md §5 bullet:
 
 With:
 
-> `Quantity<D: Dimension>` — a signed decimal amount with a runtime `UnitId`, where `D` is a **closed kernel dimension** (Count, Length, Mass, Time, …) so incompatible kinds do not compile. **Units of measure are not type parameters**; customer-defined and item-specific units are `UnitId` values interpreted by `datum-uom` via `ConversionContext`. `Money` is a separate primitive with `CurrencyId` and explicit scale. Ledger persistence stores amount + unit id (+ dimension kind denormalized where needed); SQL zero-sum is enforced per `(group, ledger, item, unit)` bucket.
+> `Quantity<D: Dimension>` — a signed decimal amount with a runtime `UnitId`, where `D` is a **closed kernel dimension** (Count, Length, Mass, Time, …) so incompatible kinds do not compile. **Units of measure are not type parameters**; customer-defined and item-specific units are `UnitId` values interpreted by `wicket-uom` via `ConversionContext`. `Money` is a separate primitive with `CurrencyId` and explicit scale. Ledger persistence stores amount + unit id (+ dimension kind denormalized where needed); SQL zero-sum is enforced per `(group, ledger, item, unit)` bucket.
 
 **ADR 0002 tweak (non-blocking but honest):** Change “quantity in inches and millimetres can be different types” to “quantities of different **dimensions** are different types; **within** a dimension, unit compatibility is enforced at runtime via `UnitId` and conversion.”
 
@@ -238,9 +238,9 @@ With:
 | Step | Owner | Action |
 |------|-------|--------|
 | 1 | **Opus DECISION** | Ratify dimension-vs-unit split, money split, ledger bucket constraint — **before Wave 1 workspace freeze** |
-| 2 | Grok/Cursor **workspace** | Stub `datum-core` public types per decision (not `Quantity<U: Unit>`) |
-| 3 | Grok/Cursor **datum-uom** | `UnitConverter`, rounding, item UoM roles |
-| 4 | Grok/Cursor **datum-ledger** | Posting row shape + property tests with normalized stocking UoM |
+| 2 | Grok/Cursor **workspace** | Stub `wicket-core` public types per decision (not `Quantity<U: Unit>`) |
+| 3 | Grok/Cursor **wicket-uom** | `UnitConverter`, rounding, item UoM roles |
+| 4 | Grok/Cursor **wicket-ledger** | Posting row shape + property tests with normalized stocking UoM |
 
 **Yes — this is an Opus DECISION that must land before the workspace lane freezes public types.** Thirteen crates will import `Quantity`; fixing dimension later is a workspace-wide rewrite.
 
@@ -250,22 +250,22 @@ With:
 
 | Crate | Responsibility |
 |-------|----------------|
-| `datum-core` | `UnitId`, `CurrencyId`, `Dimension`/`DimensionKind`, `Quantity<D>`, `Money`, `ConversionContext` (struct), `UnitConverter` (trait), errors |
-| `datum-uom` | DB-backed unit master, universal + item + lot conversions, rounding, impl `UnitConverter` |
-| `datum-ledger` | Posting types, group builder, normalization before insert, SQL mapping |
-| `datum-db` | Migrations: `unit`, `item_uom`, `conversion_rule`, posting columns |
+| `wicket-core` | `UnitId`, `CurrencyId`, `Dimension`/`DimensionKind`, `Quantity<D>`, `Money`, `ConversionContext` (struct), `UnitConverter` (trait), errors |
+| `wicket-uom` | DB-backed unit master, universal + item + lot conversions, rounding, impl `UnitConverter` |
+| `wicket-ledger` | Posting types, group builder, normalization before insert, SQL mapping |
+| `wicket-db` | Migrations: `unit`, `item_uom`, `conversion_rule`, posting columns |
 
 ---
 
 ## 10. TIER: **deep**
 
-`datum-core` + `datum-uom` + ledger bucket invariant warrant deep audit (per PLAN already for core; extend uom/ledger coupling).
+`wicket-core` + `wicket-uom` + ledger bucket invariant warrant deep audit (per PLAN already for core; extend uom/ledger coupling).
 
 ---
 
 ## 11. Tests: core vs uom
 
-| `datum-core` | `datum-uom` |
+| `wicket-core` | `wicket-uom` |
 |--------------|-------------|
 | `try_add` same/different `UnitId` | Conversion chains, rounding boundaries |
 | Compile tests (or separate `tests/compile_fail/`) dimension mismatch | Property: convert → convert⁻¹ within epsilon policy |
@@ -273,10 +273,10 @@ With:
 | Serde round-trip `QuantityWire` | Fuzz arbitrary unit graph, no silent loss |
 | — | Integration: issue UoM ≠ stocking UoM → ledger rows all stocking |
 
-**`datum-ledger` property tests (PLAN §7):** generate posting sequences; assert per-bucket zero-sum and projection = sum(ledger).
+**`wicket-ledger` property tests (PLAN §7):** generate posting sequences; assert per-bucket zero-sum and projection = sum(ledger).
 
 ---
 
 ## 12. Bottom line
 
-`Quantity<U: Unit>` as PLAN states is **unworkable** and **misstates** what Rust gives you. The fix is **not** abandoning ADR 0002 — it is **parameterizing dimension, not unit**, and pushing all ERP-specific conversion/rounding to `datum-uom` with explicit context. PLAN and ADR 0002 prose must change **before Wave 1** stubs encode the wrong public API.
+`Quantity<U: Unit>` as PLAN states is **unworkable** and **misstates** what Rust gives you. The fix is **not** abandoning ADR 0002 — it is **parameterizing dimension, not unit**, and pushing all ERP-specific conversion/rounding to `wicket-uom` with explicit context. PLAN and ADR 0002 prose must change **before Wave 1** stubs encode the wrong public API.

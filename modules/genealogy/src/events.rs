@@ -1,8 +1,8 @@
 //! Event subscriber. Subscriptions are declared in `module.toml` and registered
 //! through `KernelBuilder::apply_manifest` / `Kernel::register_events_subscription`.
 
-use datum_db::Tx;
-use datum_events::{Event, EventHandler, HandlerFuture};
+use wicket_db::Tx;
+use wicket_events::{Event, EventHandler, HandlerFuture};
 
 use crate::store::invalidate_cache;
 
@@ -16,7 +16,7 @@ impl EventHandler for CacheInvalidate {
             let _ = event;
             invalidate_cache(tx)
                 .await
-                .map_err(|e| datum_events::Error::Invariant(e.to_string()))?;
+                .map_err(|e| wicket_events::Error::Invariant(e.to_string()))?;
             Ok(())
         })
     }

@@ -2,7 +2,7 @@
 
 **Conforms to:** [ADR 0005](adr/0005-compliance-in-kernel.md), [ADR 0008](adr/0008-single-tenant.md), [ADR 0009](adr/0009-ui-stack.md); `docs/03-module-system.md` §3.4 and §7; `research/decisions/core-quantity.md` (D1).
 
-This is the public HTTP contract every module's routes follow. A third-party module that registers routes under its namespace appears in the generated OpenAPI document and gets a typed client for free (`docs/03-module-system.md` §3.4). The first-party UI is a client of the same surface (ADR 0009). `datum-server` in Wave 2s implements exactly this, for the slice endpoints in §9.
+This is the public HTTP contract every module's routes follow. A third-party module that registers routes under its namespace appears in the generated OpenAPI document and gets a typed client for free (`docs/03-module-system.md` §3.4). The first-party UI is a client of the same surface (ADR 0009). `wicket-server` in Wave 2s implements exactly this, for the slice endpoints in §9.
 
 The cost of a public API from day one is that these conventions freeze before most modules exist. Changing a field name later is a new major version and a year of dual-running. That is cheaper than letting each module invent a JSON dialect.
 
@@ -218,14 +218,14 @@ Records are retired by state change, not by HTTP DELETE (PLAN §6b item 16 as am
 
 ## 5. Electronic signature over HTTP
 
-Source: `research/decisions/audit-persistence.md` §9; ADR 0005 as amended; CONTRACT §6.3 (D-W1-4). Every signing requires all identification components. Datum does not implement the 11.200(a)(1)(i) continuous-session relaxation: a session cookie on a shared floor tablet is not a component "designed to be used only by the individual" (D3 §9).
+Source: `research/decisions/audit-persistence.md` §9; ADR 0005 as amended; CONTRACT §6.3 (D-W1-4). Every signing requires all identification components. Wicket does not implement the 11.200(a)(1)(i) continuous-session relaxation: a session cookie on a shared floor tablet is not a component "designed to be used only by the individual" (D3 §9).
 
 ### 5.1 Declaration in OpenAPI
 
 A transition that requires a signature is marked on the operation, not discovered at runtime:
 
 ```yaml
-x-datum-signature:
+x-wicket-signature:
   meaning: Released
   permission: production.work_order.release
 ```
@@ -234,7 +234,7 @@ x-datum-signature:
 
 ### 5.2 What the client presents
 
-Minting is a separate request, owned by `datum-esign`, and happens before the transition (CONTRACT §6.3: the gate verifies, it does not mint).
+Minting is a separate request, owned by `wicket-esign`, and happens before the transition (CONTRACT §6.3: the gate verifies, it does not mint).
 
 ```
 POST /api/v1/esign/signatures
@@ -258,13 +258,13 @@ Idempotency-Key: 01932c5a-8b10-7001-8000-0000000000e1
 
 `identification` is two components every time: the signing identifier and the signing secret, or an IdP step-up token in place of the secret for OIDC shops. The login session is not a component. The signing credential is separable from the login credential (PLAN §6b item 14); using the session password here is `VALIDATION` on `identification`.
 
-The meaning text in the body must equal the `x-datum-signature.meaning` of the transition that will consume the token. The server stores the printed meaning, the signer, the server time, and SHA-256 of the canonical record bytes at `record.version`.
+The meaning text in the body must equal the `x-wicket-signature.meaning` of the transition that will consume the token. The server stores the printed meaning, the signer, the server time, and SHA-256 of the canonical record bytes at `record.version`.
 
 The transition then carries the minted id:
 
 ```
 POST /api/v1/production/work-orders/{id}/release
-X-Datum-Signature: 01932c5a-8b10-7001-8000-0000000000e2
+X-Wicket-Signature: 01932c5a-8b10-7001-8000-0000000000e2
 If-Match: "3"
 ```
 
@@ -298,7 +298,7 @@ A successful signed transition includes the manifestation the audit row also car
 
 ### 5.4 The slice ships without signatures
 
-`datum-esign` is Wave 2b (PLAN §3). Until it is bound, the composition root wires `NoSignatures`, which refuses every token (CONTRACT §6.3). A `Required` edge under `NoSignatures` does not skip the check and does not run unsigned: the handler returns 409 `SIGNATURE_NO_PROVIDER`. A release build that enables any `Required` edge while `NoSignatures` is bound fails at startup (D-W1-4). The Wave 2s slice is unsigned **by declaration** (plain-shop enables no `regulated = true` module; regulated-device lists the edge and the gate still refuses until 2b). Unsigned-by-accident is not representable.
+`wicket-esign` is Wave 2b (PLAN §3). Until it is bound, the composition root wires `NoSignatures`, which refuses every token (CONTRACT §6.3). A `Required` edge under `NoSignatures` does not skip the check and does not run unsigned: the handler returns 409 `SIGNATURE_NO_PROVIDER`. A release build that enables any `Required` edge while `NoSignatures` is bound fails at startup (D-W1-4). The Wave 2s slice is unsigned **by declaration** (plain-shop enables no `regulated = true` module; regulated-device lists the edge and the gate still refuses until 2b). Unsigned-by-accident is not representable.
 
 `POST /api/v1/esign/signatures` does not exist until Wave 2b. Calling it is 404.
 
@@ -324,18 +324,18 @@ External clients may generate from the same document in any language. They are n
 
 ## 7. Authentication and sessions
 
-Mechanism lives in `datum-identity`. This section is the HTTP convention that mechanism must satisfy.
+Mechanism lives in `wicket-identity`. This section is the HTTP convention that mechanism must satisfy.
 
 | Client | Credential | CSRF |
 |---|---|---|
-| First-party browser (office and floor) | Session cookie `datum_session`, `HttpOnly`, `SameSite=Lax`, `Path=/`, `Secure` when the install is on TLS | Required on every mutating request: `X-CSRF-Token` must match cookie `datum_csrf` (double-submit). Mismatch is 403 `FORBIDDEN`. |
+| First-party browser (office and floor) | Session cookie `wicket_session`, `HttpOnly`, `SameSite=Lax`, `Path=/`, `Secure` when the install is on TLS | Required on every mutating request: `X-CSRF-Token` must match cookie `wicket_csrf` (double-submit). Mismatch is 403 `FORBIDDEN`. |
 | Machine and third-party | `Authorization: Bearer <token>` | Not applicable. Bearer is not sent automatically by a browser on a cross-site form. |
 
-Cookie vs bearer is a convention, not a product fork. One principal can hold both a session and a token. The actor that reaches `Tx::begin` is the one `datum-identity` verified for this request.
+Cookie vs bearer is a convention, not a product fork. One principal can hold both a session and a token. The actor that reaches `Tx::begin` is the one `wicket-identity` verified for this request.
 
 A LAN install often runs HTTP, not TLS (`docs/02-architecture.md` §6, ADR 0003 as amended). `Secure` cookies then cannot be set; that is a real cost, and it is why CSRF is not optional on cookie-auth and why floor terminals auto-lock (docs/02 §8). Bearer tokens on HTTP are equally visible on the wire. TLS is recommended; it is not assumed.
 
-Login, logout, session lock, inactivity timeout, Argon2id, and optional OIDC are `datum-identity` routes under `/api/v1/identity/`. This document does not specify their bodies. It does specify:
+Login, logout, session lock, inactivity timeout, Argon2id, and optional OIDC are `wicket-identity` routes under `/api/v1/identity/`. This document does not specify their bodies. It does specify:
 
 - The session is not a signing component (§5.2).
 - A locked or expired session is 401 `UNAUTHENTICATED` on the next mutating request, with no write.
@@ -464,7 +464,7 @@ Floor POST. Designed against the 500 ms scan-to-confirm budget (§8). Actor is t
 ```
 POST /api/v1/inventory/receipts
 Idempotency-Key: 01932c5a-8b10-7001-8000-0000000000e0
-X-CSRF-Token: <matches datum_csrf>
+X-CSRF-Token: <matches wicket_csrf>
 ```
 
 ```json
@@ -508,7 +508,7 @@ If-Match: "2"
 OpenAPI on this operation (regulated-device profile):
 
 ```yaml
-x-datum-signature:
+x-wicket-signature:
   meaning: Released
   permission: production.work_order.release
 ```
@@ -528,7 +528,7 @@ x-datum-signature:
 }
 ```
 
-**Required edge, `NoSignatures` bound (regulated-device before Wave 2b).** Same request, with or without `X-Datum-Signature`. The gate refuses; the work order stays unreleased:
+**Required edge, `NoSignatures` bound (regulated-device before Wave 2b).** Same request, with or without `X-Wicket-Signature`. The gate refuses; the work order stays unreleased:
 
 ```json
 {
@@ -541,7 +541,7 @@ x-datum-signature:
 }
 ```
 
-HTTP 409. The row is unchanged. After Wave 2b the client mints per §5.2, sends `X-Datum-Signature`, and the success body gains the `signature` object in §5.3.
+HTTP 409. The row is unchanged. After Wave 2b the client mints per §5.2, sends `X-Wicket-Signature`, and the success body gains the `signature` object in §5.3.
 
 ### 9.5 Completion — 500 pieces, finished lot `LOT-WO-1847`
 

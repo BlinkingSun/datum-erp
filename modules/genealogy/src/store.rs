@@ -1,17 +1,17 @@
-//! Persistence and traces. Writes go through [`datum_db::Tx`].
-//! Ledger reads go only through [`datum_ledger::trace_backward`] /
-//! [`datum_ledger::trace_forward`].
+//! Persistence and traces. Writes go through [`wicket_db::Tx`].
+//! Ledger reads go only through [`wicket_ledger::trace_backward`] /
+//! [`wicket_ledger::trace_forward`].
 
 use std::collections::{BTreeSet, HashMap};
 
-use datum_core::{Actor, Boundary, ItemId, LotId, PostingId, SerialId};
-use datum_db::{Pool, Tx, WriteContext, WritePool};
-use datum_jobs::{EnqueueOptions, HandlerOutcome, JobHandler, JobId, Progress};
-use datum_ledger::{Node, TraceStart, trace_backward, trace_forward};
-use datum_mod_inventory::document_history;
 use rust_decimal::Decimal;
 use serde_json::Value;
 use uuid::Uuid;
+use wicket_core::{Actor, Boundary, ItemId, LotId, PostingId, SerialId};
+use wicket_db::{Pool, Tx, WriteContext, WritePool};
+use wicket_jobs::{EnqueueOptions, HandlerOutcome, JobHandler, JobId, Progress};
+use wicket_ledger::{Node, TraceStart, trace_backward, trace_forward};
+use wicket_mod_inventory::document_history;
 
 use crate::domain::{
     DEFAULT_INLINE_MAX_POSTINGS, Direction, ExportFormat, INLINE_MAX_ENV, Impact, TraceOrigin,
@@ -88,11 +88,11 @@ async fn resolve_start(
 ) -> Result<(TraceStart, Option<LotId>, Option<SerialId>)> {
     match origin {
         TraceOrigin::Lot(lot) => {
-            let _ = datum_mod_lots::load_lot(tx, lot).await?;
+            let _ = wicket_mod_lots::load_lot(tx, lot).await?;
             Ok((start_from_lot(lot), Some(lot), None))
         }
         TraceOrigin::Serial(serial) => {
-            let s = datum_mod_lots::load_serial(tx, serial).await?;
+            let s = wicket_mod_lots::load_serial(tx, serial).await?;
             Ok((start_from_lot(s.lot), Some(s.lot), Some(serial)))
         }
         TraceOrigin::Posting(p) => Ok((start_from_posting(p), None, None)),
@@ -200,7 +200,7 @@ async fn lot_items(tx: &mut Tx<'_>, nodes: &[Node]) -> Result<HashMap<LotId, Ite
     }
     let mut map = HashMap::new();
     for id in ids {
-        if let Ok(lot) = datum_mod_lots::load_lot(tx, id).await {
+        if let Ok(lot) = wicket_mod_lots::load_lot(tx, id).await {
             map.insert(id, lot.item);
         }
     }
@@ -371,7 +371,7 @@ pub async fn trace(tx: &mut Tx<'_>, actor: Actor, req: TraceRequest) -> Result<T
     }
     let limit = req.max_postings.unwrap_or_else(inline_max_postings);
     if limit == 0 {
-        let job_id = datum_jobs::enqueue(
+        let job_id = wicket_jobs::enqueue(
             tx,
             TRACE_JOB,
             enqueue_payload(&req, key)?,
@@ -387,7 +387,7 @@ pub async fn trace(tx: &mut Tx<'_>, actor: Actor, req: TraceRequest) -> Result<T
     let body = compute_body(tx, req).await?;
     let n = body_posting_count(&body);
     if n > limit {
-        let job_id = datum_jobs::enqueue(
+        let job_id = wicket_jobs::enqueue(
             tx,
             TRACE_JOB,
             enqueue_payload(&req, key)?,
@@ -414,8 +414,8 @@ pub async fn trace_inline(tx: &mut Tx<'_>, req: TraceRequest) -> Result<TraceBod
 
 /// Forward closure to CUSTOMER shipments (D2 case g; the mockup recall list).
 pub async fn impact(tx: &mut Tx<'_>, lot: LotId) -> Result<Impact> {
-    let lot_row = datum_mod_lots::load_lot(tx, lot).await?;
-    let _ = datum_ledger::has_postings(tx, lot_row.item).await?;
+    let lot_row = wicket_mod_lots::load_lot(tx, lot).await?;
+    let _ = wicket_ledger::has_postings(tx, lot_row.item).await?;
     let fwd = build_tree(
         tx,
         start_from_lot(lot),
@@ -438,7 +438,7 @@ pub async fn impact(tx: &mut Tx<'_>, lot: LotId) -> Result<Impact> {
         collect_lots(n, &mut lots);
     }
     lots.insert(lot);
-    let customer = datum_mod_locations::boundary_location_id(tx, Boundary::Customer).await?;
+    let customer = wicket_mod_locations::boundary_location_id(tx, Boundary::Customer).await?;
     let mut shipments = Vec::new();
     let mut customers = Vec::new();
     let mut units = BTreeSet::new();
@@ -481,17 +481,17 @@ pub async fn where_used(
     item: ItemId,
     revision: &str,
 ) -> Result<Vec<Tree>> {
-    let rec = datum_mod_items::get(pool, item).await?;
+    let rec = wicket_mod_items::get(pool, item).await?;
     if rec.revision != revision {
         return Ok(Vec::new());
     }
-    if !datum_ledger::has_postings(tx, item).await? {
+    if !wicket_ledger::has_postings(tx, item).await? {
         return Ok(Vec::new());
     }
     let mut out = Vec::new();
     let mut cursor: Option<String> = None;
     loop {
-        let page = datum_mod_lots::list_lots(tx, Some(200), cursor.as_deref()).await?;
+        let page = wicket_mod_lots::list_lots(tx, Some(200), cursor.as_deref()).await?;
         for lot in page.data {
             if lot.item_id != item {
                 continue;
@@ -517,8 +517,8 @@ pub async fn where_used(
 }
 
 /// Job status (read pool; no write).
-pub async fn job_status(pool: &Pool, id: JobId) -> Result<Option<datum_jobs::JobStatus>> {
-    Ok(datum_jobs::status(pool, id).await?)
+pub async fn job_status(pool: &Pool, id: JobId) -> Result<Option<wicket_jobs::JobStatus>> {
+    Ok(wicket_jobs::status(pool, id).await?)
 }
 
 /// Flatten a tree to CSV (export).
@@ -585,7 +585,7 @@ impl JobHandler for TraceJob {
         payload: &Value,
         progress: Progress,
     ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = datum_jobs::Result<HandlerOutcome>> + Send + '_>,
+        Box<dyn std::future::Future<Output = wicket_jobs::Result<HandlerOutcome>> + Send + '_>,
     > {
         let payload = payload.clone();
         let pool = self.pool.clone();
@@ -594,18 +594,18 @@ impl JobHandler for TraceJob {
             progress
                 .report(25, "tracing")
                 .await
-                .map_err(|e| datum_jobs::Error::Invariant(e.to_string()))?;
+                .map_err(|e| wicket_jobs::Error::Invariant(e.to_string()))?;
             let parsed: TraceJobPayload = serde_json::from_value(payload)
-                .map_err(|e| datum_jobs::Error::Invariant(e.to_string()))?;
+                .map_err(|e| wicket_jobs::Error::Invariant(e.to_string()))?;
             let origin = match parsed.origin_kind.as_str() {
                 "lot" => {
                     let u = Uuid::parse_str(&parsed.origin)
-                        .map_err(|e| datum_jobs::Error::Invariant(e.to_string()))?;
+                        .map_err(|e| wicket_jobs::Error::Invariant(e.to_string()))?;
                     TraceOrigin::Lot(LotId::from_uuid(u))
                 }
                 "serial" => {
                     let u = Uuid::parse_str(&parsed.origin)
-                        .map_err(|e| datum_jobs::Error::Invariant(e.to_string()))?;
+                        .map_err(|e| wicket_jobs::Error::Invariant(e.to_string()))?;
                     TraceOrigin::Serial(SerialId::from_uuid(u))
                 }
                 "posting" => {
@@ -613,18 +613,18 @@ impl JobHandler for TraceJob {
                         .origin
                         .parse()
                         .map_err(|e: std::num::ParseIntError| {
-                            datum_jobs::Error::Invariant(e.to_string())
+                            wicket_jobs::Error::Invariant(e.to_string())
                         })?;
                     TraceOrigin::Posting(PostingId(p))
                 }
                 other => {
-                    return Err(datum_jobs::Error::Invariant(format!(
+                    return Err(wicket_jobs::Error::Invariant(format!(
                         "unknown origin kind {other}"
                     )));
                 }
             };
             let direction = Direction::parse(&parsed.direction)
-                .ok_or_else(|| datum_jobs::Error::Invariant("invalid direction".into()))?;
+                .ok_or_else(|| wicket_jobs::Error::Invariant("invalid direction".into()))?;
             let req = TraceRequest {
                 origin,
                 direction,
@@ -635,22 +635,22 @@ impl JobHandler for TraceJob {
             let ctx = job_ctx(actor);
             let mut tx = Tx::begin(&write, &ctx)
                 .await
-                .map_err(|e| datum_jobs::Error::Invariant(e.to_string()))?;
+                .map_err(|e| wicket_jobs::Error::Invariant(e.to_string()))?;
             let body = compute_body(&mut tx, req)
                 .await
-                .map_err(|e| datum_jobs::Error::Invariant(e.to_string()))?;
+                .map_err(|e| wicket_jobs::Error::Invariant(e.to_string()))?;
             cache_put(&mut tx, &parsed.cache_key, &body)
                 .await
-                .map_err(|e| datum_jobs::Error::Invariant(e.to_string()))?;
+                .map_err(|e| wicket_jobs::Error::Invariant(e.to_string()))?;
             tx.commit()
                 .await
-                .map_err(|e| datum_jobs::Error::Invariant(e.to_string()))?;
+                .map_err(|e| wicket_jobs::Error::Invariant(e.to_string()))?;
             progress
                 .report(100, "done")
                 .await
-                .map_err(|e| datum_jobs::Error::Invariant(e.to_string()))?;
+                .map_err(|e| wicket_jobs::Error::Invariant(e.to_string()))?;
             let value = serde_json::to_value(&body)
-                .map_err(|e| datum_jobs::Error::Invariant(e.to_string()))?;
+                .map_err(|e| wicket_jobs::Error::Invariant(e.to_string()))?;
             Ok(HandlerOutcome::Done(value))
         })
     }

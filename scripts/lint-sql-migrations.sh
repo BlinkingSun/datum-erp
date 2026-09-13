@@ -15,7 +15,7 @@ command -v rg >/dev/null 2>&1 || {
 cd "$REPO_ROOT" || exit 1
 
 # schema:owning-crate-basename (modules use directory name; owner is Cargo package name).
-SCHEMA_OWNERS='identity:datum-identity uom:datum-uom ledger:datum-ledger sm:datum-statemachine jobs:datum-jobs events:datum-events numbering:datum-numbering audit:datum-audit items:datum-mod-items locations:datum-mod-locations lots:datum-mod-lots inventory:datum-mod-inventory genealogy:datum-mod-genealogy production_min:datum-mod-production-min documents:datum-documents print:datum-print esign:datum-esign customfields:datum-customfields server:datum-server datum:datum-db'
+SCHEMA_OWNERS='identity:wicket-identity uom:wicket-uom ledger:wicket-ledger sm:wicket-statemachine jobs:wicket-jobs events:wicket-events numbering:wicket-numbering audit:wicket-audit items:wicket-mod-items locations:wicket-mod-locations lots:wicket-mod-lots inventory:wicket-mod-inventory genealogy:wicket-mod-genealogy production_min:wicket-mod-production-min documents:wicket-documents print:wicket-print esign:wicket-esign customfields:wicket-customfields server:wicket-server wicket:wicket-db'
 
 # Parse rg -n "file:line:text", including an optional Windows drive letter (C:).
 # Sets HIT_FILE, HIT_LINE, HIT_TEXT. Returns 0 on success.
@@ -106,8 +106,8 @@ migration_unit_owns_schema() {
       "$own") return 0 ;;
     esac
     case "$own" in
-      datum-mod-*)
-        mod="${own#datum-mod-}"
+      wicket-mod-*)
+        mod="${own#wicket-mod-}"
         mod="${mod//-/_}"
         if [ "$unit" = "$mod" ]; then
           return 0
@@ -116,28 +116,28 @@ migration_unit_owns_schema() {
     esac
   done
   case "$unit" in
-    datum-ledger)
+    wicket-ledger)
       [ "$schema" = ledger ] || [ "$schema" = transient ] && return 0
       ;;
-    datum-jobs | datum-events)
+    wicket-jobs | wicket-events)
       [ "$schema" = app ] || [ "$schema" = transient ] && return 0
       ;;
-    datum-identity)
+    wicket-identity)
       [ "$schema" = identity ] || [ "$schema" = transient ] && return 0
       ;;
-    datum-statemachine)
+    wicket-statemachine)
       [ "$schema" = sm ] && return 0
       ;;
-    datum-module)
+    wicket-module)
       [ "$schema" = module ] && return 0
       ;;
-    datum-db)
-      [ "$schema" = datum ] && return 0
+    wicket-db)
+      [ "$schema" = wicket ] && return 0
       ;;
-    datum-audit)
+    wicket-audit)
       [ "$schema" = audit ] && return 0
       ;;
-    datum-server)
+    wicket-server)
       [ "$schema" = server ] && return 0
       ;;
     inventory)
@@ -162,9 +162,9 @@ filter_migration_hits() {
         continue
         ;;
     esac
-    if [ "$schema" = datum ]; then
+    if [ "$schema" = wicket ]; then
       case "$line" in
-        *INSERT\ INTO\ datum.schema_class* | *DELETE\ FROM\ datum.schema_class*)
+        *INSERT\ INTO\ wicket.schema_class* | *DELETE\ FROM\ wicket.schema_class*)
           continue
           ;;
       esac
@@ -349,14 +349,14 @@ EOF
 }
 
 # Parser + neutralization fixtures for Windows-shaped rg hits (just lint-sql-selftest).
-# Neutralization opens crates/datum-uom/migrations under REPO_ROOT (real tree or a copy).
+# Neutralization opens crates/wicket-uom/migrations under REPO_ROOT (real tree or a copy).
 # This function does not create or delete files.
 run_hit_selftest() {
   fail=0
-  win_hit='C:\ci\datum-erp\crates\datum-uom\migrations\0001.up.sql:12:FROM ledger.posting'
-  rel_hit='crates/datum-uom/migrations/0001.up.sql:12:FROM ledger.posting'
-  win_file='C:\ci\datum-erp\crates\datum-uom\migrations\0001.up.sql'
-  rel_file='crates/datum-uom/migrations/0001.up.sql'
+  win_hit='C:\ci\wicket-erp\crates\wicket-uom\migrations\0001.up.sql:12:FROM ledger.posting'
+  rel_hit='crates/wicket-uom/migrations/0001.up.sql:12:FROM ledger.posting'
+  win_file='C:\ci\wicket-erp\crates\wicket-uom\migrations\0001.up.sql'
+  rel_file='crates/wicket-uom/migrations/0001.up.sql'
 
   if ! parse_rg_hit "$win_hit"; then
     echo "lint-sql-selftest: Windows-shaped hit failed to parse: $win_hit" >&2
@@ -378,19 +378,19 @@ run_hit_selftest() {
     echo "lint-sql-selftest: relative hit parsed file='$HIT_FILE' line=$HIT_LINE"
   fi
 
-  mig_dir='crates/datum-uom/migrations'
-  real_rel='crates/datum-uom/migrations/00000000000001_uom.up.sql:89:      SELECT 1 FROM ledger.posting p WHERE p.item_id = p_item_id'
-  win_real='C:\ci\datum-erp\crates\datum-uom\migrations\00000000000001_uom.up.sql:89:      SELECT 1 FROM ledger.posting p WHERE p.item_id = p_item_id'
+  mig_dir='crates/wicket-uom/migrations'
+  real_rel='crates/wicket-uom/migrations/00000000000001_uom.up.sql:89:      SELECT 1 FROM ledger.posting p WHERE p.item_id = p_item_id'
+  win_real='C:\ci\wicket-erp\crates\wicket-uom\migrations\00000000000001_uom.up.sql:89:      SELECT 1 FROM ledger.posting p WHERE p.item_id = p_item_id'
 
   if ! cross_schema_hit_neutralized "$mig_dir" "$real_rel"; then
-    echo 'lint-sql-selftest: relative ledger.posting hit in datum-uom should be neutralized (owner check must not misfire)' >&2
+    echo 'lint-sql-selftest: relative ledger.posting hit in wicket-uom should be neutralized (owner check must not misfire)' >&2
     fail=1
   else
     echo 'lint-sql-selftest: relative hit neutralization correctly allowed'
   fi
 
   if ! cross_schema_hit_neutralized "$mig_dir" "$win_real"; then
-    echo 'lint-sql-selftest: Windows-shaped ledger.posting hit in datum-uom should be neutralized (owner check must not misfire)' >&2
+    echo 'lint-sql-selftest: Windows-shaped ledger.posting hit in wicket-uom should be neutralized (owner check must not misfire)' >&2
     fail=1
   else
     echo 'lint-sql-selftest: Windows-shaped hit neutralization correctly allowed'
@@ -419,7 +419,7 @@ for tree in crates modules; do
       continue
     fi
     unit="$(basename "$unit_dir")"
-    case "$unit" in datum-module | datum-test) continue ;; esac
+    case "$unit" in wicket-module | wicket-test) continue ;; esac
 
     # (a) cross-schema DDL/DML (same table-read law as src/, applied to migrations).
     for pair in $SCHEMA_OWNERS; do
@@ -430,7 +430,7 @@ for tree in crates modules; do
       # Kernel lanes register audit metadata (exempt/redact/event FK), not module reads.
       if [ "$schema" = audit ]; then
         case "$unit" in
-          datum-identity | datum-numbering) continue ;;
+          wicket-identity | wicket-numbering) continue ;;
         esac
       fi
       hits="$(rg -n -i --glob '*.sql' \
@@ -456,20 +456,20 @@ EOF
       fi
     done
 
-    # (b) SECURITY DEFINER functions only in datum-ledger / datum-audit / datum-db / datum-numbering.
+    # (b) SECURITY DEFINER functions only in wicket-ledger / wicket-audit / wicket-db / wicket-numbering.
     # R-2s-8: modules may not define SECURITY DEFINER; numbering exempt (D3 §8 gap-free counters).
     case "$unit" in
-      datum-ledger | datum-audit | datum-db | datum-numbering) ;;
+      wicket-ledger | wicket-audit | wicket-db | wicket-numbering) ;;
       *)
         if ! security_definer_unpaired "$mig_dir"; then
-          echo "lint-sql: CREATE FUNCTION ... SECURITY DEFINER in migrations of ${unit} (allowed only in datum-ledger, datum-audit, datum-db, datum-numbering; R-2s-8 / D3 §8)" >&2
+          echo "lint-sql: CREATE FUNCTION ... SECURITY DEFINER in migrations of ${unit} (allowed only in wicket-ledger, wicket-audit, wicket-db, wicket-numbering; R-2s-8 / D3 §8)" >&2
           lint_fail=1
         fi
         ;;
     esac
 
-    # (c) GRANT/REVOKE on foreign schemas outside datum-db bootstrap migration.
-    bootstrap="crates/datum-db/migrations/00000000000001_datum_schema.up.sql"
+    # (c) GRANT/REVOKE on foreign schemas outside wicket-db bootstrap migration.
+    bootstrap="crates/wicket-db/migrations/00000000000001_wicket_schema.up.sql"
     for sql in "$mig_dir"/*.sql; do
       if [ ! -f "$sql" ]; then
         continue
@@ -491,7 +491,7 @@ EOF
         schema_hits="$(printf '%s\n' "$grant_hits" | rg "${schema}\\." || true)"
         if [ -n "$schema_hits" ]; then
           printf '%s\n' "$schema_hits"
-          echo "lint-sql: GRANT/REVOKE on ${schema}.* in ${sql} (only datum-db bootstrap may grant foreign schemas)" >&2
+          echo "lint-sql: GRANT/REVOKE on ${schema}.* in ${sql} (only wicket-db bootstrap may grant foreign schemas)" >&2
           lint_fail=1
         fi
       done
@@ -500,12 +500,12 @@ EOF
     # (d) Session-protocol fence in migrations (CONTRACT §5a / §5a.1 mirror).
     # Wave-1 bootstrap in 0001 migrations is grandfathered; rule (d) targets later bypass (e.g. server-slice wo_start).
     case "$unit" in
-      datum-db | datum-audit) ;;
+      wicket-db | wicket-audit) ;;
       *)
         session_hits="$(rg -n -i --glob '*.sql' --glob '!00000000000001_*.up.sql' \
-          -e "SET[[:space:]]+datum\\." \
-          -e "set_config\\('datum\\." \
-          -e "current_setting\\('datum\\." \
+          -e "SET[[:space:]]+wicket\\." \
+          -e "set_config\\('wicket\\." \
+          -e "current_setting\\('wicket\\." \
           "$mig_dir" 2>/dev/null || true)"
         if [ -n "$session_hits" ]; then
           while IFS= read -r hit; do
@@ -513,14 +513,14 @@ EOF
               continue
             fi
             case "$hit" in
-              *DEFAULT*current_setting*datum.*) continue ;;
+              *DEFAULT*current_setting*wicket.*) continue ;;
             esac
             file="$hit"
             if parse_rg_hit "$hit"; then
               file="$(localize_hit_file "$HIT_FILE")"
             fi
             printf '%s\n' "$hit"
-            echo "lint-sql: session-protocol fence bypass in ${file} (datum.* GUC outside datum-db/datum-audit migrations)" >&2
+            echo "lint-sql: session-protocol fence bypass in ${file} (wicket.* GUC outside wicket-db/wicket-audit migrations)" >&2
             lint_fail=1
           done <<EOF
 $session_hits

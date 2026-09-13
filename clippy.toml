@@ -1,17 +1,17 @@
-# Raw-SQL fence (CONTRACT §5a as amended, D3 §11). datum-db, datum-audit, and
-# datum-test opt out in crate rustc attributes; just lint-sql is the string-level backstop.
+# Raw-SQL fence (CONTRACT §5a as amended, D3 §11). wicket-db, wicket-audit, and
+# wicket-test opt out in crate rustc attributes; just lint-sql is the string-level backstop.
 disallowed-macros = [
-    { path = "sqlx::query", reason = "session-protocol SQL is confined to datum-db, datum-audit, and datum-test (CONTRACT §5a as amended)", allow-invalid = true },
-    { path = "sqlx::query_as", reason = "session-protocol SQL is confined to datum-db, datum-audit, and datum-test (CONTRACT §5a as amended)", allow-invalid = true },
-    { path = "sqlx::query_scalar", reason = "session-protocol SQL is confined to datum-db, datum-audit, and datum-test (CONTRACT §5a as amended)", allow-invalid = true },
+    { path = "sqlx::query", reason = "session-protocol SQL is confined to wicket-db, wicket-audit, and wicket-test (CONTRACT §5a as amended)", allow-invalid = true },
+    { path = "sqlx::query_as", reason = "session-protocol SQL is confined to wicket-db, wicket-audit, and wicket-test (CONTRACT §5a as amended)", allow-invalid = true },
+    { path = "sqlx::query_scalar", reason = "session-protocol SQL is confined to wicket-db, wicket-audit, and wicket-test (CONTRACT §5a as amended)", allow-invalid = true },
 ]
 disallowed-methods = [
-    { path = "sqlx::raw_sql", reason = "session-protocol SQL is confined to datum-db, datum-audit, and datum-test (CONTRACT §5a as amended)", allow-invalid = true },
-    { path = "sqlx::QueryBuilder::new", reason = "session-protocol SQL is confined to datum-db, datum-audit, and datum-test (CONTRACT §5a as amended)", allow-invalid = true },
-    { path = "sqlx::postgres::PgConnection::copy_in_raw", reason = "session-protocol SQL is confined to datum-db, datum-audit, and datum-test (CONTRACT §5a as amended)", allow-invalid = true },
-    { path = "set_config", reason = "session-protocol SQL is confined to datum-db, datum-audit, and datum-test (CONTRACT §5a as amended)", allow-invalid = true },
-    { path = "current_setting", reason = "session-protocol SQL is confined to datum-db, datum-audit, and datum-test (CONTRACT §5a as amended)", allow-invalid = true },
+    { path = "sqlx::raw_sql", reason = "session-protocol SQL is confined to wicket-db, wicket-audit, and wicket-test (CONTRACT §5a as amended)", allow-invalid = true },
+    { path = "sqlx::QueryBuilder::new", reason = "session-protocol SQL is confined to wicket-db, wicket-audit, and wicket-test (CONTRACT §5a as amended)", allow-invalid = true },
+    { path = "sqlx::postgres::PgConnection::copy_in_raw", reason = "session-protocol SQL is confined to wicket-db, wicket-audit, and wicket-test (CONTRACT §5a as amended)", allow-invalid = true },
+    { path = "set_config", reason = "session-protocol SQL is confined to wicket-db, wicket-audit, and wicket-test (CONTRACT §5a as amended)", allow-invalid = true },
+    { path = "current_setting", reason = "session-protocol SQL is confined to wicket-db, wicket-audit, and wicket-test (CONTRACT §5a as amended)", allow-invalid = true },
 ]
 disallowed-types = [
-    { path = "sqlx::QueryBuilder", reason = "session-protocol SQL is confined to datum-db, datum-audit, and datum-test (CONTRACT §5a as amended)", allow-invalid = true },
+    { path = "sqlx::QueryBuilder", reason = "session-protocol SQL is confined to wicket-db, wicket-audit, and wicket-test (CONTRACT §5a as amended)", allow-invalid = true },
 ]

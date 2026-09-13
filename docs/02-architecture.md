@@ -307,7 +307,7 @@ the original decision while keeping PostgreSQL itself. The rule is short:
 **Both processes are system services**, which is the requirement everything else follows
 from. A shop floor tablet that comes back at 6am needs the office machine answering with
 nobody logged in, and a process launched by an interactive user dies when that user logs
-off. That is true of `postgres.exe` and it is equally true of `datum-server`. So the
+off. That is true of `postgres.exe` and it is equally true of `wicket-server`. So the
 installer registers a service, which costs one administrator prompt at install time and
 none afterwards — and once that prompt is paid for our own service, having the database
 be a service too costs nothing. This is why bundling bought less than it looked like it
@@ -316,18 +316,18 @@ did: the elevation was never avoidable for any database choice.
 Per operating system, concretely:
 
 - **Windows.** PostgreSQL from the EDB installer, which registers it as a Windows
-  Service under its own account. Datum from a signed MSI that registers `datum-server`
+  Service under its own account. Wicket from a signed MSI that registers `wicket-server`
   as a Windows Service set to Automatic (Delayed Start) and adds one inbound firewall
   rule. Configuration lives in `%PROGRAMDATA%`, not in one user's profile, so a second
   office login does not get a second installation. PostgreSQL listens on loopback only;
-  only `datum-server` binds the LAN, so there is one firewall rule and one exposed
-  process. `datum-server` connects to `127.0.0.1` and never to `localhost`, because
+  only `wicket-server` binds the LAN, so there is one firewall rule and one exposed
+  process. `wicket-server` connects to `127.0.0.1` and never to `localhost`, because
   Windows resolves `localhost` IPv6-first and the failed `::1` attempt costs seconds
   against a sub-second scan budget.
 - **macOS.** For a Mac serving a shop, PostgreSQL from Homebrew started with
   `sudo brew services start`, which writes a LaunchDaemon that survives logout; without
   `sudo` it writes a LaunchAgent that does not, which is the same defect in a different
-  hat. Datum from a signed `.pkg` that installs its own LaunchDaemon. Postgres.app is
+  hat. Wicket from a signed `.pkg` that installs its own LaunchDaemon. Postgres.app is
   fine for a single-user office desktop and is not the answer for a machine that serves
   tablets, because it stops when the app quits.
 - **Linux.** The distribution's PostgreSQL package, then our `.deb` or `.rpm` with a
@@ -403,7 +403,7 @@ accident rather than nation-state.
 - Every mutation is audited with the actor. The audit store is append-only at the
   database grant level: the application role can read the trail and cannot insert,
   update, or delete an entry. Grants bind the application. They do not bind the person
-  who administers the database, who on a self-hosted install is the customer. Datum does
+  who administers the database, who on a self-hosted install is the customer. Wicket does
   not claim the trail cannot be altered by someone with administrative control of the
   database server itself. Instead, each transaction is sealed into a hash chain whose
   head is published off the server on a schedule the customer controls, so that any

@@ -33,8 +33,8 @@ pub use store::{
     tree_csv, undirected_edges, where_used,
 };
 
-use datum_db::Tx;
-use datum_module::{Kernel, KernelBuilder, ModuleManifest, Profile};
+use wicket_db::Tx;
+use wicket_module::{Kernel, KernelBuilder, ModuleManifest, Profile};
 
 /// Embedded migrator (`placeholder` + `0001_genealogy`).
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
@@ -99,7 +99,7 @@ mod tests {
 
     #[test]
     fn postgres_helper_is_callable() {
-        let _ = datum_test::postgres_available();
+        let _ = wicket_test::postgres_available();
     }
 
     #[test]

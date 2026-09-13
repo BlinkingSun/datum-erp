@@ -1,5 +1,5 @@
 [package]
-name = "datum-mod-inventory"
+name = "wicket-mod-inventory"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -17,16 +17,16 @@ test-utils = []
 
 [dependencies]
 chrono.workspace = true
-datum-core.workspace = true
-datum-audit.workspace = true
-datum-db.workspace = true
-datum-events.workspace = true
-datum-ledger.workspace = true
-datum-module.workspace = true
-datum-statemachine.workspace = true
-datum-uom.workspace = true
-datum-mod-locations = { path = "../locations" }
-datum-mod-lots = { path = "../lots" }
+wicket-core.workspace = true
+wicket-audit.workspace = true
+wicket-db.workspace = true
+wicket-events.workspace = true
+wicket-ledger.workspace = true
+wicket-module.workspace = true
+wicket-statemachine.workspace = true
+wicket-uom.workspace = true
+wicket-mod-locations = { path = "../locations" }
+wicket-mod-lots = { path = "../lots" }
 rust_decimal.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -36,9 +36,9 @@ tokio.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
-datum-audit.workspace = true
-datum-identity.workspace = true
-datum-test.workspace = true
-datum-mod-items = { path = "../items" }
+wicket-audit.workspace = true
+wicket-identity.workspace = true
+wicket-test.workspace = true
+wicket-mod-items = { path = "../items" }
 proptest.workspace = true
 tokio.workspace = true

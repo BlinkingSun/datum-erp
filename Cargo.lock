@@ -422,525 +422,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "datum-audit"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "datum-core",
- "datum-db",
- "datum-test",
- "proptest",
- "serde",
- "serde_json",
- "sqlx",
- "thiserror",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "datum-core"
-version = "0.1.0"
-dependencies = [
- "proptest",
- "rust_decimal",
- "serde",
- "serde_json",
- "thiserror",
- "trybuild",
- "uuid",
-]
-
-[[package]]
-name = "datum-customfields"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "datum-audit",
- "datum-core",
- "datum-db",
- "datum-esign",
- "datum-events",
- "datum-identity",
- "datum-jobs",
- "datum-ledger",
- "datum-numbering",
- "datum-statemachine",
- "datum-test",
- "datum-uom",
- "proptest",
- "rust_decimal",
- "serde",
- "serde_json",
- "sqlx",
- "thiserror",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "datum-db"
-version = "0.1.0"
-dependencies = [
- "datum-core",
- "datum-test",
- "proptest",
- "serde",
- "sqlx",
- "thiserror",
- "tokio",
- "trybuild",
-]
-
-[[package]]
-name = "datum-documents"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "datum-audit",
- "datum-core",
- "datum-db",
- "datum-identity",
- "datum-module",
- "datum-numbering",
- "datum-statemachine",
- "datum-test",
- "proptest",
- "serde",
- "serde_json",
- "sqlx",
- "thiserror",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "datum-esign"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "datum-audit",
- "datum-core",
- "datum-db",
- "datum-identity",
- "datum-module",
- "datum-statemachine",
- "datum-test",
- "proptest",
- "serde",
- "serde_json",
- "sqlx",
- "thiserror",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "datum-events"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "datum-audit",
- "datum-core",
- "datum-db",
- "datum-test",
- "proptest",
- "serde",
- "serde_json",
- "sqlx",
- "thiserror",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "datum-identity"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "datum-audit",
- "datum-core",
- "datum-db",
- "datum-test",
- "proptest",
- "serde",
- "serde_json",
- "sqlx",
- "thiserror",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "datum-jobs"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "datum-audit",
- "datum-core",
- "datum-db",
- "datum-events",
- "datum-test",
- "proptest",
- "serde",
- "serde_json",
- "sqlx",
- "thiserror",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "datum-ledger"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "datum-audit",
- "datum-core",
- "datum-db",
- "datum-events",
- "datum-identity",
- "datum-jobs",
- "datum-numbering",
- "datum-test",
- "datum-uom",
- "proptest",
- "rust_decimal",
- "serde",
- "sqlx",
- "thiserror",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "datum-mod-genealogy"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "datum-audit",
- "datum-core",
- "datum-db",
- "datum-events",
- "datum-identity",
- "datum-jobs",
- "datum-ledger",
- "datum-mod-inventory",
- "datum-mod-items",
- "datum-mod-locations",
- "datum-mod-lots",
- "datum-module",
- "datum-test",
- "proptest",
- "rust_decimal",
- "serde",
- "serde_json",
- "sqlx",
- "thiserror",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "datum-mod-inventory"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "datum-audit",
- "datum-core",
- "datum-db",
- "datum-events",
- "datum-identity",
- "datum-ledger",
- "datum-mod-items",
- "datum-mod-locations",
- "datum-mod-lots",
- "datum-module",
- "datum-statemachine",
- "datum-test",
- "datum-uom",
- "proptest",
- "rust_decimal",
- "serde",
- "serde_json",
- "sqlx",
- "thiserror",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "datum-mod-items"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "datum-audit",
- "datum-core",
- "datum-db",
- "datum-events",
- "datum-identity",
- "datum-ledger",
- "datum-module",
- "datum-statemachine",
- "datum-test",
- "datum-uom",
- "proptest",
- "rust_decimal",
- "serde",
- "serde_json",
- "sqlx",
- "thiserror",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "datum-mod-locations"
-version = "0.1.0"
-dependencies = [
- "datum-audit",
- "datum-core",
- "datum-db",
- "datum-events",
- "datum-identity",
- "datum-ledger",
- "datum-module",
- "datum-statemachine",
- "datum-test",
- "datum-uom",
- "proptest",
- "rust_decimal",
- "serde",
- "serde_json",
- "sqlx",
- "thiserror",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "datum-mod-lots"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "datum-audit",
- "datum-core",
- "datum-db",
- "datum-events",
- "datum-identity",
- "datum-module",
- "datum-numbering",
- "datum-statemachine",
- "datum-test",
- "proptest",
- "rust_decimal",
- "serde",
- "serde_json",
- "sqlx",
- "thiserror",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "datum-mod-production-min"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "datum-audit",
- "datum-core",
- "datum-db",
- "datum-events",
- "datum-identity",
- "datum-ledger",
- "datum-mod-inventory",
- "datum-mod-items",
- "datum-mod-locations",
- "datum-mod-lots",
- "datum-module",
- "datum-numbering",
- "datum-statemachine",
- "datum-test",
- "datum-uom",
- "proptest",
- "rust_decimal",
- "serde",
- "serde_json",
- "sqlx",
- "thiserror",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "datum-module"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "datum-audit",
- "datum-core",
- "datum-customfields",
- "datum-db",
- "datum-documents",
- "datum-esign",
- "datum-events",
- "datum-identity",
- "datum-jobs",
- "datum-ledger",
- "datum-mod-items",
- "datum-mod-locations",
- "datum-mod-lots",
- "datum-numbering",
- "datum-print",
- "datum-statemachine",
- "datum-test",
- "datum-uom",
- "proptest",
- "rust_decimal",
- "serde",
- "serde_json",
- "sqlx",
- "thiserror",
- "tokio",
-]
-
-[[package]]
-name = "datum-numbering"
-version = "0.1.0"
-dependencies = [
- "datum-audit",
- "datum-core",
- "datum-db",
- "datum-test",
- "proptest",
- "serde",
- "sqlx",
- "thiserror",
- "tokio",
-]
-
-[[package]]
-name = "datum-print"
-version = "0.1.0"
-dependencies = [
- "datum-audit",
- "datum-core",
- "datum-db",
- "datum-documents",
- "datum-esign",
- "datum-identity",
- "datum-numbering",
- "datum-statemachine",
- "datum-test",
- "pdf-writer",
- "proptest",
- "serde",
- "serde_json",
- "sqlx",
- "thiserror",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "datum-server"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "chrono",
- "clap",
- "datum-audit",
- "datum-core",
- "datum-customfields",
- "datum-db",
- "datum-documents",
- "datum-esign",
- "datum-events",
- "datum-identity",
- "datum-jobs",
- "datum-ledger",
- "datum-mod-genealogy",
- "datum-mod-inventory",
- "datum-mod-items",
- "datum-mod-locations",
- "datum-mod-lots",
- "datum-mod-production-min",
- "datum-module",
- "datum-numbering",
- "datum-print",
- "datum-statemachine",
- "datum-test",
- "datum-uom",
- "proptest",
- "rust_decimal",
- "serde",
- "serde_json",
- "sqlx",
- "thiserror",
- "tokio",
- "tower",
- "tower-http",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "datum-statemachine"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "datum-audit",
- "datum-core",
- "datum-db",
- "datum-identity",
- "datum-module",
- "datum-test",
- "proptest",
- "rust_decimal",
- "serde",
- "sqlx",
- "thiserror",
- "tokio",
- "trybuild",
- "uuid",
-]
-
-[[package]]
-name = "datum-test"
-version = "0.1.0"
-dependencies = [
- "sqlx",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "datum-uom"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "datum-audit",
- "datum-core",
- "datum-db",
- "datum-events",
- "datum-identity",
- "datum-jobs",
- "datum-ledger",
- "datum-numbering",
- "datum-test",
- "proptest",
- "rust_decimal",
- "serde",
- "sqlx",
- "thiserror",
- "tokio",
- "trybuild",
- "uuid",
-]
-
-[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2776,6 +2257,525 @@ name = "whoami"
 version = "2.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "626c4bac6755d76ffc12cb01b2eac751db1996b9e0041de9aa02c8c211ddc82c"
+
+[[package]]
+name = "wicket-audit"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "proptest",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "uuid",
+ "wicket-core",
+ "wicket-db",
+ "wicket-test",
+]
+
+[[package]]
+name = "wicket-core"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "trybuild",
+ "uuid",
+]
+
+[[package]]
+name = "wicket-customfields"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "proptest",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "uuid",
+ "wicket-audit",
+ "wicket-core",
+ "wicket-db",
+ "wicket-esign",
+ "wicket-events",
+ "wicket-identity",
+ "wicket-jobs",
+ "wicket-ledger",
+ "wicket-numbering",
+ "wicket-statemachine",
+ "wicket-test",
+ "wicket-uom",
+]
+
+[[package]]
+name = "wicket-db"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "serde",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "trybuild",
+ "wicket-core",
+ "wicket-test",
+]
+
+[[package]]
+name = "wicket-documents"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "proptest",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "uuid",
+ "wicket-audit",
+ "wicket-core",
+ "wicket-db",
+ "wicket-identity",
+ "wicket-module",
+ "wicket-numbering",
+ "wicket-statemachine",
+ "wicket-test",
+]
+
+[[package]]
+name = "wicket-esign"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "proptest",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "uuid",
+ "wicket-audit",
+ "wicket-core",
+ "wicket-db",
+ "wicket-identity",
+ "wicket-module",
+ "wicket-statemachine",
+ "wicket-test",
+]
+
+[[package]]
+name = "wicket-events"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "proptest",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "uuid",
+ "wicket-audit",
+ "wicket-core",
+ "wicket-db",
+ "wicket-test",
+]
+
+[[package]]
+name = "wicket-identity"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "proptest",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "uuid",
+ "wicket-audit",
+ "wicket-core",
+ "wicket-db",
+ "wicket-test",
+]
+
+[[package]]
+name = "wicket-jobs"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "proptest",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "uuid",
+ "wicket-audit",
+ "wicket-core",
+ "wicket-db",
+ "wicket-events",
+ "wicket-test",
+]
+
+[[package]]
+name = "wicket-ledger"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "proptest",
+ "rust_decimal",
+ "serde",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "uuid",
+ "wicket-audit",
+ "wicket-core",
+ "wicket-db",
+ "wicket-events",
+ "wicket-identity",
+ "wicket-jobs",
+ "wicket-numbering",
+ "wicket-test",
+ "wicket-uom",
+]
+
+[[package]]
+name = "wicket-mod-genealogy"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "proptest",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "uuid",
+ "wicket-audit",
+ "wicket-core",
+ "wicket-db",
+ "wicket-events",
+ "wicket-identity",
+ "wicket-jobs",
+ "wicket-ledger",
+ "wicket-mod-inventory",
+ "wicket-mod-items",
+ "wicket-mod-locations",
+ "wicket-mod-lots",
+ "wicket-module",
+ "wicket-test",
+]
+
+[[package]]
+name = "wicket-mod-inventory"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "proptest",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "uuid",
+ "wicket-audit",
+ "wicket-core",
+ "wicket-db",
+ "wicket-events",
+ "wicket-identity",
+ "wicket-ledger",
+ "wicket-mod-items",
+ "wicket-mod-locations",
+ "wicket-mod-lots",
+ "wicket-module",
+ "wicket-statemachine",
+ "wicket-test",
+ "wicket-uom",
+]
+
+[[package]]
+name = "wicket-mod-items"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "proptest",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "uuid",
+ "wicket-audit",
+ "wicket-core",
+ "wicket-db",
+ "wicket-events",
+ "wicket-identity",
+ "wicket-ledger",
+ "wicket-module",
+ "wicket-statemachine",
+ "wicket-test",
+ "wicket-uom",
+]
+
+[[package]]
+name = "wicket-mod-locations"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "uuid",
+ "wicket-audit",
+ "wicket-core",
+ "wicket-db",
+ "wicket-events",
+ "wicket-identity",
+ "wicket-ledger",
+ "wicket-module",
+ "wicket-statemachine",
+ "wicket-test",
+ "wicket-uom",
+]
+
+[[package]]
+name = "wicket-mod-lots"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "proptest",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "uuid",
+ "wicket-audit",
+ "wicket-core",
+ "wicket-db",
+ "wicket-events",
+ "wicket-identity",
+ "wicket-module",
+ "wicket-numbering",
+ "wicket-statemachine",
+ "wicket-test",
+]
+
+[[package]]
+name = "wicket-mod-production-min"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "proptest",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "uuid",
+ "wicket-audit",
+ "wicket-core",
+ "wicket-db",
+ "wicket-events",
+ "wicket-identity",
+ "wicket-ledger",
+ "wicket-mod-inventory",
+ "wicket-mod-items",
+ "wicket-mod-locations",
+ "wicket-mod-lots",
+ "wicket-module",
+ "wicket-numbering",
+ "wicket-statemachine",
+ "wicket-test",
+ "wicket-uom",
+]
+
+[[package]]
+name = "wicket-module"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "proptest",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "wicket-audit",
+ "wicket-core",
+ "wicket-customfields",
+ "wicket-db",
+ "wicket-documents",
+ "wicket-esign",
+ "wicket-events",
+ "wicket-identity",
+ "wicket-jobs",
+ "wicket-ledger",
+ "wicket-mod-items",
+ "wicket-mod-locations",
+ "wicket-mod-lots",
+ "wicket-numbering",
+ "wicket-print",
+ "wicket-statemachine",
+ "wicket-test",
+ "wicket-uom",
+]
+
+[[package]]
+name = "wicket-numbering"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "serde",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "wicket-audit",
+ "wicket-core",
+ "wicket-db",
+ "wicket-test",
+]
+
+[[package]]
+name = "wicket-print"
+version = "0.1.0"
+dependencies = [
+ "pdf-writer",
+ "proptest",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "uuid",
+ "wicket-audit",
+ "wicket-core",
+ "wicket-db",
+ "wicket-documents",
+ "wicket-esign",
+ "wicket-identity",
+ "wicket-numbering",
+ "wicket-statemachine",
+ "wicket-test",
+]
+
+[[package]]
+name = "wicket-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "chrono",
+ "clap",
+ "proptest",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "tower",
+ "tower-http",
+ "tracing",
+ "uuid",
+ "wicket-audit",
+ "wicket-core",
+ "wicket-customfields",
+ "wicket-db",
+ "wicket-documents",
+ "wicket-esign",
+ "wicket-events",
+ "wicket-identity",
+ "wicket-jobs",
+ "wicket-ledger",
+ "wicket-mod-genealogy",
+ "wicket-mod-inventory",
+ "wicket-mod-items",
+ "wicket-mod-locations",
+ "wicket-mod-lots",
+ "wicket-mod-production-min",
+ "wicket-module",
+ "wicket-numbering",
+ "wicket-print",
+ "wicket-statemachine",
+ "wicket-test",
+ "wicket-uom",
+]
+
+[[package]]
+name = "wicket-statemachine"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "proptest",
+ "rust_decimal",
+ "serde",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "trybuild",
+ "uuid",
+ "wicket-audit",
+ "wicket-core",
+ "wicket-db",
+ "wicket-identity",
+ "wicket-module",
+ "wicket-test",
+]
+
+[[package]]
+name = "wicket-test"
+version = "0.1.0"
+dependencies = [
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "wicket-uom"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "proptest",
+ "rust_decimal",
+ "serde",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "trybuild",
+ "uuid",
+ "wicket-audit",
+ "wicket-core",
+ "wicket-db",
+ "wicket-events",
+ "wicket-identity",
+ "wicket-jobs",
+ "wicket-ledger",
+ "wicket-numbering",
+ "wicket-test",
+]
 
 [[package]]
 name = "winapi-util"

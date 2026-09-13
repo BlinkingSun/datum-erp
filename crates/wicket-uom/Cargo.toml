@@ -1,0 +1,38 @@
+[package]
+name = "wicket-uom"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Kernel units of measure: catalog, conversion, and stock boundary rounding."
+build = "build.rs"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+test-utils = []
+
+[dependencies]
+wicket-core.workspace = true
+wicket-db.workspace = true
+wicket-audit.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+rust_decimal.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+wicket-test.workspace = true
+wicket-identity.workspace = true
+wicket-numbering.workspace = true
+wicket-events.workspace = true
+wicket-jobs.workspace = true
+wicket-ledger.workspace = true
+tokio.workspace = true
+proptest.workspace = true
+trybuild.workspace = true

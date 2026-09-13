@@ -1,4 +1,4 @@
-# Design Guidelines — Datum
+# Design Guidelines — Wicket
 
 *Binding on every lane that touches the interface. Written before the visual approval
 gate; the approved mockups get recorded in section 10 once the user signs off, and
@@ -166,7 +166,7 @@ Things that will be rejected in audit.
 
 *To be filled in after the visual approval gate. The approved mockups are
 `design/mockup-item-master.png`, `design/mockup-shop-floor.png`,
-`design/mockup-genealogy.png`, and the application icon `design/icon-datum.png`.
+`design/mockup-genealogy.png`, and the application icon `design/icon-wicket.png`.
 Until the user signs off, no interface lane starts.*
 
 ## 11. Notes for the next agent

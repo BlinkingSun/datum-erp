@@ -5,4 +5,4 @@ DROP SCHEMA IF EXISTS genealogy_transient;
 
 DROP SCHEMA IF EXISTS genealogy;
 
-DELETE FROM datum.schema_class WHERE nspname IN ('genealogy', 'genealogy_transient');
+DELETE FROM wicket.schema_class WHERE nspname IN ('genealogy', 'genealogy_transient');

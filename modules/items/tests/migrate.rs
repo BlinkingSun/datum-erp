@@ -2,10 +2,10 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, unused_crate_dependencies)]
 
-use datum_mod_items::MIGRATOR;
-use datum_module::{migrate_prefix, migrate_suffix};
-use datum_test::db_case;
 use sqlx::{migrate::Migrator, query_scalar};
+use wicket_mod_items::MIGRATOR;
+use wicket_module::{migrate_prefix, migrate_suffix};
+use wicket_test::db_case;
 
 fn items_migrator() -> Migrator {
     let mut migrator = Migrator::with_migrations(MIGRATOR.iter().cloned().collect());
@@ -19,7 +19,7 @@ async fn reversible_migration_drops_items_schema() {
     migrate_prefix(db.migrate_pool()).await.expect("prefix");
     migrate_suffix(db.migrate_pool()).await.expect("suffix");
     let boot = db.bootstrap_pool().await.expect("boot");
-    datum_audit::install_privileged(&boot)
+    wicket_audit::install_privileged(&boot)
         .await
         .expect("privileged");
     boot.close().await;
@@ -70,7 +70,7 @@ async fn migrate_down_then_up() {
     migrate_prefix(db.migrate_pool()).await.expect("prefix");
     migrate_suffix(db.migrate_pool()).await.expect("suffix");
     let boot = db.bootstrap_pool().await.expect("boot");
-    datum_audit::install_privileged(&boot)
+    wicket_audit::install_privileged(&boot)
         .await
         .expect("privileged");
     boot.close().await;

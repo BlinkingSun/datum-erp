@@ -1,14 +1,14 @@
 //! Work-order state machine. Edges are declared in `module.toml` and registered
-//! through [`datum_module::KernelBuilder`] with explicit
-//! [`datum_statemachine::SignatureDeclaration::NotRequired`] reasons.
+//! through [`wicket_module::KernelBuilder`] with explicit
+//! [`wicket_statemachine::SignatureDeclaration::NotRequired`] reasons.
 
-use datum_core::Identifier;
-use datum_statemachine::{DocRef, EdgeBuilder, Machine};
+use wicket_core::Identifier;
+use wicket_statemachine::{DocRef, EdgeBuilder, Machine};
 
 use crate::domain::{DOC_TYPE, NOT_REQUIRED_REASON};
 use crate::error::Result;
 
-/// Machine declared through `datum-statemachine` with `NotRequired` on every edge.
+/// Machine declared through `wicket-statemachine` with `NotRequired` on every edge.
 pub fn work_order_machine() -> Result<Machine> {
     Ok(Machine::builder(DOC_TYPE)
         .regulated(false)

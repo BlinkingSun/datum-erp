@@ -7,7 +7,7 @@ Decider:  project lead
 ## Context
 
 `docs/01-vision-and-scope.md` section 6 and `PLAN.md` already treat this as binding:
-Datum is not multi-tenant SaaS. The reasons were that regulated customers self-host,
+Wicket is not multi-tenant SaaS. The reasons were that regulated customers self-host,
 that rolling updates conflict with a validated installation, and that a company
 identifier on every table plus a filter on every query is a permanent tax for a
 capability we would not use.
@@ -39,7 +39,7 @@ genealogy edges. That is a data classification problem, not a tenancy problem.
 
 ## Decision
 
-**One customer per installation.** Datum is self-hosted. It is not a multi-tenant
+**One customer per installation.** Wicket is self-hosted. It is not a multi-tenant
 SaaS. One process, one database, one customer. There is no tenant identifier column,
 no row-level tenant filter, and no shared control plane that serves two customers
 from one cluster.
@@ -57,7 +57,7 @@ needs European residency puts the installation there. Those are two customers an
 installations. They are not two rows in one database.
 
 A single company that later needs two residencies runs two installations. That is a
-second copy of Datum, not a tenant. Consolidation across those copies is out of
+second copy of Wicket, not a tenant. Consolidation across those copies is out of
 scope, as `docs/01-vision-and-scope.md` already says for multi-entity customers.
 
 **What Wave 1 must contain, even under single tenancy.**

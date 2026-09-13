@@ -1,5 +1,5 @@
 [package]
-name = "datum-mod-locations"
+name = "wicket-mod-locations"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -16,12 +16,12 @@ default = []
 test-utils = []
 
 [dependencies]
-datum-core.workspace = true
-datum-db.workspace = true
-datum-audit.workspace = true
-datum-events.workspace = true
-datum-ledger.workspace = true
-datum-module = { path = "../../crates/datum-module", default-features = false }
+wicket-core.workspace = true
+wicket-db.workspace = true
+wicket-audit.workspace = true
+wicket-events.workspace = true
+wicket-ledger.workspace = true
+wicket-module = { path = "../../crates/wicket-module", default-features = false }
 sqlx.workspace = true
 thiserror.workspace = true
 serde.workspace = true
@@ -29,11 +29,11 @@ serde_json.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
-datum-test.workspace = true
-datum-identity.workspace = true
-datum-uom.workspace = true
-datum-ledger.workspace = true
-datum-statemachine.workspace = true
+wicket-test.workspace = true
+wicket-identity.workspace = true
+wicket-uom.workspace = true
+wicket-ledger.workspace = true
+wicket-statemachine.workspace = true
 tokio.workspace = true
 proptest.workspace = true
 rust_decimal.workspace = true

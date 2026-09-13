@@ -1,10 +1,10 @@
 //! Lot and serial entities, expiry precision, package hierarchy, and status.
 //!
-//! No I/O. Identifier charset is `datum_numbering::lot::validate` (invariant 9).
+//! No I/O. Identifier charset is `wicket_numbering::lot::validate` (invariant 9).
 
 use chrono::{Datelike, NaiveDate};
-use datum_core::{AnyQuantity, ItemId, LotId, SerialId};
 use serde::{Deserialize, Serialize};
+use wicket_core::{AnyQuantity, ItemId, LotId, SerialId};
 
 use crate::error::{Error, Result};
 
@@ -79,7 +79,7 @@ impl ExpiryPrecision {
             "day" => Ok(Self::Day),
             "month" => Ok(Self::Month),
             "year" => Ok(Self::Year),
-            other => Err(Error::Core(datum_core::Error::Invariant(format!(
+            other => Err(Error::Core(wicket_core::Error::Invariant(format!(
                 "unknown expiry precision {other}"
             )))),
         }
@@ -116,7 +116,7 @@ impl Expiry {
     /// Parse a month-only value `YYYY-MM` into `{first-of-month, month}`.
     pub fn from_year_month(year: i32, month: u32) -> Result<Self> {
         let date = NaiveDate::from_ymd_opt(year, month, 1).ok_or_else(|| {
-            Error::Core(datum_core::Error::Invariant(format!(
+            Error::Core(wicket_core::Error::Invariant(format!(
                 "invalid year-month {year:04}-{month:02}"
             )))
         })?;
@@ -159,7 +159,7 @@ impl PackageLevel {
             "inner" => Ok(Self::Inner),
             "case" => Ok(Self::Case),
             "pallet" => Ok(Self::Pallet),
-            other => Err(Error::Core(datum_core::Error::Invariant(format!(
+            other => Err(Error::Core(wicket_core::Error::Invariant(format!(
                 "unknown package level {other}"
             )))),
         }
@@ -169,12 +169,12 @@ impl PackageLevel {
 /// Package identifier (uuid v7).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct PackageId(pub datum_core::Identifier);
+pub struct PackageId(pub wicket_core::Identifier);
 
 impl PackageId {
     /// Mint a new id.
     pub fn generate() -> Self {
-        Self(datum_core::Identifier::generate())
+        Self(wicket_core::Identifier::generate())
     }
 
     /// Inner uuid.
@@ -184,7 +184,7 @@ impl PackageId {
 
     /// Wrap an existing uuid.
     pub fn from_uuid(u: uuid::Uuid) -> Self {
-        Self(datum_core::Identifier::from_uuid(u))
+        Self(wicket_core::Identifier::from_uuid(u))
     }
 }
 
@@ -253,7 +253,7 @@ pub struct Package {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusHistory {
     /// Surrogate id.
-    pub id: datum_core::Identifier,
+    pub id: wicket_core::Identifier,
     /// Lot subject, if this row is a lot status change.
     pub lot: Option<LotId>,
     /// Serial subject, if this row is a serial status change.
@@ -322,5 +322,5 @@ pub enum UdiTarget {
 
 /// Validate a kernel lot/serial identifier (invariant 9).
 pub fn validate_identifier(id: &str) -> Result<()> {
-    datum_numbering::lot::validate(id).map_err(|_| Error::InvalidIdentifier(id.to_owned()))
+    wicket_numbering::lot::validate(id).map_err(|_| Error::InvalidIdentifier(id.to_owned()))
 }

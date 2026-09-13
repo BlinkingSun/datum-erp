@@ -1,6 +1,6 @@
 //! Hooks. Genealogy is read-only: it never vetoes a transition.
 
-use datum_module::KernelBuilder;
+use wicket_module::KernelBuilder;
 
 use crate::error::Result;
 

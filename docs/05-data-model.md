@@ -234,13 +234,13 @@ Function `ledger.enforce_group_invariants()` (D2 §5.4) runs on **`CREATE CONSTR
 
 `SECURITY DEFINER` with pinned `search_path`. Multi-posting writes must use an explicit transaction; failures surface on `commit()`. Full function body: D2 §5.4 (byte-faithful; aggregates are scale-agnostic).
 
-**Bar before migrations:** slice definitions, boundary matrix, and §7 rounding rules (below) must be accepted before any `datum-ledger` migration (D2 §10), as amended by D-W1-1 for money columns.
+**Bar before migrations:** slice definitions, boundary matrix, and §7 rounding rules (below) must be accepted before any `wicket-ledger` migration (D2 §10), as amended by D-W1-1 for money columns.
 
 ### 1.8 Rounding and residuals (D2 §7)
 
 **R1** — Canonical measure per item (`stock_uom_id`, `stock_scale`, `residual_tolerance`); posted quantity exact at `stock_scale` (`quantity_exact_at_scale`).
 
-**R2** — Conversion once at the API boundary (`datum-uom`, half-even at `stock_scale`); `entered_*` and `conversion_factor` are provenance only.
+**R2** — Conversion once at the API boundary (`wicket-uom`, half-even at `stock_scale`); `entered_*` and `conversion_factor` are provenance only.
 
 **R3** — Same canonical number on both legs of a transfer within a group so P1 cannot fail on rounding.
 
@@ -278,9 +278,9 @@ Source: D1 §4.1 and §6.
 |---|---|---|
 | In-process | `Quantity<D>`, `Money`, `UnitCost<D>` | Not `Serialize`/`Deserialize` |
 | HTTP API | `AnyQuantity`, `MoneyWire` | JSON; **decimal as string**, never JSON number |
-| PostgreSQL | `AnyQuantity`, `MoneyWire` via `datum-db` | `numeric(24,8)` / `numeric(24,6)`; unit as `bigint`; dimension as text or enum |
+| PostgreSQL | `AnyQuantity`, `MoneyWire` via `wicket-db` | `numeric(24,8)` / `numeric(24,6)`; unit as `bigint`; dimension as text or enum |
 
-`datum-core` does not round; `datum-uom` owns conversion policy; `datum-ledger` owns posting residuals (D1 §4.2–4.3).
+`wicket-core` does not round; `wicket-uom` owns conversion policy; `wicket-ledger` owns posting residuals (D1 §4.2–4.3).
 
 ---
 
@@ -292,33 +292,33 @@ Source: D3 §§1.1–1.3, 2, 4, 5, 6, 8.
 
 | Role | Login | Purpose |
 |---|---|---|
-| `datum_owner` | NO | Owns tables and trigger functions |
-| `datum_migrate` | YES | DDL; member of `datum_owner` |
-| `datum_app` | YES | Application pool; business DML; **`SELECT` only** on `audit.*` |
-| `datum_audit_row` | NO | Owns `audit.row_change()`; column-limited `INSERT` on `audit.event` |
-| `datum_audit_event` | NO | Owns `audit.log_event()`; kernel events without row-change columns |
+| `wicket_owner` | NO | Owns tables and trigger functions |
+| `wicket_migrate` | YES | DDL; member of `wicket_owner` |
+| `wicket_app` | YES | Application pool; business DML; **`SELECT` only** on `audit.*` |
+| `wicket_audit_row` | NO | Owns `audit.row_change()`; column-limited `INSERT` on `audit.event` |
+| `wicket_audit_event` | NO | Owns `audit.log_event()`; kernel events without row-change columns |
 
 ```sql
-CREATE ROLE datum_owner       NOLOGIN;
-CREATE ROLE datum_audit_row   NOLOGIN;
-CREATE ROLE datum_audit_event NOLOGIN;
-CREATE ROLE datum_migrate     LOGIN;
-CREATE ROLE datum_app         LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE;
-GRANT datum_owner TO datum_migrate;
-REVOKE SET ON PARAMETER session_replication_role FROM datum_app;
+CREATE ROLE wicket_owner       NOLOGIN;
+CREATE ROLE wicket_audit_row   NOLOGIN;
+CREATE ROLE wicket_audit_event NOLOGIN;
+CREATE ROLE wicket_migrate     LOGIN;
+CREATE ROLE wicket_app         LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE;
+GRANT wicket_owner TO wicket_migrate;
+REVOKE SET ON PARAMETER session_replication_role FROM wicket_app;
 ```
 
-**Who writes the audit row:** the **`audit.row_change()`** trigger (owner **`datum_audit_row`**), not application code. `datum_app` has no `INSERT` on `audit.event` (D3 §1.3, §3).
+**Who writes the audit row:** the **`audit.row_change()`** trigger (owner **`wicket_audit_row`**), not application code. `wicket_app` has no `INSERT` on `audit.event` (D3 §1.3, §3).
 
 ### 3.2 Schema classes (D-W1-2)
 
-| Class | Contents | `datum_app` |
+| Class | Contents | `wicket_app` |
 |---|---|---|
 | **`app`** | Records with history (audit trigger, or referenced by history-bearing tables) | `SELECT`, `INSERT`, `UPDATE`; **no `DELETE`** |
 | **`transient`** | Sessions, idempotency keys, completed job rows, projection caches — **no audit trigger**, no inbound reference from history-bearing tables | `SELECT`, `INSERT`, `UPDATE`, **`DELETE`** |
 | **`audit`** | Trail | **`SELECT` only** |
 
-`datum_app` holds **`TRUNCATE` nowhere**. **`ON DELETE CASCADE` is banned in every schema**, including `transient` (PLAN §6b item 16 as amended).
+`wicket_app` holds **`TRUNCATE` nowhere**. **`ON DELETE CASCADE` is banned in every schema**, including `transient` (PLAN §6b item 16 as amended).
 
 Default privileges pattern: `_team/reports/DECISION-w1-contracts.md` §2.4 (`dev/sql/02-grants.sql` owned by harness lane).
 
@@ -328,7 +328,7 @@ Partitioned by `at`; columns for time, actor, provenance, business intent (`acti
 
 ### 3.4 Transaction-local actor (D3 §2)
 
-`datum_db::Tx::begin` sets **`datum.*` context with `set_config(..., is_local => true)`** in one statement, including **`datum.txid` = `pg_current_xact_id()`**. `audit.require_context()` fails closed if actor or txid mismatch (`42501`). Read pool never sets actor context.
+`wicket_db::Tx::begin` sets **`wicket.*` context with `set_config(..., is_local => true)`** in one statement, including **`wicket.txid` = `pg_current_xact_id()`**. `audit.require_context()` fails closed if actor or txid mismatch (`42501`). Read pool never sets actor context.
 
 ### 3.5 Time (D3 §4)
 
@@ -340,7 +340,7 @@ Inside the trigger: **`at = now()`** (one time of record per transaction), **`st
 
 ### 3.7 Hash chain (D3 §6)
 
-Per-transaction seal in `audit.tx_seal`; deferred trigger `audit.seal_tx()`; advisory lock on chain head; `prev_hash` / `hash` / `rows_digest` algorithm **`datum-audit-1`**; anchors off-box. Tamper **evidence**, not proof against a superuser (D3 §7).
+Per-transaction seal in `audit.tx_seal`; deferred trigger `audit.seal_tx()`; advisory lock on chain head; `prev_hash` / `hash` / `rows_digest` algorithm **`wicket-audit-1`**; anchors off-box. Tamper **evidence**, not proof against a superuser (D3 §7).
 
 ### 3.8 Automatic attachment (D3 §1.5)
 
@@ -409,15 +409,15 @@ Full numeric matrices: `research/decisions/ledger-invariant.md` §8 table (BAR/S
 
 **Naming.** Tables live in schema **`app`** unless they meet **`transient`** rules (§3.2). Primary keys are **`uuid`** (**UUID v7** via `Identifier::generate()` / `uuid::Uuid` v7). Foreign keys name the referenced table and column explicitly; no `CASCADE`.
 
-**Keys.** Surrogate ids are opaque v7 UUIDs. Regulated **document numbers** come from **`datum-numbering`**, not sequences (§3.9). Lot and serial ids obey §5.
+**Keys.** Surrogate ids are opaque v7 UUIDs. Regulated **document numbers** come from **`wicket-numbering`**, not sequences (§3.9). Lot and serial ids obey §5.
 
-**Migrations (`datum_migrate` only).** May create **`app`** / **`transient`** tables, constraints, indexes, and seed data; must call **`audit.attach`** only indirectly via create-table event trigger (or explicit attach in bootstrap). May **not** grant `datum_app` broader privileges, add `ON DELETE CASCADE`, disable audit machinery, or put audited data in **`transient`**. Every migration has a tested **`.down.sql`**. Raw SQL in modules stays behind the fence (CONTRACT §5a).
+**Migrations (`wicket_migrate` only).** May create **`app`** / **`transient`** tables, constraints, indexes, and seed data; must call **`audit.attach`** only indirectly via create-table event trigger (or explicit attach in bootstrap). May **not** grant `wicket_app` broader privileges, add `ON DELETE CASCADE`, disable audit machinery, or put audited data in **`transient`**. Every migration has a tested **`.down.sql`**. Raw SQL in modules stays behind the fence (CONTRACT §5a).
 
 **Audit for free.** Create table with primary key in **`app`** → **`zz_audit_row`** and truncate trigger attached (D3 §1.5). Exemption requires a migration inserting **`audit.exempt`** with reason. Row changes appear in **`audit.event`** with actor from **`Tx::begin`**, not from module code.
 
-**Ledger.** Modules never write **`ledger.*`** directly except through published kernel APIs (`PostingSink` implemented by `datum-ledger`). One sink per transaction; withdrawals must allocate (CONTRACT §6.2).
+**Ledger.** Modules never write **`ledger.*`** directly except through published kernel APIs (`PostingSink` implemented by `wicket-ledger`). One sink per transaction; withdrawals must allocate (CONTRACT §6.2).
 
-**Quantities and money.** Convert in **`datum-uom`** before building postings; post **`numeric(24,8)`** / **`numeric(24,6)`**; expose API decimals as **strings**.
+**Quantities and money.** Convert in **`wicket-uom`** before building postings; post **`numeric(24,8)`** / **`numeric(24,6)`**; expose API decimals as **strings**.
 
 **Version stamp.** Include **`application_version`** and **`configuration_version`** on every mutable business record in **`app`**.
 
@@ -431,5 +431,5 @@ Full numeric matrices: `research/decisions/ledger-invariant.md` §8 table (BAR/S
 | Why does a group have a kind? | Monotone dispatch + boundary matrix + extra predicates (§1.2) |
 | Where does a quantity rounding residual go? | Balance; **`ADJUSTMENT`** + `ROUNDING` boundary, dust-bounded (§1.8 R4) |
 | Where does a value rounding residual go? | **`ROUNDING` account in the same group** after `Money::settle` (§1.8 R6) |
-| Who writes the audit row? | **`audit.row_change()`** as **`datum_audit_row`** (§3.1) |
+| Who writes the audit row? | **`audit.row_change()`** as **`wicket_audit_row`** (§3.1) |
 | What may a lot id contain? | **`A–Z`, `0–9`, `-`, max 20 chars** (§5) |

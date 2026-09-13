@@ -1,14 +1,15 @@
-# Datum
+# Wicket
 
 Conforms to: [ADR 0003](docs/adr/0003-database.md) (Accepted, as amended), [ADR 0006](docs/adr/0006-license.md) (Accepted).
 
 ## 1. What this is
 
-Datum is an open source ERP for discrete manufacturing. The wedge is a 21 CFR Part 11 electronic signature — no surveyed open source ERP has one (`research/background/competitive-landscape.md` §0.1) — and an append-only ledger of quantity and value, both as kernel properties that a module cannot turn off. Everything else named in the vision (quality workflows, a Device History Record, CAD-native estimating) is a roadmap, not a present product (`docs/01-vision-and-scope.md`).
+Wicket is an open source ERP for discrete manufacturing. The wedge is a 21 CFR Part 11 electronic signature — no surveyed open source ERP has one (`research/background/competitive-landscape.md` §0.1) — and an append-only ledger of quantity and value, both as kernel properties that a module cannot turn off. Everything else named in the vision (quality workflows, a Device History Record, CAD-native estimating) is a roadmap, not a present product (`docs/01-vision-and-scope.md`).
 
 ## 2. Status
 
 Pre-alpha. There is no release. The kernel is being built. See [docs/07-roadmap.md](docs/07-roadmap.md).
+formerly Datum ERP (renamed 2026-09-13; no releases were made under the old name).
 
 ## 3. Who it is for
 
@@ -30,16 +31,16 @@ Half a day of reading. There is no shortcut.
 
 ## 5. Building
 
-Rust **1.98.1** is pinned in `rust-toolchain.toml` (`PLAN.md` §11). PostgreSQL **17** is installed and lifecycle-managed by the operating system; Datum never installs or manages PostgreSQL (`docs/adr/0003-database.md` as amended). You also need `just` and `sqlx-cli` 0.9.0 (`PLAN.md` §11).
+Rust **1.98.1** is pinned in `rust-toolchain.toml` (`PLAN.md` §11). PostgreSQL **17** is installed and lifecycle-managed by the operating system; Wicket never installs or manages PostgreSQL (`docs/adr/0003-database.md` as amended). You also need `just` and `sqlx-cli` 0.9.0 (`PLAN.md` §11).
 
-`just ci` is the local gate: `fmt-check`, `clippy`, `lint-sql`, and `test-lib` (`PLAN.md` §11). Machines with a container runtime can bring up Postgres from `dev/compose.yml` (image `postgres:17`). Machines without one use the OS-managed server on `127.0.0.1:5432`. Datum never installs that server. Run `just db-gc` to drop orphaned `datum_t_*` test databases left behind by killed test runs (default age threshold 60 minutes, override with `DATUM_DB_GC_MIN`).
+`just ci` is the local gate: `fmt-check`, `clippy`, `lint-sql`, and `test-lib` (`PLAN.md` §11). Machines with a container runtime can bring up Postgres from `dev/compose.yml` (image `postgres:17`). Machines without one use the OS-managed server on `127.0.0.1:5432`. Wicket never installs that server. Run `just db-gc` to drop orphaned `wicket_t_*` test databases left behind by killed test runs (default age threshold 60 minutes, override with `WICKET_DB_GC_MIN`).
 
 ## 6. License
 
-Datum is licensed under the GNU Affero General Public License v3.0 or later; see LICENSE. Contributions are accepted under the Developer Certificate of Origin; see CONTRIBUTING.md. Reasoning: [docs/adr/0006-license.md](docs/adr/0006-license.md).
+Wicket is licensed under the GNU Affero General Public License v3.0 or later; see LICENSE. Contributions are accepted under the Developer Certificate of Origin; see CONTRIBUTING.md. Reasoning: [docs/adr/0006-license.md](docs/adr/0006-license.md).
 
 ## 7. Contributing
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before you open a pull request.
 Use `git commit -s` so every commit carries a Developer Certificate of Origin sign-off.
-The public repository is https://github.com/BlinkingSun/datum-erp.
+The public repository is https://github.com/BlinkingSun/wicket-erp.

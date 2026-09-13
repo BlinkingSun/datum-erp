@@ -1,11 +1,11 @@
 //! Work-order entities and operation inputs. No I/O.
 
 use chrono::{DateTime, Utc};
-use datum_core::{AnyQuantity, Identifier, ItemId, LocationId, LotId, Money, SerialId, UnitId};
-use datum_mod_inventory::LineInput;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use wicket_core::{AnyQuantity, Identifier, ItemId, LocationId, LotId, Money, SerialId, UnitId};
+use wicket_mod_inventory::LineInput;
 
 use crate::error::{Error, Result};
 
@@ -208,15 +208,15 @@ pub struct ListFilter {
     pub limit: Option<u32>,
 }
 
-/// Parse a stored dimension token (`Debug` of [`datum_core::DimensionKind`]).
-pub fn dimension_from_sql(s: &str) -> Result<datum_core::DimensionKind> {
+/// Parse a stored dimension token (`Debug` of [`wicket_core::DimensionKind`]).
+pub fn dimension_from_sql(s: &str) -> Result<wicket_core::DimensionKind> {
     match s {
-        "Count" => Ok(datum_core::DimensionKind::Count),
-        "Length" => Ok(datum_core::DimensionKind::Length),
-        "Mass" => Ok(datum_core::DimensionKind::Mass),
-        "Time" => Ok(datum_core::DimensionKind::Time),
-        "Volume" => Ok(datum_core::DimensionKind::Volume),
-        "Area" => Ok(datum_core::DimensionKind::Area),
+        "Count" => Ok(wicket_core::DimensionKind::Count),
+        "Length" => Ok(wicket_core::DimensionKind::Length),
+        "Mass" => Ok(wicket_core::DimensionKind::Mass),
+        "Time" => Ok(wicket_core::DimensionKind::Time),
+        "Volume" => Ok(wicket_core::DimensionKind::Volume),
+        "Area" => Ok(wicket_core::DimensionKind::Area),
         other => Err(Error::Manifest(format!("unknown dimension {other}"))),
     }
 }

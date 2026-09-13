@@ -2,8 +2,8 @@
 
 **Decider:** opus (decision authority, task `erp`, lane `decision-audit-persistence`)
 **Date:** 2026-09-11
-**Status:** Decided. Binding on Wave 1 `workspace`, Wave 2 `datum-db`, `datum-audit`,
-`datum-identity`, `datum-esign`, `datum-numbering`, and on all customer-facing prose.
+**Status:** Decided. Binding on Wave 1 `workspace`, Wave 2 `wicket-db`, `wicket-audit`,
+`wicket-identity`, `wicket-esign`, `wicket-numbering`, and on all customer-facing prose.
 **Inputs:** `_team/reports/sweep-plan-audit-sqlx.md`, `_team/reports/sweep-plan-part11.md`
 §§4.6, 5.1–5.8, `_team/reports/plan-audit.md` §0.3, §0.4, R3, R4, G10, G11, G18, D3, D4,
 `_team/reports/sweep-plan-proptests.md` (one-group-per-transaction), ADR 0003, ADR 0005,
@@ -66,37 +66,37 @@ Five roles. Three of them cannot log in.
 
 | Role | Login | Purpose | Notable privileges |
 |---|---|---|---|
-| `datum_owner` | NOLOGIN | owns every table and every trigger function | no runtime use; `REASSIGN OWNED` target |
-| `datum_migrate` | LOGIN | runs migrations; member of `datum_owner` | DDL, GRANT; **not** the app pool URL |
-| `datum_app` | LOGIN | the application pool | `SELECT, INSERT, UPDATE, DELETE` on business tables; **`SELECT` only** on `audit.*`; no `TRUNCATE`, no `TRIGGER`, no `SET session_replication_role` |
-| `datum_audit_row` | NOLOGIN | owns `audit.row_change()`; the only writer of row-change columns | column-restricted `INSERT` on `audit.event` |
-| `datum_audit_event` | NOLOGIN | owns `audit.log_event()`; writes kernel events (login, export, print, signature, security) | column-restricted `INSERT` on `audit.event`, **no** access to `op` / `old_row` / `new_row` / `table_name` |
+| `wicket_owner` | NOLOGIN | owns every table and every trigger function | no runtime use; `REASSIGN OWNED` target |
+| `wicket_migrate` | LOGIN | runs migrations; member of `wicket_owner` | DDL, GRANT; **not** the app pool URL |
+| `wicket_app` | LOGIN | the application pool | `SELECT, INSERT, UPDATE, DELETE` on business tables; **`SELECT` only** on `audit.*`; no `TRUNCATE`, no `TRIGGER`, no `SET session_replication_role` |
+| `wicket_audit_row` | NOLOGIN | owns `audit.row_change()`; the only writer of row-change columns | column-restricted `INSERT` on `audit.event` |
+| `wicket_audit_event` | NOLOGIN | owns `audit.log_event()`; writes kernel events (login, export, print, signature, security) | column-restricted `INSERT` on `audit.event`, **no** access to `op` / `old_row` / `new_row` / `table_name` |
 
-`datum_audit_row` and `datum_audit_event` are deliberately **not** the table owner, so a
+`wicket_audit_row` and `wicket_audit_event` are deliberately **not** the table owner, so a
 bug in a `SECURITY DEFINER` function is an insert bug and never a rewrite-history bug.
 Two writer roles rather than one, because PostgreSQL column-level `INSERT` grants let us
 make "the kernel event path physically cannot fabricate a row change" a privilege fact
 rather than a code review.
 
 ```sql
-CREATE ROLE datum_owner       NOLOGIN;
-CREATE ROLE datum_audit_row   NOLOGIN;
-CREATE ROLE datum_audit_event NOLOGIN;
-CREATE ROLE datum_migrate     LOGIN;
-CREATE ROLE datum_app         LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE;
-GRANT datum_owner TO datum_migrate;
-REVOKE SET ON PARAMETER session_replication_role FROM datum_app;  -- PG 15+
+CREATE ROLE wicket_owner       NOLOGIN;
+CREATE ROLE wicket_audit_row   NOLOGIN;
+CREATE ROLE wicket_audit_event NOLOGIN;
+CREATE ROLE wicket_migrate     LOGIN;
+CREATE ROLE wicket_app         LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE;
+GRANT wicket_owner TO wicket_migrate;
+REVOKE SET ON PARAMETER session_replication_role FROM wicket_app;  -- PG 15+
 ```
 
-Two connection URLs. `DATUM_DATABASE_URL` (`datum_app`) and
-`DATUM_MIGRATE_DATABASE_URL` (`datum_migrate`). Wave 1 ships both, plus
+Two connection URLs. `WICKET_DATABASE_URL` (`wicket_app`) and
+`WICKET_MIGRATE_DATABASE_URL` (`wicket_migrate`). Wave 1 ships both, plus
 `dev/init-roles.sql`, or invariant 3 is untestable and every Wave 2 test will be written
 against a superuser and prove nothing.
 
 ### 1.2 The table
 
 ```sql
-CREATE SCHEMA audit AUTHORIZATION datum_owner;
+CREATE SCHEMA audit AUTHORIZATION wicket_owner;
 
 CREATE TABLE audit.event (
   event_id        uuid        NOT NULL DEFAULT gen_random_uuid(),
@@ -151,12 +151,12 @@ id would put permanent unexplainable gaps in the audit trail itself.
 
 ```sql
 REVOKE ALL ON audit.event FROM PUBLIC;
-GRANT SELECT ON audit.event TO datum_app;                  -- SELECT, and nothing else
-GRANT INSERT ON audit.event TO datum_audit_row;
+GRANT SELECT ON audit.event TO wicket_app;                  -- SELECT, and nothing else
+GRANT INSERT ON audit.event TO wicket_audit_row;
 GRANT INSERT (event_id, at, stmt_at, xid, actor_id, actor_kind, actor_display,
               acting_for_id, session_id, request_id, source_kind, source_device_id,
               source_ip, client_app, action, reason, doc_type, doc_id, esign_id)
-      ON audit.event TO datum_audit_event;                 -- no op/old_row/new_row/table
+      ON audit.event TO wicket_audit_event;                 -- no op/old_row/new_row/table
 ```
 
 No role holds `UPDATE`, `DELETE`, or `TRUNCATE` on `audit.event`. Not the app role, not
@@ -190,7 +190,7 @@ BEGIN
   END IF;
 
   IF ctx.reason IS NULL AND audit.reason_required(TG_RELID, TG_OP) THEN
-    RAISE EXCEPTION 'datum: % on %.% requires a reason for change',
+    RAISE EXCEPTION 'wicket: % on %.% requires a reason for change',
       TG_OP, TG_TABLE_SCHEMA, TG_TABLE_NAME USING ERRCODE = '42501';
   END IF;
 
@@ -211,13 +211,13 @@ BEGIN
     old_j, new_j, changed);
   RETURN NULL;
 END $$;
-ALTER FUNCTION audit.row_change() OWNER TO datum_audit_row;
+ALTER FUNCTION audit.row_change() OWNER TO wicket_audit_row;
 ```
 
 `audit.scrub(regclass, jsonb)` removes columns listed in
 `audit.redact(relid, column, reason, decided_by)` and substitutes `"[redacted]"`. This
 exists because `to_jsonb(NEW)` on `identity.principal` would otherwise copy every password
-hash into a table that is retained for eight years and readable by `datum_app`. Large
+hash into a table that is retained for eight years and readable by `wicket_app`. Large
 `bytea` columns are redacted the same way; document payloads are stored by content hash
 and the audit row carries the hash, not the blob.
 
@@ -228,7 +228,7 @@ it:
 CREATE FUNCTION audit.stmt_truncate() RETURNS trigger ...  -- writes op='TRUNCATE'
 ```
 
-`datum_app` is not granted `TRUNCATE` on anything, so in practice this trigger exists to
+`wicket_app` is not granted `TRUNCATE` on anything, so in practice this trigger exists to
 catch the owner and to make the trail complete rather than to permit the operation.
 
 ### 1.5 Attachment — why a module author gets audit for free
@@ -246,7 +246,7 @@ BEGIN
    WHERE i.indrelid = rel AND i.indisprimary;
 
   IF pk IS NULL THEN
-    RAISE EXCEPTION 'datum: % has no primary key; an audited table must be addressable', rel;
+    RAISE EXCEPTION 'wicket: % has no primary key; an audited table must be addressable', rel;
   END IF;
 
   EXECUTE format(
@@ -280,7 +280,7 @@ reflects the row as other triggers left it.
 
 `audit.exempt(relid, reason, decided_by, decided_at)` is the implementation of ADR 0005's
 "a table may be declared non-audited, and that declaration is itself a reviewed, recorded
-decision." Rows are written by a migration, in a transaction, as `datum_migrate`, and
+decision." Rows are written by a migration, in a transaction, as `wicket_migrate`, and
 `audit.exempt` is itself audited — so exempting a table is a permanent, attributable
 record. Exemptions in this build: `numbering.counter` (§8), `audit.tx_seal`, and
 `audit.anchor` (§6), each with its reason in the row.
@@ -320,7 +320,7 @@ guarantee, and neither may be described as one.
 ## 2. How the actor reaches the trigger, and the pool discipline
 
 This is the bug the audit slice warned about, and it is worth being blunt: a session-level
-`SET datum.actor_id = '...'` survives `COMMIT`, SQLx does not reset session state when a
+`SET wicket.actor_id = '...'` survives `COMMIT`, SQLx does not reset session state when a
 connection returns to the pool, and the next HTTP request to acquire that connection would
 be attributed to the previous operator. In a regulated system that is not a bug, it is a
 falsified record. Three independent mechanisms prevent it, and a fourth detects it.
@@ -328,7 +328,7 @@ falsified record. Three independent mechanisms prevent it, and a fourth detects 
 ### 2.1 Transaction-local only, in one statement, from Rust
 
 ```rust
-// datum-db — the only legal write surface in the workspace
+// wicket-db — the only legal write surface in the workspace
 pub struct WritePool(PgPool);          // no Deref, no as_pool(), no into_inner()
 pub struct Tx<'c> { inner: Transaction<'c, Postgres> }
 
@@ -336,22 +336,22 @@ impl Tx<'_> {
     pub async fn begin(pool: &WritePool, ctx: &WriteContext) -> Result<Tx<'_>> {
         let mut inner = pool.0.begin().await?;                     // BEGIN
         sqlx::query!(
-            r#"SELECT pg_catalog.set_config('datum.actor_id',      $1, true),
-                      pg_catalog.set_config('datum.actor_kind',    $2, true),
-                      pg_catalog.set_config('datum.actor_display', $3, true),
-                      pg_catalog.set_config('datum.acting_for',    $4, true),
-                      pg_catalog.set_config('datum.session_id',    $5, true),
-                      pg_catalog.set_config('datum.request_id',    $6, true),
-                      pg_catalog.set_config('datum.source_kind',   $7, true),
-                      pg_catalog.set_config('datum.source_device', $8, true),
-                      pg_catalog.set_config('datum.source_ip',     $9, true),
-                      pg_catalog.set_config('datum.client_app',   $10, true),
-                      pg_catalog.set_config('datum.action',       $11, true),
-                      pg_catalog.set_config('datum.reason',       $12, true),
-                      pg_catalog.set_config('datum.doc_type',     $13, true),
-                      pg_catalog.set_config('datum.doc_id',       $14, true),
-                      pg_catalog.set_config('datum.esign_id',     $15, true),
-                      pg_catalog.set_config('datum.txid',
+            r#"SELECT pg_catalog.set_config('wicket.actor_id',      $1, true),
+                      pg_catalog.set_config('wicket.actor_kind',    $2, true),
+                      pg_catalog.set_config('wicket.actor_display', $3, true),
+                      pg_catalog.set_config('wicket.acting_for',    $4, true),
+                      pg_catalog.set_config('wicket.session_id',    $5, true),
+                      pg_catalog.set_config('wicket.request_id',    $6, true),
+                      pg_catalog.set_config('wicket.source_kind',   $7, true),
+                      pg_catalog.set_config('wicket.source_device', $8, true),
+                      pg_catalog.set_config('wicket.source_ip',     $9, true),
+                      pg_catalog.set_config('wicket.client_app',   $10, true),
+                      pg_catalog.set_config('wicket.action',       $11, true),
+                      pg_catalog.set_config('wicket.reason',       $12, true),
+                      pg_catalog.set_config('wicket.doc_type',     $13, true),
+                      pg_catalog.set_config('wicket.doc_id',       $14, true),
+                      pg_catalog.set_config('wicket.esign_id',     $15, true),
+                      pg_catalog.set_config('wicket.txid',
                           pg_catalog.pg_current_xact_id()::text,      true)"#,
             /* ... */
         ).execute(&mut *inner).await?;
@@ -366,7 +366,7 @@ Five details that are decisions, not style:
    semantics: PostgreSQL itself reverts the value at `COMMIT` or `ROLLBACK`. The value
    therefore cannot outlive the transaction and cannot still be set when the connection
    returns to the pool. This is the guarantee; everything else in this section is defence
-   in depth. Session-level `SET` of any `datum.*` name is forbidden anywhere in the
+   in depth. Session-level `SET` of any `wicket.*` name is forbidden anywhere in the
    workspace and is on the CI deny-list.
 2. **`set_config`, not `SET LOCAL`.** `SET LOCAL name = $1` is a syntax error — `SET` does
    not take bind parameters. People will try it, discover it fails, and reach for string
@@ -378,10 +378,10 @@ Five details that are decisions, not style:
    function exit**. A context-setting helper is exactly the function that most wants a
    pinned `search_path`, so the two requirements are in direct conflict. Issuing the
    statement from Rust avoids the trap entirely.
-5. **`datum.txid` is captured.** See §2.3.
+5. **`wicket.txid` is captured.** See §2.3.
 
 `WriteContext` cannot be constructed from strings by module code. It is built from an
-`&Authenticated` produced by `datum-identity`'s session verification, or from
+`&Authenticated` produced by `wicket-identity`'s session verification, or from
 `Actor::service(ServicePrincipal::Jobs)` and friends, whose constructors are
 crate-private. A module cannot name an actor it did not authenticate.
 
@@ -395,7 +395,7 @@ read paths.
 PgPoolOptions::new()
     .after_connect(|c, _| Box::pin(async move {
         sqlx::raw_sql("SET timezone = 'UTC'; \
-                       SET application_name = 'datum'; \
+                       SET application_name = 'wicket'; \
                        SET idle_in_transaction_session_timeout = '15s'")
             .execute(c).await?;
         Ok(())
@@ -428,29 +428,29 @@ CREATE FUNCTION audit.require_context() RETURNS audit.context
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE c audit.context;
 BEGIN
-  c.actor_id := nullif(current_setting('datum.actor_id', true), '')::uuid;
+  c.actor_id := nullif(current_setting('wicket.actor_id', true), '')::uuid;
   -- ... remaining fields, each via current_setting(name, true) ...
 
   IF c.actor_id IS NULL THEN
-    RAISE EXCEPTION 'datum: refused write with no attributable actor'
+    RAISE EXCEPTION 'wicket: refused write with no attributable actor'
       USING ERRCODE = '42501',
-            HINT = 'begin the transaction through datum_db::Tx::begin';
+            HINT = 'begin the transaction through wicket_db::Tx::begin';
   END IF;
 
-  IF nullif(current_setting('datum.txid', true), '')::xid8
+  IF nullif(current_setting('wicket.txid', true), '')::xid8
        IS DISTINCT FROM pg_current_xact_id() THEN
-    RAISE EXCEPTION 'datum: refused write with context from another transaction'
+    RAISE EXCEPTION 'wicket: refused write with context from another transaction'
       USING ERRCODE = '42501';
   END IF;
 
   IF c.action IS NULL OR c.source_kind IS NULL THEN
-    RAISE EXCEPTION 'datum: refused write with no declared action' USING ERRCODE = '42501';
+    RAISE EXCEPTION 'wicket: refused write with no declared action' USING ERRCODE = '42501';
   END IF;
   RETURN c;
 END $$;
 ```
 
-The `datum.txid` comparison is the mechanical answer to pool leakage. Context is valid only
+The `wicket.txid` comparison is the mechanical answer to pool leakage. Context is valid only
 for the transaction that set it. If a session-level `SET` ever leaked into a pooled
 connection — through a future code path, a `psql` session, a pooler misconfiguration, or a
 mistake nobody has made yet — the leaked value belongs to a transaction id that is no
@@ -473,27 +473,27 @@ represented in the schema, let alone written.
   `AFTER` trigger, which aborts the whole transaction. The business write does not happen.
   There is no partial state, because the audit insert and the business write are the same
   transaction by construction.
-- **The refusal is itself recorded.** `datum-db` maps `42501` from
+- **The refusal is itself recorded.** `wicket-db` maps `42501` from
   `audit.require_context()` to an internal error and, on a **separate connection and
   separate transaction** (the original is doomed), calls `audit.log_event()` to record a
   `security.unattributable_write` event with the request id, the source, and the SQLSTATE.
   A fail-closed abort that leaves no trace is an operational mystery; one that leaves a
   security event is a bug report.
 
-Background jobs are not an exception. `datum-jobs` opens transactions through
+Background jobs are not an exception. `wicket-jobs` opens transactions through
 `Tx::begin(WriteContext::service(ServicePrincipal::Jobs, action))`, and a job that forgets
-dies fail-closed on its first write. This requires `Actor`/`WriteContext` in `datum-core`
-and `Tx` in `datum-db`, which is how `datum-jobs` gets attribution without an edge to
-`datum-identity` or `datum-audit` (the crate-graph gap flagged in plan-audit R5).
+dies fail-closed on its first write. This requires `Actor`/`WriteContext` in `wicket-core`
+and `Tx` in `wicket-db`, which is how `wicket-jobs` gets attribution without an edge to
+`wicket-identity` or `wicket-audit` (the crate-graph gap flagged in plan-audit R5).
 
 ### 2.5 The residual: in-process code can name another real actor
 
-`datum_app` can call `set_config('datum.actor_id', '<some other real user>', true)`. The
+`wicket_app` can call `set_config('wicket.actor_id', '<some other real user>', true)`. The
 trigger trusts the setting, and the foreign key only proves the principal exists.
 Mitigations are the sealed `WriteContext` and a CI deny-list (`clippy.toml`
 `disallowed-macros` / `disallowed-methods`, plus an `rg` gate) forbidding `sqlx::query*`,
 `QueryBuilder`, `raw_sql`, `copy_in_raw`, `set_config`, and `current_setting` outside
-`datum-db` and `datum-audit`. Those are process controls, and process controls are exactly
+`wicket-db` and `wicket-audit`. Those are process controls, and process controls are exactly
 what ADR 0005 rejects as a guarantee.
 
 So state it plainly: **in-process application code is inside the trust boundary.** The
@@ -507,11 +507,11 @@ connection. §7 does not claim otherwise.
 
 ## 3. Does the application role keep `INSERT` on `audit.event`?
 
-**No. Revoked. `datum_app` holds `SELECT` and nothing else.** This overturns the ADR 0005
+**No. Revoked. `wicket_app` holds `SELECT` and nothing else.** This overturns the ADR 0005
 sentence "the application role has insert and select."
 
 The reasoning is short. "A module author cannot write a false audit row" is either a
-privilege or a wish. If `datum_app` holds `INSERT`, any module, any handler, and any future
+privilege or a wish. If `wicket_app` holds `INSERT`, any module, any handler, and any future
 contributor can write an audit row describing a change that never happened, or describing
 it as someone else, with a timestamp of their choosing. No lint prevents it, because the
 statement is indistinguishable from a legitimate one. With `INSERT` revoked, the attempt
@@ -524,26 +524,26 @@ What it costs, honestly:
    change: successful and failed logins, permission denials, exports, prints, signature
    executions, clock changes, and the unattributable-write refusal of §2.4 are all events
    with no OLD and NEW. `audit.log_event(kind, action, reason, doc_type, doc_id, esign_id,
-   detail)` is `SECURITY DEFINER`, owned by `datum_audit_event`, `EXECUTE` granted only to
-   `datum_app`, `REVOKE ... FROM PUBLIC`, `search_path` pinned, no dynamic SQL. It stamps
+   detail)` is `SECURITY DEFINER`, owned by `wicket_audit_event`, `EXECUTE` granted only to
+   `wicket_app`, `REVOKE ... FROM PUBLIC`, `search_path` pinned, no dynamic SQL. It stamps
    `at` / `stmt_at` / `xid` from the server and actor from the transaction-local context —
    the caller supplies intent and cannot supply identity or time. `kind` is constrained to
-   a kernel enum and the free-text action is namespaced by it. Because `datum_audit_event`
+   a kernel enum and the free-text action is namespaced by it. Because `wicket_audit_event`
    holds only column-level `INSERT`, this path **physically cannot** write `op`,
    `table_name`, `old_row`, or `new_row`: a forged row change is a privilege error, and the
    `event_shape` CHECK rejects the reverse confusion too.
 2. **`SECURITY DEFINER` is a privilege-escalation surface and must be reviewed as one.**
    Pinned `search_path`, `REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA audit FROM PUBLIC`,
    explicit grants, and no `EXECUTE format()` on caller-supplied text except in
-   `audit.attach`, which runs as `datum_owner` only during DDL. The definer roles are not
+   `audit.attach`, which runs as `wicket_owner` only during DDL. The definer roles are not
    the table owner and hold no `UPDATE`/`DELETE`, so the blast radius of a bug in any of
    these functions is "wrote an audit row it should not have," never "erased one."
 3. **Test and fixture ergonomics.** Fixtures cannot bulk-insert audit rows to set up a
    scenario. They must write through `Tx::begin(Actor::test(...))`, which is better —
    fixtures then exercise the real trail — but it is more typing. Restore and data import
-   run as `datum_migrate`, not as the app.
+   run as `wicket_migrate`, not as the app.
 4. **Diagnostics.** A developer who fumbles the setup gets `permission denied` rather than
-   a silent no-op, which is the correct trade and needs a good error message in `datum-db`.
+   a silent no-op, which is the correct trade and needs a good error message in `wicket-db`.
 
 Not a cost: performance. The trigger insert is in the same transaction and the definer
 switch is negligible at shop volume.
@@ -588,7 +588,7 @@ believed. A hash chain does not fix this — a backdated row hashes perfectly. 2
 11.10(e) requires "time-stamped," not "traceable to UTC via authenticated NTP," so this is
 compliant; it is simply not what "server-authoritative time" sounds like. Therefore
 `docs/06` must state that the time source is the host clock, that clock administration is a
-customer SOP, and that Datum records clock changes it can observe (`audit.log_event` on
+customer SOP, and that Wicket records clock changes it can observe (`audit.log_event` on
 detected backward jumps between statements). "Server-side time" is never marketed as a
 substitute for trusted time. That is a `docs/06` obligation flagged in §11, not a file this
 decision edits.
@@ -631,24 +631,24 @@ write. With it, it is one indexed predicate.
 electronic form.** One command produces both forms from one query and one snapshot:
 
 ```
-datum audit export --doc work_order:WO-2026-0417 --from 2026-01-01 --to 2034-01-01
+wicket audit export --doc work_order:WO-2026-0417 --from 2026-01-01 --to 2034-01-01
 ```
 
 emits a single directory or zip bundle:
 
 | Member | Form | Purpose |
 |---|---|---|
-| `manifest.json` | electronic | `export_id`, `export_schema_version`, Datum version, PostgreSQL version, query predicate, row count, seal range, per-file SHA-256, generated-at, exporting actor |
+| `manifest.json` | electronic | `export_id`, `export_schema_version`, Wicket version, PostgreSQL version, query predicate, row count, seal range, per-file SHA-256, generated-at, exporting actor |
 | `events.ndjson` | electronic | one JSON object per audit event, all columns, including `old_row` / `new_row` |
 | `events.csv` | electronic | flat columns for inspectors who use a spreadsheet; `old_row` / `new_row` as canonical JSON text |
 | `seals.ndjson` | electronic | every `audit.tx_seal` covering the range, plus the anchors that cover those seals |
-| `dictionary.md` | human-readable | column meanings, enum values, and the canonicalisation rule, so the bundle is self-describing without Datum |
+| `dictionary.md` | human-readable | column meanings, enum values, and the canonicalisation rule, so the bundle is self-describing without Wicket |
 | `report.pdf` | human-readable | PDF/A, one section per event: local and UTC time, actor display and id, action, reason, document, device, and a before/after table of changed columns only; signature manifestations per 11.50(b) where `esign_id` is set; a verification page stating the seal range, head hash, anchor status, and the exact command to re-verify |
 
 Both forms carry the same `export_id` and the same file digests, so the paper copy and the
 electronic copy are provably the same set of records — which is what "complete and accurate
 copies" means when an investigator holds one and audits the other. The bundle is readable
-with no Datum installation and no database: this is the Annex 11 §17 answer to "still
+with no Wicket installation and no database: this is the Annex 11 §17 answer to "still
 accessible and readable after equipment or program changes," and it is why the export
 format is versioned and frozen rather than being a `pg_dump`. A `pg_dump` is neither
 human-readable nor readable after a breaking schema change, and is not an acceptable answer
@@ -656,7 +656,7 @@ to 11.10(b).
 
 Retention: partitions are never dropped. Archival detaches a monthly partition and stores
 it with the seals and anchors covering it; the archive is itself an export bundle, so a
-restored archive can be verified off-box by the same tool. `datum-audit` owns the exporter;
+restored archive can be verified off-box by the same tool. `wicket-audit` owns the exporter;
 `report.pdf` is rendered by the print primitive, which is why the missing print crate
 (plan-audit G8) blocks this deliverable and is flagged in §11.
 
@@ -695,7 +695,7 @@ CREATE TABLE audit.tx_seal (
   rows_digest bytea       NOT NULL,       -- sha256 over the tx's canonical rows
   prev_hash   bytea       NOT NULL UNIQUE,
   hash        bytea       NOT NULL UNIQUE,
-  chain_algo  text        NOT NULL        -- 'datum-audit-1'
+  chain_algo  text        NOT NULL        -- 'wicket-audit-1'
 );
 ```
 
@@ -713,7 +713,7 @@ hash        = sha256( prev_hash || seq::text || xid::text || to_char(sealed_at, 
 
 `audit.canon_jsonb` is ours, not PostgreSQL's `jsonb::text`: keys sorted lexicographically,
 no insignificant whitespace, numbers rendered as their text form, recursive. It is frozen
-and versioned by `chain_algo`, so a future `datum-audit-2` verifies new ranges by new rules
+and versioned by `chain_algo`, so a future `wicket-audit-2` verifies new ranges by new rules
 and old ranges by old ones. Betting that a PostgreSQL major version's `jsonb` text output
 is byte-stable for eight years is not a bet we are making.
 
@@ -739,7 +739,7 @@ never `nextval()`, which would leave permanent gaps on rollback (§8). `UNIQUE` 
 `prev_hash`, and `hash` turns any residual race — including a `REPEATABLE READ` or
 `SERIALIZABLE` transaction whose snapshot hides a concurrent seal — into a loud constraint
 violation rather than a silent fork. Write transactions run `READ COMMITTED` by default;
-the rare serialisation failure is retried by `datum-db`.
+the rare serialisation failure is retried by `wicket-db`.
 
 `audit.tx_seal` and `audit.anchor` are in `audit.exempt` — auditing the audit chain is a
 recursion with no evidentiary value, and their integrity is the chain itself.
@@ -759,12 +759,12 @@ it proves nothing. So:
 **Anchors.** A nightly job writes the chain head as a short, human-transcribable record:
 
 ```
-datum audit anchor
+wicket audit anchor
   seq        1284013
   head       9f2c 41a7 8b03 5de6 1c88 0f45 a2b9 7e10 ...
   sealed_at  2026-09-11T03:00:07Z
   rows       4118902
-  version    datum 1.0.3 / datum-audit-1
+  version    wicket 1.0.3 / wicket-audit-1
 ```
 
 **Where it goes off the box** — the customer picks at least one at install time, and the IQ
@@ -780,12 +780,12 @@ suite refuses to pass with none configured:
 
 **Who runs the verification, and when.** The customer's quality manager, as the periodic
 audit-trail review that Annex 11 §9 already requires them to perform. The mechanical step
-is: run `datum audit export`, carry the bundle to a **different computer**, and run
-`datum-verify` — a small standalone binary that needs no database and no Datum install. It
+is: run `wicket audit export`, carry the bundle to a **different computer**, and run
+`wicket-verify` — a small standalone binary that needs no database and no Wicket install. It
 recomputes the chain from the bundle's rows and compares the head against the anchors
 recorded off the box at the time. A head that matches a two-year-old anchor written in the
 QA logbook is evidence that the covered history has not been rewritten since, and that
-evidence does not depend on trusting the server, the cluster owner, or us. Datum ships the
+evidence does not depend on trusting the server, the cluster owner, or us. Wicket ships the
 procedure as a one-page SOP in the validation pack and a named test in the IQ suite, and the
 application health page warns when the last confirmed off-box anchor is older than the
 configured interval — default seven days — because an anchor procedure nobody performs is
@@ -797,7 +797,7 @@ marketing. If a customer wants signed anchors, the key is theirs and lives off t
 
 ### 6.3 What the chain actually buys
 
-| Control | Stops `datum_app` | Stops owner at `psql` | Stops a doctored restore | Stops editing files in `PGDATA` |
+| Control | Stops `wicket_app` | Stops owner at `psql` | Stops a doctored restore | Stops editing files in `PGDATA` |
 |---|---|---|---|---|
 | No `INSERT` / `UPDATE` / `DELETE` grant | yes | no | no | no |
 | `BEFORE UPDATE/DELETE` raise + `audit_protect` | yes | until disabled | no | no |
@@ -814,13 +814,13 @@ That distinction is the whole of §7.
 This is the wording the project uses — in `docs/01`, `docs/02`, `docs/06`, the sales site,
 and the validation pack — and it is the wording a customer can repeat to an investigator.
 
-> **Every change to a regulated record in Datum is written to the audit trail by the
+> **Every change to a regulated record in Wicket is written to the audit trail by the
 > database itself, inside the same transaction as the change, with the operator's identity,
 > the server time, the prior and new values, and the reason where one is required; a write
 > that cannot be attributed to an authenticated operator is refused rather than recorded as
 > unknown. The application — including any module, and including a defective one — can read
 > the audit trail but cannot insert, alter, or delete an entry: that is enforced by database
-> privileges, not by application code. Datum does not claim the trail cannot be altered by
+> privileges, not by application code. Wicket does not claim the trail cannot be altered by
 > someone with administrative control of the database server itself; instead, each
 > transaction is sealed into a hash chain whose head is published off the server on a
 > schedule you control, so that any later alteration of stored history is detectable by
@@ -897,7 +897,7 @@ Throughput is one allocation at a time per document type per transaction. At a 3
 shop that is not a constraint, and where it ever becomes one, the answer is a coarser period
 key, not a sequence.
 
-`datum-numbering` currently has no stated algorithm in PLAN (plan-audit G16). This section is
+`wicket-numbering` currently has no stated algorithm in PLAN (plan-audit G16). This section is
 the algorithm. It also wants a PLAN §6 invariant of its own, whose exact text is in §11 —
 this decision's edit permission covers invariants 3 through 5 only, so the sentence is
 proposed rather than written.
@@ -906,7 +906,7 @@ proposed rather than written.
 
 ## 9. Electronic signature under 21 CFR 11.200
 
-**Confirmed, not overturned: every signing requires all identification components. Datum
+**Confirmed, not overturned: every signing requires all identification components. Wicket
 does not implement the 11.200(a)(1)(i) continuous-session relaxation in v1.**
 
 11.200(a)(1) requires at least two distinct identification components. Clause (i) permits
@@ -932,14 +932,14 @@ Reasons to take the conservative default:
    signing. The conservative default makes that sentence literally true instead of
    approximately true.
 
-Consequences for `datum-esign` and `datum-identity`: signing always prompts for the
+Consequences for `wicket-esign` and `wicket-identity`: signing always prompts for the
 identification code and password, or an IdP step-up for OIDC shops (SSO does not make a shop
 Part 11-complete, and the step-up is required); a signature records the signer, the server
 time, the printed meaning of the signature, and the hash of the exact record version signed;
 the signature's `esign_id` appears on the audit rows of the transaction it authorised; failed
 signing attempts are `audit.log_event` security events; and an administrator-initiated
 credential reset must not let one person alone assume another's identity, which is
-11.200(a)(3) and a `datum-identity` acceptance criterion. Biometrics are out of scope and no
+11.200(a)(3) and a `wicket-identity` acceptance criterion. Biometrics are out of scope and no
 placeholder column for them is created.
 
 ---
@@ -948,13 +948,13 @@ placeholder column for them is created.
 
 | # | Situation | What happens, mechanically | Where it is proven |
 |---|---|---|---|
-| **a** | Module author writes a normal `INSERT` and forgets audit entirely | `zz_audit_row` fires; `audit.require_context()` reads the transaction-local context `Tx::begin` set; a complete audit row is written in the same transaction with server time, actor, `new_row`, action, and document. The author wrote nothing and could not have prevented it. If the table came from their own migration, the `audit_attach` event trigger attached the triggers at `CREATE TABLE` — including for tables nobody has written yet | `datum-audit`: insert into a fresh table created inside the test migration, assert one audit row with the right `row_key` and `changed_columns` |
-| **b** | Module author deliberately tries to write a false audit row | `INSERT INTO audit.event ...` as `datum_app` → `42501 permission denied for table event`. Through `audit.log_event`, the column-level grant on `datum_audit_event` makes `op`, `table_name`, `old_row`, `new_row` unwritable and the `event_shape` CHECK rejects the attempt, while `actor_id`, `at`, `stmt_at`, and `xid` are stamped by the server from context the caller cannot borrow from another transaction. `UPDATE` / `DELETE` on `audit.event` → `42501`. Residual: in-process code can name another *real* authenticated principal (§2.5), which is inside the trust boundary and is not claimed against | `datum-audit`: four negative tests, each asserting SQLSTATE `42501` |
-| **c** | Request arrives with no authenticated actor | No `Authenticated`, so no `WriteContext`, so no `Tx::begin`: the handler returns 401 and no transaction opens. If a write reaches PostgreSQL anyway, `audit.require_context()` raises `42501` in the `AFTER` trigger and the **entire transaction aborts** — the business row is not written, and nothing is recorded as "unknown," which `actor_id NOT NULL REFERENCES identity.principal` makes unrepresentable. A `security.unattributable_write` event is logged on a separate connection | `datum-db`: write on a raw pool connection without context, assert abort and that the target table is unchanged |
-| **d** | Two requests reuse the same pooled connection back to back | Request 1's context was set with `set_config(..., true)`, so PostgreSQL discards it at `COMMIT`; `after_release` additionally runs `RESET ALL` and discards the connection if that fails. Request 2's `Tx::begin` sets its own. If any future path leaked a session-level value, `datum.txid` would not equal `pg_current_xact_id()` and request 2's first write would be **refused**, never misattributed | `datum-db`: pool with `max_connections = 1`, two sequential writes by different actors, assert two audit rows with the correct distinct actors; plus a test that sets a session-level `datum.actor_id` by hand and asserts the next write fails |
-| **e** | Someone with database superuser access edits a historical audit row | Grants do not stop them and `audit_protect` can be disabled by them. The edited row's transaction no longer reproduces its seal's `rows_digest`, so `audit.verify` fails at that `seq`. To hide it they must re-seal that transaction and, because each `hash` includes `prev_hash`, every seal after it — which changes the chain head. The head then disagrees with the off-box anchor recorded before the edit, and `datum-verify` on a separate machine localises the divergence to "after anchor N." Uncovered case, stated plainly: history written since the last off-box anchor, or a site that configured no anchor sink, is not detectable — which is why the IQ suite fails with no sink configured and the health page nags when anchors go stale | `datum-audit`: tamper test as owner, assert `audit.verify` fails at the expected `seq`; re-seal test, assert the head diverges from a stored anchor |
-| **f** | Transaction rolls back after consuming a document number | Nothing was consumed. The number came from `UPDATE numbering.counter ... RETURNING`, which rolls back with the transaction; the next allocation returns the same value. No audit row exists for the failed attempt, which is correct — Part 11 audits changes to records, not attempts — and a failed *signing* or a permission denial is separately recorded as a security event on its own connection. The seal chain has no gap either: `seq` is `prev.seq + 1` taken under a transaction-scoped advisory lock, so an aborted transaction leaves the head where it was | `datum-numbering`: abort-then-reallocate test; concurrent allocation test asserting a contiguous committed set. `datum-audit`: abort test asserting no seal and an unchanged head |
-| **g** | Investigator asks for every change to one work order, readable and electronic, eight years later | `datum audit export --doc work_order:<id>` selects on `(doc_type, doc_id)` across the monthly partitions — including archived ones, restored as export bundles — and emits one bundle containing `events.ndjson`, `events.csv`, `seals.ndjson`, `manifest.json`, `dictionary.md`, and `report.pdf`. The PDF is the human-readable copy, with actor display names as of each change, local and UTC times, reasons, changed-column before/after tables, and 11.50(b) signature manifestations where a signature is linked. Both forms carry the same `export_id` and file digests, so the paper and electronic copies are provably the same records. The bundle is self-describing and readable with no Datum install, which is the answer to reading it after a program change; the seals and anchors travel with it, so the investigator's own verification runs off the box | `datum-audit`: golden-bundle test on a seeded work order, digest-stability test, and an IQ-suite named test that exports, verifies, and renders |
+| **a** | Module author writes a normal `INSERT` and forgets audit entirely | `zz_audit_row` fires; `audit.require_context()` reads the transaction-local context `Tx::begin` set; a complete audit row is written in the same transaction with server time, actor, `new_row`, action, and document. The author wrote nothing and could not have prevented it. If the table came from their own migration, the `audit_attach` event trigger attached the triggers at `CREATE TABLE` — including for tables nobody has written yet | `wicket-audit`: insert into a fresh table created inside the test migration, assert one audit row with the right `row_key` and `changed_columns` |
+| **b** | Module author deliberately tries to write a false audit row | `INSERT INTO audit.event ...` as `wicket_app` → `42501 permission denied for table event`. Through `audit.log_event`, the column-level grant on `wicket_audit_event` makes `op`, `table_name`, `old_row`, `new_row` unwritable and the `event_shape` CHECK rejects the attempt, while `actor_id`, `at`, `stmt_at`, and `xid` are stamped by the server from context the caller cannot borrow from another transaction. `UPDATE` / `DELETE` on `audit.event` → `42501`. Residual: in-process code can name another *real* authenticated principal (§2.5), which is inside the trust boundary and is not claimed against | `wicket-audit`: four negative tests, each asserting SQLSTATE `42501` |
+| **c** | Request arrives with no authenticated actor | No `Authenticated`, so no `WriteContext`, so no `Tx::begin`: the handler returns 401 and no transaction opens. If a write reaches PostgreSQL anyway, `audit.require_context()` raises `42501` in the `AFTER` trigger and the **entire transaction aborts** — the business row is not written, and nothing is recorded as "unknown," which `actor_id NOT NULL REFERENCES identity.principal` makes unrepresentable. A `security.unattributable_write` event is logged on a separate connection | `wicket-db`: write on a raw pool connection without context, assert abort and that the target table is unchanged |
+| **d** | Two requests reuse the same pooled connection back to back | Request 1's context was set with `set_config(..., true)`, so PostgreSQL discards it at `COMMIT`; `after_release` additionally runs `RESET ALL` and discards the connection if that fails. Request 2's `Tx::begin` sets its own. If any future path leaked a session-level value, `wicket.txid` would not equal `pg_current_xact_id()` and request 2's first write would be **refused**, never misattributed | `wicket-db`: pool with `max_connections = 1`, two sequential writes by different actors, assert two audit rows with the correct distinct actors; plus a test that sets a session-level `wicket.actor_id` by hand and asserts the next write fails |
+| **e** | Someone with database superuser access edits a historical audit row | Grants do not stop them and `audit_protect` can be disabled by them. The edited row's transaction no longer reproduces its seal's `rows_digest`, so `audit.verify` fails at that `seq`. To hide it they must re-seal that transaction and, because each `hash` includes `prev_hash`, every seal after it — which changes the chain head. The head then disagrees with the off-box anchor recorded before the edit, and `wicket-verify` on a separate machine localises the divergence to "after anchor N." Uncovered case, stated plainly: history written since the last off-box anchor, or a site that configured no anchor sink, is not detectable — which is why the IQ suite fails with no sink configured and the health page nags when anchors go stale | `wicket-audit`: tamper test as owner, assert `audit.verify` fails at the expected `seq`; re-seal test, assert the head diverges from a stored anchor |
+| **f** | Transaction rolls back after consuming a document number | Nothing was consumed. The number came from `UPDATE numbering.counter ... RETURNING`, which rolls back with the transaction; the next allocation returns the same value. No audit row exists for the failed attempt, which is correct — Part 11 audits changes to records, not attempts — and a failed *signing* or a permission denial is separately recorded as a security event on its own connection. The seal chain has no gap either: `seq` is `prev.seq + 1` taken under a transaction-scoped advisory lock, so an aborted transaction leaves the head where it was | `wicket-numbering`: abort-then-reallocate test; concurrent allocation test asserting a contiguous committed set. `wicket-audit`: abort test asserting no seal and an unchanged head |
+| **g** | Investigator asks for every change to one work order, readable and electronic, eight years later | `wicket audit export --doc work_order:<id>` selects on `(doc_type, doc_id)` across the monthly partitions — including archived ones, restored as export bundles — and emits one bundle containing `events.ndjson`, `events.csv`, `seals.ndjson`, `manifest.json`, `dictionary.md`, and `report.pdf`. The PDF is the human-readable copy, with actor display names as of each change, local and UTC times, reasons, changed-column before/after tables, and 11.50(b) signature manifestations where a signature is linked. Both forms carry the same `export_id` and file digests, so the paper and electronic copies are provably the same records. The bundle is self-describing and readable with no Wicket install, which is the answer to reading it after a program change; the seals and anchors travel with it, so the investigator's own verification runs off the box | `wicket-audit`: golden-bundle test on a seeded work order, digest-stability test, and an IQ-suite named test that exports, verifies, and renders |
 
 ---
 
@@ -966,17 +966,17 @@ Binding. These are not suggestions to the executors.
 first: `dev/init-roles.sql` with the five roles and the grants of §1.1 and §1.3; two
 `DATABASE_URL`s; the `clippy.toml` deny-list plus a CI `rg` gate for `sqlx::query*`,
 `QueryBuilder`, `raw_sql`, `copy_in_raw`, `set_config`, and `current_setting` outside
-`datum-db` and `datum-audit`; a pinned SQLx version and a pinned PostgreSQL major version in
+`wicket-db` and `wicket-audit`; a pinned SQLx version and a pinned PostgreSQL major version in
 the test fixture; `after_connect` / `after_release` as written in §2.2; and `Tx::begin`
-**real, not `todo!()`**, in the `datum-db` stub, because thirteen Wave 2 lanes will otherwise
+**real, not `todo!()`**, in the `wicket-db` stub, because thirteen Wave 2 lanes will otherwise
 each invent it.
 
-**Wave 2 `datum-audit`** owns §§1.2–1.5, §6, and the exporter. Serial after `datum-db`, deep
+**Wave 2 `wicket-audit`** owns §§1.2–1.5, §6, and the exporter. Serial after `wicket-db`, deep
 tier. Its acceptance criteria are the seven rows of §10, each as a named test, plus the
 `audit.exempt` rows for `numbering.counter`, `audit.tx_seal`, and `audit.anchor` with their
 reasons.
 
-**Wave 2 `datum-db`** owns §2, deep tier, including the separate-connection security-event
+**Wave 2 `wicket-db`** owns §2, deep tier, including the separate-connection security-event
 path, `READ COMMITTED` by default, and serialisation retry.
 
 **Test databases** are ephemeral per test (`#[sqlx::test]`, or a `CREATE DATABASE ...
@@ -997,8 +997,8 @@ convenience. A test that needs a clean audit table is in the wrong database.
    document numbers are gap-free. They are allocated from a counter row in the caller's
    transaction, never from a PostgreSQL sequence, and a committed number is never reused;
    cancellation is a visible status, not a missing number."*
-7. `datum-jobs` needs `Actor` / `WriteContext` from `datum-core` and `Tx` from `datum-db`
-   (plan-audit R5); no edge to `datum-identity` or `datum-audit` is required.
+7. `wicket-jobs` needs `Actor` / `WriteContext` from `wicket-core` and `Tx` from `wicket-db`
+   (plan-audit R5); no edge to `wicket-identity` or `wicket-audit` is required.
 
 ---
 
@@ -1007,8 +1007,8 @@ convenience. A test that needs a clean audit table is in the wrong database.
 | # | Question | Decision |
 |---|---|---|
 | 1 | Where the guarantee lives | PostgreSQL `AFTER ... FOR EACH ROW` trigger, generic, attached by an event trigger at `CREATE TABLE`, writing through `SECURITY DEFINER`. Not SQLx |
-| 2 | How the actor reaches it | One `set_config(..., is_local := true)` statement from `Tx::begin`, plus `datum.txid` checked against `pg_current_xact_id()`. `RESET ALL` on release as belt. Absent or stale context aborts the transaction |
-| 3 | Does `datum_app` keep `INSERT` on audit | **No.** `SELECT` only. Kernel events go through a column-restricted `SECURITY DEFINER` function |
+| 2 | How the actor reaches it | One `set_config(..., is_local := true)` statement from `Tx::begin`, plus `wicket.txid` checked against `pg_current_xact_id()`. `RESET ALL` on release as belt. Absent or stale context aborts the transaction |
+| 3 | Does `wicket_app` keep `INSERT` on audit | **No.** `SELECT` only. Kernel events go through a column-restricted `SECURITY DEFINER` function |
 | 4 | Time source | `at = now()`, `stmt_at = clock_timestamp()`, `xid` stored, all `timestamptz` UTC, all server-side. Honest about the host clock |
 | 5 | Row contents and export | Actor plus display, provenance, device, action, required-by-catalogue reason, `doc_type` / `doc_id`, `esign_id`, `old_row` / `new_row` / `changed_columns`, monthly partitions; export bundle of NDJSON, CSV, seals, manifest, dictionary, and PDF/A under one `export_id` |
 | 6 | Hash chain in v1 | **Yes.** Per-transaction seal chain sealed by a deferred constraint trigger; verified off-box by the quality manager against anchors published off the server; no on-box key signing |

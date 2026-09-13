@@ -4,17 +4,17 @@
 
 mod common;
 
-use datum_core::{Identifier, LocationId};
-use datum_db::Tx;
-use datum_mod_inventory::{
+use sqlx::query as sql_query;
+use sqlx::query_scalar as sql_query_scalar;
+use wicket_core::{Identifier, LocationId};
+use wicket_db::Tx;
+use wicket_mod_inventory::{
     AdjustRequest, BalanceQuery, CountLine, CountRequest, DocumentStatus, IssueRequest, LineInput,
     ReceiveRequest, ReturnRequest, ShipRequest, WipIssuePlan, adjust, allocated, available,
     customer_return, cycle_count, document_history, issue_to_wip, on_hand, receive,
     ship_to_customer, stash_wip_issue_plan, take_wip_issue_plan,
 };
-use datum_test::db_case;
-use sqlx::query as sql_query;
-use sqlx::query_scalar as sql_query_scalar;
+use wicket_test::db_case;
 
 use common::{
     action_ctx, assert_group_conserves, boot_kernel, consumption_count, dec, group_kind,
@@ -77,10 +77,10 @@ async fn case_b_release_quarantine_posts_and_changes_status() {
     assert_eq!(group_kind(db.app_pool(), group.as_uuid()).await, "MOVEMENT");
     let ctx = action_ctx(&w, "inventory.view");
     let mut tx = Tx::begin(&pool, &ctx).await.expect("begin");
-    let lot = datum_mod_lots::load_lot(&mut tx, w.lot_bar)
+    let lot = wicket_mod_lots::load_lot(&mut tx, w.lot_bar)
         .await
         .expect("lot");
-    assert_eq!(lot.status, datum_mod_lots::LotStatus::Available);
+    assert_eq!(lot.status, wicket_mod_lots::LotStatus::Available);
     let avail = available(
         &mut tx,
         BalanceQuery {
@@ -357,7 +357,7 @@ async fn case_k_issue_by_the_inch_posts_uom_rounding_residual() {
     assert_eq!(group_kind(db.app_pool(), residual).await, "ADJUSTMENT");
     assert_eq!(
         reason_code(db.app_pool(), residual).await.as_deref(),
-        Some(datum_ledger::UOM_CONVERSION_RESIDUAL)
+        Some(wicket_ledger::UOM_CONVERSION_RESIDUAL)
     );
     let tag: String =
         sql_query_scalar("SELECT source_kind FROM ledger.posting_group WHERE group_id = $1")
@@ -400,7 +400,7 @@ async fn over_receipt_beyond_tolerance_is_a_document_error_not_a_ledger_error() 
     .await
     .expect_err("over-receipt");
     assert!(
-        matches!(err, datum_mod_inventory::Error::Document(_)),
+        matches!(err, wicket_mod_inventory::Error::Document(_)),
         "got {err}"
     );
     let _ = tx.rollback().await;
@@ -445,9 +445,9 @@ async fn on_hand_equals_ledger_fold_after_every_document() {
     )
     .await
     .expect("on_hand");
-    let fold = datum_ledger::balance_at(
+    let fold = wicket_ledger::balance_at(
         &mut tx,
-        datum_ledger::BalanceSlice {
+        wicket_ledger::BalanceSlice {
             item: w.bar,
             location: w.quarantine,
             lot: Some(w.lot_bar),
@@ -493,7 +493,7 @@ async fn posting_without_actor_aborts_and_leaves_no_document() {
 }
 
 #[tokio::test]
-async fn every_inventory_table_is_audited_and_owned_by_datum_owner() {
+async fn every_inventory_table_is_audited_and_owned_by_wicket_owner() {
     let db = db_case!("inv_audit");
     boot_kernel(&db).await;
     for table in ["document", "document_line"] {
@@ -503,7 +503,7 @@ async fn every_inventory_table_is_audited_and_owned_by_datum_owner() {
         );
         assert_eq!(
             table_owner(db.migrate_pool(), "inventory", table).await,
-            "datum_owner",
+            "wicket_owner",
             "inventory.{table} owner"
         );
     }

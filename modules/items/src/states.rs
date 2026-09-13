@@ -1,11 +1,11 @@
 //! Item release state machine (`draft → released → obsolete`).
 
-use datum_statemachine::{EdgeBuilder, Machine};
+use wicket_statemachine::{EdgeBuilder, Machine};
 
 use crate::domain::{DOC_TYPE, NOT_REQUIRED_REASON};
 use crate::error::Result;
 
-/// Machine declared through `datum-statemachine` with `NotRequired` on every edge.
+/// Machine declared through `wicket-statemachine` with `NotRequired` on every edge.
 pub fn item_machine() -> Result<Machine> {
     Ok(Machine::builder(DOC_TYPE)
         .regulated(false)

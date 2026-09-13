@@ -2,7 +2,7 @@
 //!
 //! Invariants 9–12 live here: constrained identifiers, serial-within-lot,
 //! package hierarchy, expiry precision, and the nullable UDI attachment point.
-//! Writes go through [`datum_db::Tx`]. This module never posts to the ledger.
+//! Writes go through [`wicket_db::Tx`]. This module never posts to the ledger.
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
@@ -33,8 +33,8 @@ pub use store::{
     package_hierarchy, resolve, set_status, trace_keys,
 };
 
-use datum_db::Tx;
-use datum_module::{KernelBuilder, ModuleManifest, Profile};
+use wicket_db::Tx;
+use wicket_module::{KernelBuilder, ModuleManifest, Profile};
 
 /// Embedded migrator (`placeholder` + `0001_lots`).
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
@@ -45,8 +45,8 @@ pub fn manifest() -> Result<ModuleManifest> {
 }
 
 /// Run this crate's migrations on `pool` (after kernel and dependency modules).
-pub async fn migrate(pool: &datum_db::Pool) -> Result<()> {
-    datum_db::migrate::run(pool, &[("datum-mod-lots", &MIGRATOR)])
+pub async fn migrate(pool: &wicket_db::Pool) -> Result<()> {
+    wicket_db::migrate::run(pool, &[("wicket-mod-lots", &MIGRATOR)])
         .await
         .map_err(Error::from)
 }
@@ -63,18 +63,18 @@ pub fn register(builder: &mut KernelBuilder, profile: &Profile) -> Result<()> {
 }
 
 pub(crate) async fn stamps(tx: &mut Tx<'_>) -> Result<(String, String)> {
-    let app = datum_db::app_version();
-    let cfg = tx.setting("datum.config_version").await?;
+    let app = wicket_db::app_version();
+    let cfg = tx.setting("wicket.config_version").await?;
     Ok((app, cfg))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use datum_audit as _;
-    use datum_identity as _;
     use proptest::prelude::*;
     use tokio as _;
+    use wicket_audit as _;
+    use wicket_identity as _;
 
     #[test]
     fn unimplemented_formats() {
@@ -89,7 +89,7 @@ mod tests {
 
     #[test]
     fn postgres_helper_is_callable() {
-        let _ = datum_test::postgres_available();
+        let _ = wicket_test::postgres_available();
     }
 
     #[test]

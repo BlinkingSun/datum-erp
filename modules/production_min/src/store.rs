@@ -1,25 +1,25 @@
-//! Persistence and posting. Every mutation runs inside [`datum_db::Tx`].
-//! Postings go through [`datum_ledger::GroupBuilder`] obtained from the kernel.
+//! Persistence and posting. Every mutation runs inside [`wicket_db::Tx`].
+//! Postings go through [`wicket_ledger::GroupBuilder`] obtained from the kernel.
 
 use crate::domain::StartRequest;
 use chrono::{DateTime, Utc};
-use datum_core::{
+use rust_decimal::Decimal;
+use uuid::Uuid;
+use wicket_core::{
     AnyQuantity, AreaDim, Boundary, ConversionContext, CostElement, CountDim, CurrencyId,
     DimensionKind, GroupKind, Identifier, ItemId, LengthDim, LocationId, LotId, MassDim, Money,
     PostingGroupHeader, PostingIntent, PostingSink, QuantityPosting, TimeDim, ValueAccount,
     ValuePosting, VolumeDim,
 };
-use datum_db::Tx;
-use datum_ledger::{CostMethod, GroupBuilder, Layer, load_open_layers, load_stock_item};
-use datum_mod_inventory::{
+use wicket_db::Tx;
+use wicket_ledger::{CostMethod, GroupBuilder, Layer, load_open_layers, load_stock_item};
+use wicket_mod_inventory::{
     Document, IssueRequest, WipIssuePlan, clear_wip_issue_plan, finish_wip_issue, issue_to_wip,
     plan_wip_issue,
 };
-use datum_mod_lots::{CreateLot, LotStatus, create_lot, create_serials};
-use datum_module::Kernel;
-use datum_numbering::{ResetPolicy, SequenceId};
-use rust_decimal::Decimal;
-use uuid::Uuid;
+use wicket_mod_lots::{CreateLot, LotStatus, create_lot, create_serials};
+use wicket_module::Kernel;
+use wicket_numbering::{ResetPolicy, SequenceId};
 
 use crate::domain::{
     CompleteRequest, Completion, CreateWorkOrder, DEFAULT_FINISHED_LOT_TEMPLATE, DOC_TYPE,
@@ -82,7 +82,7 @@ pub async fn create(tx: &mut Tx<'_>, kernel: &Kernel, spec: CreateWorkOrder) -> 
     if spec.quantity_ordered.amount <= Decimal::ZERO {
         return Err(Error::InvalidQuantity);
     }
-    let _item = datum_mod_items::get(kernel.pool(), spec.item).await?;
+    let _item = wicket_mod_items::get(kernel.pool(), spec.item).await?;
     let id = Identifier::generate();
     let (app, cfg) = stamps(tx).await?;
     tx.execute(
@@ -116,7 +116,7 @@ pub async fn create(tx: &mut Tx<'_>, kernel: &Kernel, spec: CreateWorkOrder) -> 
 pub async fn release(
     tx: &mut Tx<'_>,
     kernel: &Kernel,
-    ctx: &datum_db::WriteContext,
+    ctx: &wicket_db::WriteContext,
     id: Identifier,
 ) -> Result<WorkOrder> {
     let wo = load(tx, id).await?;
@@ -127,7 +127,7 @@ pub async fn release(
         });
     }
     let number = allocate_wo_number(tx, kernel).await?;
-    let wip = datum_mod_locations::ensure_wip(tx, id).await?;
+    let wip = wicket_mod_locations::ensure_wip(tx, id).await?;
     kernel
         .transition(tx, &doc_ref(id), "release", None, ctx)
         .await?;
@@ -159,7 +159,7 @@ pub async fn release(
 pub async fn issue_material(
     tx: &mut Tx<'_>,
     kernel: &Kernel,
-    ctx: &datum_db::WriteContext,
+    ctx: &wicket_db::WriteContext,
     req: IssueMaterialRequest,
 ) -> Result<WorkOrder> {
     let wo = load(tx, req.work_order).await?;
@@ -224,7 +224,7 @@ pub async fn issue_material(
 pub async fn start(
     tx: &mut Tx<'_>,
     kernel: &Kernel,
-    ctx: &datum_db::WriteContext,
+    ctx: &wicket_db::WriteContext,
     req: StartRequest,
 ) -> Result<WorkOrder> {
     let id = req.work_order;
@@ -296,7 +296,7 @@ pub async fn start(
 async fn transition_issue_with_sink(
     tx: &mut Tx<'_>,
     kernel: &Kernel,
-    ctx: &datum_db::WriteContext,
+    ctx: &wicket_db::WriteContext,
     id: Identifier,
     header: PostingGroupHeader,
     expects_postings: bool,
@@ -323,7 +323,7 @@ async fn transition_issue_with_sink(
         }
         return Ok(None);
     }
-    Ok(Some(datum_ledger::post(tx, watch).await?))
+    Ok(Some(wicket_ledger::post(tx, watch).await?))
 }
 
 struct DeferredFinalize(GroupBuilder);
@@ -340,11 +340,11 @@ impl PostingSink for DeferredFinalize {
     fn contribute(
         &mut self,
         intent: PostingIntent,
-    ) -> core::result::Result<datum_core::PostingHandle, datum_core::PostingError> {
+    ) -> core::result::Result<wicket_core::PostingHandle, wicket_core::PostingError> {
         self.0.contribute(intent)
     }
 
-    fn finalize(self: Box<Self>) -> core::result::Result<(), datum_core::PostingError> {
+    fn finalize(self: Box<Self>) -> core::result::Result<(), wicket_core::PostingError> {
         Ok(())
     }
 }
@@ -352,7 +352,7 @@ impl PostingSink for DeferredFinalize {
 async fn record_issue_lines(
     tx: &mut Tx<'_>,
     work_order: Identifier,
-    req_lines: &[datum_mod_inventory::LineInput],
+    req_lines: &[wicket_mod_inventory::LineInput],
     doc: &Document,
 ) -> Result<()> {
     let (app, cfg) = stamps(tx).await?;
@@ -392,7 +392,7 @@ async fn record_issue_lines(
 pub async fn complete(
     tx: &mut Tx<'_>,
     kernel: &Kernel,
-    ctx: &datum_db::WriteContext,
+    ctx: &wicket_db::WriteContext,
     req: CompleteRequest,
 ) -> Result<Completion> {
     let wo = load(tx, req.work_order).await?;
@@ -461,8 +461,8 @@ pub async fn complete(
 
     let layers = load_issued_layers(tx, wo.id, wip).await?;
     let mut consumed_value = Money::zero(CurrencyId(840));
-    let consumed_loc = datum_mod_locations::boundary_location_id(tx, Boundary::Consumed).await?;
-    let produced_loc = datum_mod_locations::boundary_location_id(tx, Boundary::Produced).await?;
+    let consumed_loc = wicket_mod_locations::boundary_location_id(tx, Boundary::Consumed).await?;
+    let produced_loc = wicket_mod_locations::boundary_location_id(tx, Boundary::Produced).await?;
 
     for layer in &layers {
         let qty = AnyQuantity {
@@ -496,7 +496,7 @@ pub async fn complete(
         }))?;
         consumed_value = consumed_value
             .try_add(layer_money)
-            .map_err(datum_core::Error::from)?;
+            .map_err(wicket_core::Error::from)?;
     }
 
     let screw_in = builder.contribute(PostingIntent::Quantity(qty_post(
@@ -526,7 +526,7 @@ pub async fn complete(
     }))?;
     let variance = consumed_value
         .try_sub(produced_value)
-        .map_err(datum_core::Error::from)?;
+        .map_err(wicket_core::Error::from)?;
     if !variance.amount().is_zero() {
         builder.contribute(PostingIntent::Value(ValuePosting {
             account: ValueAccount::MfgVariance,
@@ -542,15 +542,17 @@ pub async fn complete(
             unit: layer.uom,
             dimension: dimension_for_unit(layer.uom.0),
         };
-        builder.contribute(PostingIntent::Consumption(datum_core::ConsumptionPosting {
-            consuming: screw_in,
-            consumed_posting_id: layer.posting_id,
-            quantity: qty,
-            amount: money(layer.remaining_amt, layer.currency)?,
-        }))?;
+        builder.contribute(PostingIntent::Consumption(
+            wicket_core::ConsumptionPosting {
+                consuming: screw_in,
+                consumed_posting_id: layer.posting_id,
+                quantity: qty,
+                amount: money(layer.remaining_amt, layer.currency)?,
+            },
+        ))?;
     }
 
-    let group_id = datum_ledger::post(tx, builder).await?;
+    let group_id = wicket_ledger::post(tx, builder).await?;
 
     if scrap.amount > Decimal::ZERO {
         post_scrap_adjustment(
@@ -718,7 +720,7 @@ async fn allocate_wo_number(tx: &mut Tx<'_>, kernel: &Kernel) -> Result<String> 
         Some(spec) => ("wo", spec.reset_policy()?),
         None => ("wo", ResetPolicy::Yearly),
     };
-    Ok(datum_numbering::next_number(tx, SequenceId::new(doc_type, policy)).await?)
+    Ok(wicket_numbering::next_number(tx, SequenceId::new(doc_type, policy)).await?)
 }
 
 async fn load_issued_layers(
@@ -765,7 +767,7 @@ async fn produced_value(
                 let amt = std
                     .amount()
                     .checked_mul(produced.amount)
-                    .ok_or(datum_core::Error::Overflow)?;
+                    .ok_or(wicket_core::Error::Overflow)?;
                 money(amt, std.currency())
             }
             None => Ok(consumed),
@@ -781,7 +783,7 @@ fn unit_cost(total: Money, qty: Decimal, currency: CurrencyId) -> Result<Money> 
     let amt = total
         .amount()
         .checked_div(qty)
-        .ok_or(datum_core::Error::Overflow)?;
+        .ok_or(wicket_core::Error::Overflow)?;
     money(amt, currency)
 }
 
@@ -796,12 +798,12 @@ async fn post_scrap_adjustment(
     scrap: AnyQuantity,
     unit_cost: Money,
 ) -> Result<()> {
-    let scrap_loc = datum_mod_locations::boundary_location_id(tx, Boundary::Scrap).await?;
+    let scrap_loc = wicket_mod_locations::boundary_location_id(tx, Boundary::Scrap).await?;
     let amount = money(
         unit_cost
             .amount()
             .checked_mul(scrap.amount)
-            .ok_or(datum_core::Error::Overflow)?,
+            .ok_or(wicket_core::Error::Overflow)?,
         unit_cost.currency(),
     )?;
     let mut builder = kernel.posting_sink(
@@ -845,7 +847,7 @@ async fn post_scrap_adjustment(
         amount,
         values: None,
     }))?;
-    let _ = datum_ledger::post(tx, builder).await?;
+    let _ = wicket_ledger::post(tx, builder).await?;
     Ok(())
 }
 
@@ -880,7 +882,7 @@ async fn convert_entered(
     lot: Option<LotId>,
     entered: AnyQuantity,
 ) -> Result<AnyQuantity> {
-    let catalog = datum_uom::load_catalog(tx).await?;
+    let catalog = wicket_uom::load_catalog(tx).await?;
     let ctx = ConversionContext { item, lot };
     let (canonical, _factor, residual) = match entered.dimension {
         DimensionKind::Count => pack(
@@ -921,8 +923,8 @@ async fn convert_entered(
     Ok(canonical)
 }
 
-fn pack<D: datum_core::Dimension>(
-    conv: datum_uom::StockConversion<D>,
+fn pack<D: wicket_core::Dimension>(
+    conv: wicket_uom::StockConversion<D>,
 ) -> Result<(AnyQuantity, Decimal, AnyQuantity)> {
     Ok((
         AnyQuantity::from(conv.canonical),
@@ -937,7 +939,7 @@ fn qty_post(
     location: LocationId,
     boundary: Option<Boundary>,
     lot: Option<LotId>,
-    serial: Option<datum_core::SerialId>,
+    serial: Option<wicket_core::SerialId>,
 ) -> QuantityPosting {
     QuantityPosting {
         item,
@@ -959,7 +961,7 @@ fn signed(base: AnyQuantity, sign: i32) -> AnyQuantity {
 }
 
 fn money(amount: Decimal, currency: CurrencyId) -> Result<Money> {
-    Ok(Money::new(amount, currency).map_err(datum_core::Error::from)?)
+    Ok(Money::new(amount, currency).map_err(wicket_core::Error::from)?)
 }
 
 fn dimension_for_unit(uom: i64) -> DimensionKind {
@@ -1025,7 +1027,7 @@ pub async fn load_issue_lines(tx: &mut Tx<'_>, work_order: Identifier) -> Result
             inventory_document: Identifier::from_uuid(doc),
             item: ItemId::from_uuid(item),
             lot: lot.map(LotId::from_uuid),
-            serial: serial.map(datum_core::SerialId::from_uuid),
+            serial: serial.map(wicket_core::SerialId::from_uuid),
             quantity: quantity_from_parts(amt, uom, &dim)?,
             amount: match (money_amt, cur) {
                 (Some(a), Some(c)) => Some(money(a, CurrencyId(c))?),

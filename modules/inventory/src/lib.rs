@@ -41,8 +41,8 @@ pub use store::{
     ship_to_customer, void_document,
 };
 
-use datum_db::Tx;
-use datum_module::{KernelBuilder, ModuleManifest, Profile};
+use wicket_db::Tx;
+use wicket_module::{KernelBuilder, ModuleManifest, Profile};
 
 /// Embedded migrator (`placeholder` + `0001_inventory`).
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
@@ -64,8 +64,8 @@ pub fn register(builder: &mut KernelBuilder, _profile: &Profile) -> Result<()> {
 }
 
 pub(crate) async fn stamps(tx: &mut Tx<'_>) -> Result<(String, String)> {
-    let app = datum_db::app_version();
-    let cfg = tx.setting("datum.config_version").await?;
+    let app = wicket_db::app_version();
+    let cfg = tx.setting("wicket.config_version").await?;
     Ok((app, cfg))
 }
 
@@ -88,7 +88,7 @@ mod tests {
 
     #[test]
     fn postgres_helper_is_callable() {
-        let _ = datum_test::postgres_available();
+        let _ = wicket_test::postgres_available();
     }
 
     #[test]
@@ -149,7 +149,7 @@ mod tests {
         assert_eq!(m.edges.len(), 6);
         for e in &m.edges {
             match &e.signature {
-                datum_statemachine::SignatureDeclaration::NotRequired { reason } => {
+                wicket_statemachine::SignatureDeclaration::NotRequired { reason } => {
                     assert_eq!(*reason, NOT_REQUIRED_REASON);
                 }
                 other => panic!("expected NotRequired, got {other:?}"),

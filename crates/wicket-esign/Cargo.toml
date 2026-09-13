@@ -1,0 +1,35 @@
+[package]
+name = "wicket-esign"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Electronic signatures: mint, prepared SignatureGate, manifestation."
+build = "build.rs"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+test-utils = []
+
+[dependencies]
+chrono.workspace = true
+wicket-audit.workspace = true
+wicket-core.workspace = true
+wicket-db.workspace = true
+wicket-identity.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+wicket-module.workspace = true
+wicket-statemachine.workspace = true
+wicket-test.workspace = true
+proptest.workspace = true
+tokio.workspace = true

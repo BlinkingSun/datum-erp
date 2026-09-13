@@ -1,8 +1,8 @@
-# DECISION D1 — The `datum-core` quantity, unit, and money contract
+# DECISION D1 — The `wicket-core` quantity, unit, and money contract
 
 **Decider:** Opus (decision authority, team task `erp`, decision D1)
 **Date:** 2026-09-11
-**Status:** DECIDED. This is the frozen public contract for `datum-core`. Wave 1 builds to it.
+**Status:** DECIDED. This is the frozen public contract for `wicket-core`. Wave 1 builds to it.
 **Inputs:** `_team/reports/sweep-plan-typed-qty.md`, `_team/reports/plan-audit.md` (§0.2, R2, G7, D1),
 `_team/reports/sweep-plan-ledger.md`, `_team/reports/sweep-plan-proptests.md` §§387–394,
 `PLAN.md` §5, `docs/02-architecture.md` §2, `docs/adr/0002-backend-language.md`, `docs/adr/0004-append-only-ledger.md`.
@@ -17,7 +17,7 @@ parameter; it cannot be, because units are customer-defined rows in a table and 
 not. What *is* a type parameter is **dimension** — a sealed kernel set of six kinds. Unit identity
 is a runtime `UnitId` that can only enter a `Quantity<D>` through a checked witness. Money is a
 separate primitive that shares no arithmetic with quantity. The numeric type is
-`rust_decimal::Decimal` for both, at different bounded scales. `datum-core` performs **no rounding
+`rust_decimal::Decimal` for both, at different bounded scales. `wicket-core` performs **no rounding
 at all**; it makes rounding un-ignorable by returning conversion and extension results in a type
 whose value cannot be read without either proving exactness or naming a destination for the
 residual. That last type, not the phantom dimension, is the guard that addresses the failure mode
@@ -34,25 +34,25 @@ freezes, or this contract needs a named amendment.
 | # | Assumption about D2 (ledger) | If D2 decides otherwise |
 |---|---|---|
 | **A1** | Inventory conservation slice is `(group_id, item_id, unit_id)`. `unit_id` is a partition key of the balance bucket. | **This is the load-bearing one.** If the slice does not partition by `unit_id`, cross-dimension sums become expressible in SQL, the database stops being a backstop, and `Quantity<D>`'s phantom parameter goes from belt-and-braces to sole defence in the posting path. §7's answer changes and §3's verdict gets *stronger*, not weaker. |
-| **A2** | Every inventory row in a group is normalized to one unit per item **before** `INSERT`. Conversion never happens in SQL. | If SQL may convert, `datum-db` needs the conversion graph, `datum-uom` loses its monopoly on rounding, and §4.3 is unenforceable. Refuse this. |
+| **A2** | Every inventory row in a group is normalized to one unit per item **before** `INSERT`. Conversion never happens in SQL. | If SQL may convert, `wicket-db` needs the conversion graph, `wicket-uom` loses its monopoly on rounding, and §4.3 is unenforceable. Refuse this. |
 | **A3** | Cost and labor slices are `(group_id, ledger)` plus finer cost dimensions, and money never shares a numeric column with quantity (separate `amount` / `quantity` columns, per `sweep-plan-ledger.md` §2). | If one numeric column carries both, `Money` and `Quantity` become indistinguishable at the persistence boundary and acceptance criterion (d) survives only in Rust, not in the database. |
 | **A4** | `lot_id` and `serial_id` are dimensions but **not** conservation keys. | Affects catch-weight (§5) only; catch-weight's eventual linkage wants lot/serial as a correlation key, not a balance key. No change to core types. |
 | **A5** | Residual and loss destinations are ordinary postings to virtual locations inside the same group, and `ADJUSTMENT` requires a reason code (ADR 0004 already says this). | If residuals cannot be posted, §4.3 collapses to "refuse the transaction," which is a worse product and must then be a stated product decision rather than an accident of the type system. |
 
 Nothing in §2's type sketches changes under any of A1–A5. That is deliberate: the core contract is
-chosen so the ledger lane can still move without reopening `datum-core`.
+chosen so the ledger lane can still move without reopening `wicket-core`.
 
 ---
 
 ## 2. The frozen contract
 
-`datum-core` has **no** `sqlx` dependency, no database dependency, and no async. Dependencies are
+`wicket-core` has **no** `sqlx` dependency, no database dependency, and no async. Dependencies are
 `rust_decimal` (with `serde-with-str`), `serde`, and `thiserror`. Everything below is `pub`.
 
 ### 2.1 Identifiers and dimension
 
 ```rust
-//! datum-core::units
+//! wicket-core::units
 
 /// Opaque catalog identifier. Core never interprets the catalog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -127,7 +127,7 @@ impl<D: Dimension> UnitRef<D> {
 }
 ```
 
-No `unsafe`, no `new_unchecked`, no sealed-token ceremony — and `datum-uom`, in a different crate,
+No `unsafe`, no `new_unchecked`, no sealed-token ceremony — and `wicket-uom`, in a different crate,
 can still mint one. PLAN invariant 7 is respected.
 
 ### 2.3 `Quantity<D>`
@@ -196,7 +196,7 @@ Deliberate omissions, each load-bearing:
 ### 2.4 Erasure for heterogeneous collections, the wire, and the database
 
 ```rust
-/// The boundary type. What crosses HTTP. What `datum-db` maps to a row. The only
+/// The boundary type. What crosses HTTP. What `wicket-db` maps to a row. The only
 /// serde-bearing quantity representation in the kernel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AnyQuantity {
@@ -227,7 +227,7 @@ infecting the whole workspace (§3). The rule for contributors is one sentence: 
 ### 2.5 Money and unit cost
 
 ```rust
-//! datum-core::money
+//! wicket-core::money
 
 /// Money carries up to 6 decimal places: enough for 4 sub-minor digits on a 2-minor
 /// currency, which is what extended amounts and landed-cost proration actually need.
@@ -288,12 +288,12 @@ holds because the two types are simply unrelated — the cheapest possible mecha
 
 `UnitCost<D>` is included in the freeze, rather than deferred to a costing crate, because it is
 the one place money and quantity legitimately meet and its signature has to be settled before
-thirteen crates import `datum-core`.
+thirteen crates import `wicket-core`.
 
 ### 2.6 The residual types — the actual guard
 
 ```rust
-//! datum-core::rounding
+//! wicket-core::rounding
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -343,10 +343,10 @@ You cannot write `converter.convert(..)?.value` — the field is private. You ca
 `converter.convert(..)?.into()` — no `Into` impl exists. The compiler forces the author to type
 either `into_exact()?` or `split(rule)` and bind two names. Binding the second name and dropping
 it is possible — that *is* the residual being discarded — and it is caught by the workspace's
-`unused_variables` deny, plus the `datum-ledger` property test asserting every slice sums to zero.
+`unused_variables` deny, plus the `wicket-ledger` property test asserting every slice sums to zero.
 Belt, braces, and a database constraint.
 
-### 2.7 The conversion interface (trait in core, implementation in `datum-uom`)
+### 2.7 The conversion interface (trait in core, implementation in `wicket-uom`)
 
 ```rust
 /// Item and lot context, because a conversion factor in this domain is item data and
@@ -511,9 +511,9 @@ which is what proration and unit pricing consume; settlement to two happens via 
 
 | Crate | Rounding authority |
 |---|---|
-| `datum-core` | **None.** Core defines `Rounding` and the residual types. Core never rounds a value. There is no `round()` on `Quantity`, `Money`, or `UnitCost`. |
-| `datum-uom` | Owns the *policy lookup*: for `(item, unit, operation)` it supplies the target scale and the `Rounding` rule from the unit master. It calls `Converted::split`; it does not invent arithmetic. |
-| `datum-ledger` | Owns *where a residual is posted*. It is the only crate that may turn a residual into a posting row. |
+| `wicket-core` | **None.** Core defines `Rounding` and the residual types. Core never rounds a value. There is no `round()` on `Quantity`, `Money`, or `UnitCost`. |
+| `wicket-uom` | Owns the *policy lookup*: for `(item, unit, operation)` it supplies the target scale and the `Rounding` rule from the unit master. It calls `Converted::split`; it does not invent arithmetic. |
+| `wicket-ledger` | Owns *where a residual is posted*. It is the only crate that may turn a residual into a posting row. |
 | Modules | May choose to reject rather than round. May never round. |
 
 Defaults: `HalfUp` for money settlement (matches invoice convention and customer expectation),
@@ -537,7 +537,7 @@ to a `ROUNDING` cost element in the same group under A3.
 
 **Why this is one rule and not two.** The ordinary transfer case creates **no residual at all**,
 and this is worth stating because it is the case everyone worries about. Issue 100 inches of a bar
-stocked in feet: `datum-uom` converts *once*, gets `8.3333` ft plus a residual, and then **both**
+stocked in feet: `wicket-uom` converts *once*, gets `8.3333` ft plus a residual, and then **both**
 the `-` row from `STOCK` and the `+` row to `WIP` carry `8.3333`. The slice sums to zero by
 construction. The residual is a *measurement* discrepancy between the physical world and the
 record, not a conservation violation, and it surfaces where measurement discrepancies belong: at
@@ -561,7 +561,7 @@ requirement in the target market and it is not a v1 requirement.
 **The reason, not the excuse.** Catch-weight is not a quantity-*type* problem. `Quantity<D>` and
 the `(group, item, unit)` slice already handle the arithmetic: a catch-weight item posts an `EA`
 slice and a `KG` slice in the same group, each balancing independently. That part is free. What is
-not free is everything around it, and none of it lives in `datum-core`:
+not free is everything around it, and none of it lives in `wicket-core`:
 
 1. **Item master.** "One item has one stocking unit" becomes false. Every screen, API response, and
    report that says "quantity on hand" must answer *in which measure*.
@@ -574,7 +574,7 @@ not free is everything around it, and none of it lives in `datum-core`:
    `serial_id`, which under A4 is a dimension rather than a conservation key — so the correlation is
    a query, not a constraint, and it can silently go missing.
 
-**What breaks when catch-weight arrives.** Not `datum-core`. `Quantity<D>` is already
+**What breaks when catch-weight arrives.** Not `wicket-core`. `Quantity<D>` is already
 dimension-parameterized, `UnitRef<D>` already proves membership, and the slice already partitions
 by unit — the §2 contract survives verbatim. What changes is the item master schema, the
 availability and allocation APIs, the costing driver, and MRP's unit selection. The honest risk is
@@ -594,13 +594,13 @@ item. At that point this becomes an ADR, not a patch.
 
 ## 6. Serialization boundaries
 
-`datum-core` depends on `serde` and **not** on `sqlx`. Three representations, one per boundary.
+`wicket-core` depends on `serde` and **not** on `sqlx`. Three representations, one per boundary.
 
 | Boundary | Type | Encoding |
 |---|---|---|
 | **In-process domain math** | `Quantity<D>`, `Money`, `UnitCost<D>` | None. These types are deliberately **not** `Serialize`/`Deserialize`: a type parameter cannot round-trip through JSON, so serializing `Quantity<D>` would either drop `D` or fabricate it on read. |
 | **HTTP API** | `AnyQuantity`, `MoneyWire` | JSON, with `Decimal` as a **string**, never a JSON number, because `serde_json` numbers are `f64` in most clients: `{"amount":"8.33330000","unit":42,"dimension":"Length"}`. `dimension` is denormalized so a client or middleware can reject a mismatch without a catalog round-trip. |
-| **PostgreSQL** | `AnyQuantity`, `MoneyWire` | `datum-db` implements `sqlx::FromRow`/`Encode` over these: `amount -> numeric(24,8)`, `unit -> bigint`, `dimension -> text` or a PG enum. Core's only obligation is that these structs have public fields, which they do. |
+| **PostgreSQL** | `AnyQuantity`, `MoneyWire` | `wicket-db` implements `sqlx::FromRow`/`Encode` over these: `amount -> numeric(24,8)`, `unit -> bigint`, `dimension -> text` or a PG enum. Core's only obligation is that these structs have public fields, which they do. |
 
 ```rust
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -609,13 +609,13 @@ impl From<Money> for MoneyWire { /* infallible */ }
 impl TryFrom<MoneyWire> for Money { type Error = MoneyError; /* scale-checked */ }
 ```
 
-The read path is always the same three steps, and `datum-db` is the only crate that writes them:
+The read path is always the same three steps, and `wicket-db` is the only crate that writes them:
 row → `AnyQuantity` → `downcast::<D>()`. The dimension check is not skippable, because
 `AnyQuantity` has no other exit toward `Quantity<D>`.
 
 Core does **not** own the DDL. `numeric(24,8)` and `numeric(24,6)` are frozen here as the column
-types and `datum-db` writes the migration; `QUANTITY_MAX_SCALE` and `MONEY_MAX_SCALE` are the
-single source of truth, and `datum-db` carries a test asserting the migration's scale matches them.
+types and `wicket-db` writes the migration; `QUANTITY_MAX_SCALE` and `MONEY_MAX_SCALE` are the
+single source of truth, and `wicket-db` carries a test asserting the migration's scale matches them.
 
 ---
 
@@ -626,7 +626,7 @@ months."* Decompose that failure mode.
 
 | Sub-mode | Prevented? | By what |
 |---|---|---|
-| **(i) Wrong conversion factor in the unit master** — 12.0 entered as 1.2 | **No. Not by any type system.** | Data governance only: audited and e-signed changes to `conversion_rule`; `datum-uom` round-trip property tests; per-dimension sanity bounds. |
+| **(i) Wrong conversion factor in the unit master** — 12.0 entered as 1.2 | **No. Not by any type system.** | Data governance only: audited and e-signed changes to `conversion_rule`; `wicket-uom` round-trip property tests; per-dimension sanity bounds. |
 | **(ii) A residual silently dropped, so ledger and physical world diverge a little on every issue** | **Yes — this design prevents it.** | `Converted<D>` / `Scaled<D>` / `Settled` / `Extended`: private fields, no `Deref`, no `Into`, `#[must_use]`, and the only exits are `into_exact() -> Result<_, ResidualError>` and `split(rule) -> (value, residual)`. |
 | **(iii) Adding unlike dimensions** | Yes, twice. | Compile error in domain math; rejected commit in the posting path via the `unit_id` slice key (A1). |
 | **(iv) A `Quantity` built on a unit from the wrong dimension** | Yes. | `UnitRef::checked` is the only constructor; there is no `new_unchecked` and no `unsafe`. |
@@ -654,8 +654,8 @@ strengthening the prose around it.
 | **e** | Silently truncating a conversion residual | Four locks. (1) `UnitConverter::convert` returns `Converted<D>`, never `Quantity<D>`. (2) `Converted` has private fields, no `Deref`, no `Into`, and is `#[must_use]`. (3) The only exits are `into_exact() -> Result<_, ResidualError>` and `split(rule) -> (Quantity<D>, Quantity<D>)`. (4) `Quantity::new` rejects scale > 8 with `ScaleExceeded` rather than truncating, and there is no `Div` and no `round` on `Quantity`. | **Does not compile** to ignore the residual; **typed error** (`ResidualError::NotExact`) when exactness is demanded and not available |
 | **f** | Constructing a quantity whose unit does not belong to its dimension | `Quantity::new` takes `UnitRef<D>`, not `UnitId`. `UnitRef::<D>::checked(id, catalog_kind)` is the sole constructor and compares against `D::KIND`, returning `DimensionMismatch`. No `new_unchecked`, no `unsafe`. Unrepresentable once constructed; a typed error at the one boundary where it can be attempted. | **Does not compile** to bypass; **typed error** at the catalog boundary |
 | **g** | Summing a column of postings, same item and unit | `Quantity::try_sum(iter) -> Result<Option<Self>, QuantityError>` — one unit check per element, `None` on empty because a zero has no unit. Plus `Quantity::zero(unit_ref)` and `try_add_assign` for fold-style code, and `AnyQuantity::try_sum` for erased ledger rows. | **Permitted, ergonomic** |
-| **h** | Converting feet to inches for an item whose factor is item data | `converter.convert(qty, to_inches, &ConversionContext { item, lot })?` — `ConversionContext` is a core struct carrying exactly the keys a factor may depend on; the factor lookup and the conversion graph live in `datum-uom`. Returns `Converted<D>`, so (e) applies. | **Permitted, ergonomic** |
-| **i** | Storing and reloading through PostgreSQL without losing precision | `Decimal` at scale ≤ 8 into `numeric(24,8)` via `rust_decimal`'s native `numeric` codec; 24 significant digits sits inside `Decimal`'s 28. Core exposes `AnyQuantity` with public fields and no `sqlx` dependency; `datum-db` owns `FromRow`. Overlong values are refused by the column type and out-of-range values decode as an error, never a wrong number. `datum-db` carries a round-trip property test and a test asserting migration scale equals `QUANTITY_MAX_SCALE`. | **Permitted, verified by test** |
+| **h** | Converting feet to inches for an item whose factor is item data | `converter.convert(qty, to_inches, &ConversionContext { item, lot })?` — `ConversionContext` is a core struct carrying exactly the keys a factor may depend on; the factor lookup and the conversion graph live in `wicket-uom`. Returns `Converted<D>`, so (e) applies. | **Permitted, ergonomic** |
+| **i** | Storing and reloading through PostgreSQL without losing precision | `Decimal` at scale ≤ 8 into `numeric(24,8)` via `rust_decimal`'s native `numeric` codec; 24 significant digits sits inside `Decimal`'s 28. Core exposes `AnyQuantity` with public fields and no `sqlx` dependency; `wicket-db` owns `FromRow`. Overlong values are refused by the column type and out-of-range values decode as an error, never a wrong number. `wicket-db` carries a round-trip property test and a test asserting migration scale equals `QUANTITY_MAX_SCALE`. | **Permitted, verified by test** |
 
 ---
 
@@ -694,11 +694,11 @@ design it no longer supports is worth nothing to whoever reads it in two years.
 
 | Lane | Obligation |
 |---|---|
-| `workspace` (Wave 1) | Stub `datum-core` exactly per §2. `rust_decimal` with `serde-with-str`; **no** `sqlx`. `Quantity<D>` is not `Serialize`. |
-| `datum-core` (Wave 1 — complete, not stubbed, per audit G7) | Full implementation plus compile-fail tests under `tests/compile_fail/` for (a), (d), and reading `Converted`'s value. |
-| `datum-uom` (Wave 2) | `impl UnitCatalog + UnitConverter`; owns scale and `Rounding` policy per `(item, unit, operation)`; calls `Converted::split`; owns conversion round-trip property tests. |
-| `datum-ledger` (Wave 2) | Sole authority to post a residual. Normalizes to one unit per slice before `INSERT`. Rows carry exactly one measure. |
-| `datum-db` (Wave 2) | `numeric(24,8)` / `numeric(24,6)`; `FromRow` for `AnyQuantity` and `MoneyWire`; scale-vs-constant test; round-trip precision test. |
+| `workspace` (Wave 1) | Stub `wicket-core` exactly per §2. `rust_decimal` with `serde-with-str`; **no** `sqlx`. `Quantity<D>` is not `Serialize`. |
+| `wicket-core` (Wave 1 — complete, not stubbed, per audit G7) | Full implementation plus compile-fail tests under `tests/compile_fail/` for (a), (d), and reading `Converted`'s value. |
+| `wicket-uom` (Wave 2) | `impl UnitCatalog + UnitConverter`; owns scale and `Rounding` policy per `(item, unit, operation)`; calls `Converted::split`; owns conversion round-trip property tests. |
+| `wicket-ledger` (Wave 2) | Sole authority to post a residual. Normalizes to one unit per slice before `INSERT`. Rows carry exactly one measure. |
+| `wicket-db` (Wave 2) | `numeric(24,8)` / `numeric(24,6)`; `FromRow` for `AnyQuantity` and `MoneyWire`; scale-vs-constant test; round-trip precision test. |
 | `doc-datamodel` (Wave 1) | Column types and the three-representation boundary table from §6. |
 | `doc-api` (Wave 1) | `Decimal` on the wire is a **string**. `AnyQuantity` is the API contract shape. |
 | D2 ledger decision | Adopt §4.3's invariant sentence verbatim, or tell me which of A1–A5 changed. |

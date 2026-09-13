@@ -1,4 +1,4 @@
-# Contributing to Datum
+# Contributing to Wicket
 
 Conforms to: [ADR 0006](docs/adr/0006-license.md) (Accepted); crate graph as frozen in `PLAN.md` §5.
 
@@ -64,7 +64,7 @@ The crate contract in `PLAN.md` §5 is not negotiable in a pull request. Crate n
 - No `todo!()` on `main`.
 - Every migration has a tested reverse (`PLAN.md` §6 invariant 8).
 - No stored balances: no column holds a running quantity or value that application code updates (`PLAN.md` §6 invariant 1).
-- Tests that need Postgres skip locally and are required in CI (`PLAN.md` §7; `DATUM_REQUIRE_PG=1` makes a missing database a failure).
+- Tests that need Postgres skip locally and are required in CI (`PLAN.md` §7; `WICKET_REQUIRE_PG=1` makes a missing database a failure).
 
 ## 5. Commit messages
 

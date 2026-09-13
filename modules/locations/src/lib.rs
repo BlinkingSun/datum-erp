@@ -3,7 +3,7 @@
 #![cfg_attr(test, allow(unused_crate_dependencies))]
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
-use datum_audit as _;
+use wicket_audit as _;
 
 mod api;
 mod domain;
@@ -28,7 +28,7 @@ pub use store::{
     list, list_flat, location_id_by_code, seed_install, site_id_by_code, update,
 };
 
-use datum_module::ModuleManifest;
+use wicket_module::ModuleManifest;
 
 /// Embedded migrator.
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
@@ -39,18 +39,18 @@ pub fn manifest() -> Result<ModuleManifest> {
 }
 
 /// Run this crate's migrations on `pool` (after kernel migrators).
-pub async fn migrate(pool: &datum_db::Pool) -> Result<()> {
-    datum_db::migrate::run(pool, &[("datum-mod-locations", &MIGRATOR)])
+pub async fn migrate(pool: &wicket_db::Pool) -> Result<()> {
+    wicket_db::migrate::run(pool, &[("wicket-mod-locations", &MIGRATOR)])
         .await
         .map_err(Error::from)
 }
 
 /// Install: seed boundaries, register event schemas, register module row.
-pub async fn install(tx: &mut datum_db::Tx<'_>, enabled: bool) -> Result<()> {
+pub async fn install(tx: &mut wicket_db::Tx<'_>, enabled: bool) -> Result<()> {
     register_schemas_global()?;
     store::seed_install(tx).await?;
     let manifest = manifest()?;
-    datum_module::install(tx, &manifest, enabled).await?;
+    wicket_module::install(tx, &manifest, enabled).await?;
     Ok(())
 }
 
@@ -135,7 +135,7 @@ mod tests {
 
     #[test]
     fn postgres_helper_is_callable() {
-        let _ = datum_test::postgres_available();
+        let _ = wicket_test::postgres_available();
     }
 
     proptest! {

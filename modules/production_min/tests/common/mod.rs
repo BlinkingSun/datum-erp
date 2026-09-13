@@ -2,29 +2,29 @@
 
 #![allow(dead_code, unused_imports)]
 
-use datum_core::{
+use rust_decimal::Decimal;
+use sqlx::{PgPool, query_scalar as sql_query_scalar};
+use wicket_core::{
     Actor, ActorKind, AnyQuantity, CurrencyId, DimensionKind, Identifier, ItemId, LocationId,
     LotId, Money, UnitId,
 };
-use datum_db::{Tx, WriteContext, WritePool};
-use datum_identity::rbac::{RoleBundle, assign_role, seed_bundles};
-use datum_identity::{PrincipalKind, SYSTEM_ID, create_principal};
-use datum_ledger::CostMethod;
-use datum_mod_inventory::{
+use wicket_db::{Tx, WriteContext, WritePool};
+use wicket_identity::rbac::{RoleBundle, assign_role, seed_bundles};
+use wicket_identity::{PrincipalKind, SYSTEM_ID, create_principal};
+use wicket_ledger::CostMethod;
+use wicket_mod_inventory::{
     IssueRequest, LineInput, ReceiveRequest, ReleaseRequest, issue_to_wip, receive,
     release_from_quarantine,
 };
-use datum_mod_items::{Kind, NewItem};
-use datum_mod_locations::{CreateLocation, LocationKind, seed_install};
-use datum_mod_lots::{CreateLot, LotStatus};
-use datum_mod_production_min::{
+use wicket_mod_items::{Kind, NewItem};
+use wicket_mod_locations::{CreateLocation, LocationKind, seed_install};
+use wicket_mod_lots::{CreateLot, LotStatus};
+use wicket_mod_production_min::{
     CompleteRequest, CreateWorkOrder, DOC_TYPE, FinishedLotTemplate, IssueMaterialRequest,
     StartRequest, Status, WorkOrder, complete, create, load, release, start,
 };
-use datum_module::{Kernel, KernelBuilder, Profile};
-use datum_statemachine::DocRef;
-use rust_decimal::Decimal;
-use sqlx::{PgPool, query_scalar as sql_query_scalar};
+use wicket_module::{Kernel, KernelBuilder, Profile};
+use wicket_statemachine::DocRef;
 
 pub const EA: UnitId = UnitId(1);
 pub const IN: UnitId = UnitId(3);
@@ -55,7 +55,7 @@ pub fn qty_ea(s: &str) -> AnyQuantity {
     }
 }
 
-pub fn write_pool(db: &datum_test::TestDb) -> WritePool {
+pub fn write_pool(db: &wicket_test::TestDb) -> WritePool {
     WritePool::new(db.app_pool().clone())
 }
 
@@ -95,22 +95,22 @@ pub fn edge_ctx(kernel: &Kernel, actor: Actor, id: Identifier, edge: &str) -> Wr
 /// D-2b-13: one published order. `install_upto` is not on this tree yet
 /// (glue lane); fall back to kernel prefix/suffix then `wave_2s1_migrators`
 /// / `slice_migrators`, with `audit_attach` up before this crate's DDL.
-pub async fn install_through(db: &datum_test::TestDb, crate_name: &str) {
-    datum_module::migrate_prefix(db.migrate_pool())
+pub async fn install_through(db: &wicket_test::TestDb, crate_name: &str) {
+    wicket_module::migrate_prefix(db.migrate_pool())
         .await
         .expect("migrate prefix");
-    datum_module::migrate_suffix(db.migrate_pool())
+    wicket_module::migrate_suffix(db.migrate_pool())
         .await
         .unwrap_or_else(|e| panic!("migrate suffix: {e:#}"));
     let boot = db.bootstrap_pool().await.expect("bootstrap pool");
-    datum_audit::install_privileged(&boot)
+    wicket_audit::install_privileged(&boot)
         .await
         .expect("install_privileged");
     boot.close().await;
 
     let mut found = false;
-    for (name, migrator) in datum_module::wave_2s1_migrators().expect("wave_2s1") {
-        datum_db::migrate::run(db.migrate_pool(), &[(name, migrator)])
+    for (name, migrator) in wicket_module::wave_2s1_migrators().expect("wave_2s1") {
+        wicket_db::migrate::run(db.migrate_pool(), &[(name, migrator)])
             .await
             .unwrap_or_else(|e| panic!("migrate {name}: {e:#}"));
         if name == crate_name {
@@ -119,8 +119,8 @@ pub async fn install_through(db: &datum_test::TestDb, crate_name: &str) {
         }
     }
     if !found {
-        for (name, migrator) in datum_module::slice_migrators() {
-            datum_db::migrate::run(db.migrate_pool(), &[(name, migrator)])
+        for (name, migrator) in wicket_module::slice_migrators() {
+            wicket_db::migrate::run(db.migrate_pool(), &[(name, migrator)])
                 .await
                 .unwrap_or_else(|e| panic!("migrate {name}: {e:#}"));
             if name == crate_name {
@@ -130,29 +130,29 @@ pub async fn install_through(db: &datum_test::TestDb, crate_name: &str) {
         }
     }
     assert!(found, "{crate_name} not in published wave_2s1/slice order");
-    datum_module::attach_kernel_audit(db.migrate_pool())
+    wicket_module::attach_kernel_audit(db.migrate_pool())
         .await
         .expect("attach_kernel_audit");
-    datum_module::attach_slice_audit(db.migrate_pool())
+    wicket_module::attach_slice_audit(db.migrate_pool())
         .await
         .expect("attach_slice_audit");
 }
 
-pub async fn migrate_all(db: &datum_test::TestDb) {
-    install_through(db, "datum-mod-production-min").await;
+pub async fn migrate_all(db: &wicket_test::TestDb) {
+    install_through(db, "wicket-mod-production-min").await;
 }
 
-pub async fn boot_kernel(db: &datum_test::TestDb) -> Kernel {
+pub async fn boot_kernel(db: &wicket_test::TestDb) -> Kernel {
     migrate_all(db).await;
     let profile = Profile::plain_shop().unwrap();
     let mut builder = Kernel::builder(db.app_pool().clone(), profile.clone());
-    datum_mod_items::register(&mut builder, &profile).expect("register items");
+    wicket_mod_items::register(&mut builder, &profile).expect("register items");
     builder
-        .apply_manifest(&datum_mod_locations::manifest().expect("locations manifest"))
+        .apply_manifest(&wicket_mod_locations::manifest().expect("locations manifest"))
         .expect("register locations");
-    datum_mod_lots::register(&mut builder, &profile).expect("register lots");
-    datum_mod_inventory::register(&mut builder, &profile).expect("register inventory");
-    datum_mod_production_min::register(&mut builder, &profile).expect("register production");
+    wicket_mod_lots::register(&mut builder, &profile).expect("register lots");
+    wicket_mod_inventory::register(&mut builder, &profile).expect("register inventory");
+    wicket_mod_production_min::register(&mut builder, &profile).expect("register production");
     builder.build().await.expect("kernel build")
 }
 
@@ -167,14 +167,14 @@ pub struct World {
     pub lot_bar: LotId,
 }
 
-pub async fn seed_world(db: &datum_test::TestDb, kernel: Kernel) -> World {
+pub async fn seed_world(db: &wicket_test::TestDb, kernel: Kernel) -> World {
     let pool = write_pool(db);
     let mut tx = Tx::begin(&pool, &boot_ctx()).await.expect("begin seed");
     seed_install(&mut tx).await.expect("seed locations");
-    let site = datum_mod_locations::default_site_id(&mut tx)
+    let site = wicket_mod_locations::default_site_id(&mut tx)
         .await
         .expect("default site");
-    let quarantine = datum_mod_locations::create(
+    let quarantine = wicket_mod_locations::create(
         &mut tx,
         CreateLocation {
             code: "WH-Q".into(),
@@ -187,7 +187,7 @@ pub async fn seed_world(db: &datum_test::TestDb, kernel: Kernel) -> World {
     .await
     .expect("quarantine")
     .id;
-    let available = datum_mod_locations::create(
+    let available = wicket_mod_locations::create(
         &mut tx,
         CreateLocation {
             code: "WH-A".into(),
@@ -200,7 +200,7 @@ pub async fn seed_world(db: &datum_test::TestDb, kernel: Kernel) -> World {
     .await
     .expect("available")
     .id;
-    let fg = datum_mod_locations::create(
+    let fg = wicket_mod_locations::create(
         &mut tx,
         CreateLocation {
             code: "WH-FG".into(),
@@ -213,7 +213,7 @@ pub async fn seed_world(db: &datum_test::TestDb, kernel: Kernel) -> World {
     .await
     .expect("fg")
     .id;
-    let bar = datum_mod_items::create(
+    let bar = wicket_mod_items::create(
         &mut tx,
         &kernel,
         NewItem {
@@ -231,7 +231,7 @@ pub async fn seed_world(db: &datum_test::TestDb, kernel: Kernel) -> World {
     .await
     .expect("bar")
     .id;
-    let screw = datum_mod_items::create(
+    let screw = wicket_mod_items::create(
         &mut tx,
         &kernel,
         NewItem {
@@ -250,7 +250,7 @@ pub async fn seed_world(db: &datum_test::TestDb, kernel: Kernel) -> World {
     .expect("screw")
     .id;
     let lot_ctx = boot_ctx();
-    let lot_bar = datum_mod_lots::create_lot(
+    let lot_bar = wicket_mod_lots::create_lot(
         &mut tx,
         &kernel,
         &lot_ctx,
@@ -517,7 +517,7 @@ pub async fn complete_wo(
     w: &World,
     pool: &WritePool,
     id: Identifier,
-) -> datum_mod_production_min::Completion {
+) -> wicket_mod_production_min::Completion {
     let ctx = edge_ctx(&w.kernel, w.actor, id, "complete");
     let mut tx = Tx::begin(pool, &ctx).await.expect("begin complete");
     let c = complete(

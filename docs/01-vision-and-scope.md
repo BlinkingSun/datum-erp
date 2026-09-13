@@ -6,20 +6,18 @@
 
 ## 1. The name
 
-Working name: **Datum**.
+Chosen name: **Wicket**.
 
-In geometric dimensioning and tolerancing, a datum is the reference feature every
-other measurement is taken from. That is exactly what this system is meant to be for a
-shop: the single reference that everything else is measured against. It is also the
-singular of *data*. The metaphor is machinist-native and the double meaning is
-on-target.
+Wicket ERP is the product name (chosen 2026-09-13). A wicket is a small gate — the
+passage into the shop's system of record. The word is uncommon enough to search for.
 
-It is a placeholder until someone objects. The name appears in exactly one constant in
-the codebase so it stays cheap to change. Alternatives considered:
+The name appears in exactly one constant in the codebase so it stays cheap to change.
+Alternatives considered:
 
 | Name | For | Against |
 |---|---|---|
-| **Datum** | GD&T term, double meaning, short | Common English word, harder to search for |
+| **Wicket** | Short, searchable, gate metaphor | Cricket association outside the US — chosen 2026-09-13 |
+| **Datum** | GD&T term, double meaning, short | Dropped 2026-09-13: an existing product already uses the name |
 | **Mandrel** | The shaft everything is built around, matches a core-plus-modules design | Less obvious meaning outside machining |
 | **Tracewright** | Traceability plus maker, unique and searchable | Invented, slightly precious |
 | **Arbor** | Machining term, suggests a tree of modules | Several existing projects use it |
@@ -49,7 +47,7 @@ deletable by an administrator. See `_team/reports/sweep-plan-competitive.md`.
 
 **It installs next to a PostgreSQL the operating system already owns.** One binary per
 platform, on macOS, Windows, and Linux. On a machine that already runs PostgreSQL 16 or
-later, a shop installs Datum and is entering data in under ten minutes, with no database
+later, a shop installs Wicket and is entering data in under ten minutes, with no database
 administrator and no container runtime. On a bare machine the honest number is thirty
 minutes, because PostgreSQL is installed first from its own platform installer. An
 evaluator who wants to see the product before installing anything runs one downloaded
@@ -163,12 +161,12 @@ Stating these plainly now saves arguments later.
 Concrete tests, in rough order of when they become answerable.
 
 1. **Install.** On a machine that already runs PostgreSQL 16 or later, a shop installs
-   Datum and is entering data in under ten minutes, on any of three operating systems,
+   Wicket and is entering data in under ten minutes, on any of three operating systems,
    with no database administrator and no container runtime. On a bare machine the honest
    number is thirty minutes, because PostgreSQL is installed first from its own platform
    installer — one administrator prompt on Windows, one package manager command on
    Linux, one Homebrew formula on macOS — and the shop is told exactly which version,
-   which download, and what to click. Datum's first-run wizard does every remaining step
+   which download, and what to click. Wicket's first-run wizard does every remaining step
    itself: it finds the cluster, creates the database, the roles and the grants, runs the
    migrations, and verifies them. Nobody writes a connection string and nobody runs
    `psql`. An evaluator who wants to see the product before installing anything runs one

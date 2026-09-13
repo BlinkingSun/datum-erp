@@ -10,9 +10,9 @@ Date: 2026-09-11. Reviewer: grok-4.6. Product files not modified.
 
 The stub approach is the **right bottleneck shape** and the **wrong level of specification**. One Wave 1 workspace lane that freezes names, edges, error types, and lints before a 13-wide fan-out is how isolated git worktrees stay mergeable. PLAN §9 is correct about *why*. PLAN is silent about *what a stub is*, and that silence will make Wave 2 fail its own acceptance criteria.
 
-A Wave 2 worker in an isolated worktree branched from merged Wave 1 sees **only** what Wave 1 committed. If Wave 1 crates are `todo!()` empty libs, `datum-ledger` cannot name `datum_uom::Quantity` / `datum_uom::Error` / `datum_audit::AuditCtx` in signatures or in a property-test generator. `cargo test -p datum-ledger` will not compile, let alone pass. PLAN §7 then becomes unsatisfiable in Wave 2.
+A Wave 2 worker in an isolated worktree branched from merged Wave 1 sees **only** what Wave 1 committed. If Wave 1 crates are `todo!()` empty libs, `wicket-ledger` cannot name `wicket_uom::Quantity` / `wicket_uom::Error` / `wicket_audit::AuditCtx` in signatures or in a property-test generator. `cargo test -p wicket-ledger` will not compile, let alone pass. PLAN §7 then becomes unsatisfiable in Wave 2.
 
-**PLAN implies (a) for cross-crate tests and (b) for the ledger crate itself, and does not notice the contradiction.** Isolated worktrees cannot see each other's unmerged implementations, so Wave 2 tests that need a *real* ledger *and* a *real* UoM engine cannot pass until merge. The ledger property tests, however, live *inside* `datum-ledger`. They can run in that lane alone if (and only if) dependency stubs export **constructable types and traits**, and the ledger lane writes its own in-memory engine / TestDb fixtures. That is enough for "property tests on `datum-ledger`" as a Wave 2 acceptance criterion. It is **not** enough for workspace-level integration tests. Those are Wave 2.5 / phase-end gate, and PLAN does not say so.
+**PLAN implies (a) for cross-crate tests and (b) for the ledger crate itself, and does not notice the contradiction.** Isolated worktrees cannot see each other's unmerged implementations, so Wave 2 tests that need a *real* ledger *and* a *real* UoM engine cannot pass until merge. The ledger property tests, however, live *inside* `wicket-ledger`. They can run in that lane alone if (and only if) dependency stubs export **constructable types and traits**, and the ledger lane writes its own in-memory engine / TestDb fixtures. That is enough for "property tests on `wicket-ledger`" as a Wave 2 acceptance criterion. It is **not** enough for workspace-level integration tests. Those are Wave 2.5 / phase-end gate, and PLAN does not say so.
 
 **Do not start the workspace lane until an opus DECISION writes the stub SPEC (this document, plus the Quantity decision from slice 5).** Typing 15 crates against an unfrozen `Quantity` is how you pay the "most expensive crate to get wrong" cost twice.
 
@@ -25,10 +25,10 @@ A Wave 2 worker in an isolated worktree branched from merged Wave 1 sees **only*
 | One workspace lane owns the skeleton **and** a compiling stub for every crate in §5 | PLAN §3 | Correct bottleneck. Underspecified payload. |
 | Stubs "fix names, dependency edges, error types, and lint configuration" | PLAN §9 | Necessary, not sufficient. Missing: toolchain pin, constructable types, sqlx offline policy, TestDb crate, migration placeholders, `Cargo.lock` / `.sqlx` ownership, `.gitignore` seam with `doc-repo`. |
 | Wave 2: 13 lanes, each owns exactly one crate directory, all branch from merged Wave 1 | PLAN §3 | Sound **if** Wave 2 never edits workspace `Cargo.toml` members, `[workspace.dependencies]`, `rust-toolchain.toml`, `.github/`, `justfile`, `.cargo/`, or a workspace-root `.sqlx/`. PLAN never forbids those edits. |
-| Property tests on `datum-ledger` are a per-lane Wave 2 obligation | PLAN §7 | Compiles only against **rich** uom/audit/core/db stubs. Runs only if the ledger lane owns an in-memory (or TestDb) engine. Cross-crate "real uom + real ledger" tests cannot pass in isolated worktrees. |
+| Property tests on `wicket-ledger` are a per-lane Wave 2 obligation | PLAN §7 | Compiles only against **rich** uom/audit/core/db stubs. Runs only if the ledger lane owns an in-memory (or TestDb) engine. Cross-crate "real uom + real ledger" tests cannot pass in isolated worktrees. |
 | `rust-toolchain.toml` is owned by workspace | PLAN §3 table | File is named. **Channel, edition, MSRV, components are not.** Gap. |
 | License via workspace package metadata | implied by any real `Cargo.toml` | ADR 0006 is **Open**. Wave 1 cannot honestly set `license.workspace`. |
-| Thirteen Wave 2 lanes vs 15 crates in §5 | PLAN §§3, 5 | Off-by-one is slice 3's job. Wave 1 must still **list and stub every member**, including `datum-module` and `datum-server`, so Wave 2/3 never touch `[workspace].members`. |
+| Thirteen Wave 2 lanes vs 15 crates in §5 | PLAN §§3, 5 | Off-by-one is slice 3's job. Wave 1 must still **list and stub every member**, including `wicket-module` and `wicket-server`, so Wave 2/3 never touch `[workspace].members`. |
 
 Kernel crates in §5 (15): `core`, `db`, `audit`, `identity`, `esign`, `uom`, `numbering`, `events`, `jobs`, `ledger`, `statemachine`, `documents`, `customfields`, `module`, `server`. Wave 2 "13" is almost certainly the 13 that are not `module` and not `server`. Wave 1 stubs **all 15** plus a 16th test crate (below).
 
@@ -40,7 +40,7 @@ Isolated worktrees share git objects and have separate working trees. They **can
 
 1. **Crate-dir exclusivity is sufficient for `src/` merge** provided each Wave 2 lane rewrites only `crates/<its-crate>/**`. Replacing a stub `lib.rs` with a real one is a single-parent merge against main, not a 13-way collision.
 2. **Workspace-root files are a 13-way collision.** If any Wave 2 lane adds a member, a workspace dep, a CI job, a `just` recipe, or a query cache file at repo root, the Wave 2 merge is hell. **Normative rule:** Wave 2 may not edit anything outside its crate directory except `Cargo.lock` (see §6.5). New workspace deps or new members are an escalation, same rule as PLAN §5 new edges.
-3. **`cargo test --workspace` in a Wave 2 worktree compiles stub implementations of every *other* crate.** Ledger tests that call `datum_uom::convert()` and expect a real conversion table will fail or skip until uom merges. Design tests to the stub contract, not to the sibling's future body.
+3. **`cargo test --workspace` in a Wave 2 worktree compiles stub implementations of every *other* crate.** Ledger tests that call `wicket_uom::convert()` and expect a real conversion table will fail or skip until uom merges. Design tests to the stub contract, not to the sibling's future body.
 4. **Shared `CARGO_TARGET_DIR` across 13 concurrent worktrees will lock-fight.** Wave 1 justfile / CI must use the per-worktree default `target/` (or a per-lane dir). Do not set a workspace-global `build.target-dir` in `.cargo/config.toml`.
 5. **rust-analyzer in a worktree** loads the workspace. Stub crates that `deny(warnings)` and then warn will paint the whole workspace red and fail CI. See §8.
 
@@ -56,8 +56,8 @@ What they **do** require from Wave 1 stubs:
 
 | Need | Must be in Wave 1 stub? | Who implements the body? |
 |---|---|---|
-| `Identifier`, `Money`, `Quantity`, `Actor`, `datum_core::Error` / `Result` | **Yes, real types** | Prefer **complete** `datum-core` in Wave 1, not a stub (see §5.1) |
-| `UnitId` / `Unit` newtype, constructable in tests (`UnitId::each()`, `UnitId::inch()`, or `UnitId::from_uuid`) | **Yes** | `datum-uom` stub constructors; conversion tables are Wave 2 uom |
+| `Identifier`, `Money`, `Quantity`, `Actor`, `wicket_core::Error` / `Result` | **Yes, real types** | Prefer **complete** `wicket-core` in Wave 1, not a stub (see §5.1) |
+| `UnitId` / `Unit` newtype, constructable in tests (`UnitId::each()`, `UnitId::inch()`, or `UnitId::from_uuid`) | **Yes** | `wicket-uom` stub constructors; conversion tables are Wave 2 uom |
 | `Quantity` arithmetic in **one** unit (add/sub signed amounts, no convert) | **Yes if Quantity lives in core**; uom stub re-exports | core |
 | `convert(qty, to) -> Result<Quantity>` | Trait in the uom stub; **body may return `Err(Error::Unimplemented)`** | Wave 2 uom. Ledger tests must not depend on success. Use one unit, or a test fake **inside the ledger crate**. |
 | Audit write / actor context | Trait + `AuditCtx` type in audit stub | Wave 2 audit. Ledger tests use a recording fake **inside the ledger crate**, or skip audit on the in-memory path. |
@@ -67,13 +67,13 @@ What they **do** require from Wave 1 stubs:
 **Implied PLAN policy, made explicit:**
 
 - **(a)** Wave 2 crate tests that cross into another kernel crate's *behavior* are unit-only against stubs. Cross-crate integration is Wave 2.5 / FINDINGS-0 whole-program, after merge.
-- **(b)** Property tests on `datum-ledger` run in the ledger lane against **(b1)** an in-memory engine (no Postgres, no sibling crates beyond types) and optionally **(b2)** Postgres via `TestDb` + *that crate's* migrations. (b1) is the Wave 2 done-gate. (b2) is the same lane if TestDb works; it still must not join tables that only exist in unmerged sibling crates.
+- **(b)** Property tests on `wicket-ledger` run in the ledger lane against **(b1)** an in-memory engine (no Postgres, no sibling crates beyond types) and optionally **(b2)** Postgres via `TestDb` + *that crate's* migrations. (b1) is the Wave 2 done-gate. (b2) is the same lane if TestDb works; it still must not join tables that only exist in unmerged sibling crates.
 
-(b1) is enough for PLAN §7 as written. It is **not** enough for ADR 0004's "enforced by the database, not by application convention." That half of the invariant is a Postgres test in the ledger crate, which needs TestDb, not a real `datum-uom`.
+(b1) is enough for PLAN §7 as written. It is **not** enough for ADR 0004's "enforced by the database, not by application convention." That half of the invariant is a Postgres test in the ledger crate, which needs TestDb, not a real `wicket-uom`.
 
 **PLAN amendment text (paste):**
 
-> Wave 2 acceptance for `datum-ledger` property tests is: generated sequences against the in-memory engine, plus (if `TestDb` is available) the same invariants against Postgres using only `datum-ledger` migrations and stub types from dependencies. Tests that require a non-stub `datum-uom` conversion engine or a non-stub audit interceptor are phase-end integration tests and are not a Wave 2 lane done-gate.
+> Wave 2 acceptance for `wicket-ledger` property tests is: generated sequences against the in-memory engine, plus (if `TestDb` is available) the same invariants against Postgres using only `wicket-ledger` migrations and stub types from dependencies. Tests that require a non-stub `wicket-uom` conversion engine or a non-stub audit interceptor are phase-end integration tests and are not a Wave 2 lane done-gate.
 
 ---
 
@@ -98,7 +98,7 @@ crates/<each>/Cargo.toml
 crates/<each>/src/lib.rs            # and only the files listed per crate below
 crates/<each>/migrations/           # db-backed crates
 crates/<each>/build.rs              # db-backed crates (sqlx migrate build-script)
-crates/datum-test/                  # NEW — not in PLAN §5
+crates/wicket-test/                  # NEW — not in PLAN §5
 ```
 
 Collision with `doc-repo` (README, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, **`.gitignore`**): **Wave 1 workspace must own the Rust/sqlx bits of `.gitignore`** (`/target`, `**/*.rs.bk`, `.env`, `*.pdb`) and must **not** ignore `.sqlx/` or `migrations/`. If `doc-repo` also writes `.gitignore`, the PLAN ownership table is wrong; give workspace a `gitignore-rust` fragment or make `doc-repo` land first with a stub `.gitignore` that workspace is allowed to append. Do not let two lanes write the same file.
@@ -127,22 +127,22 @@ Do not add `rust-analyzer` / `rust-src` to the pin (CI image bloat). Developers 
 [workspace]
 resolver = "3"
 members = [
-  "crates/datum-core",
-  "crates/datum-db",
-  "crates/datum-audit",
-  "crates/datum-identity",
-  "crates/datum-esign",
-  "crates/datum-uom",
-  "crates/datum-numbering",
-  "crates/datum-events",
-  "crates/datum-jobs",
-  "crates/datum-ledger",
-  "crates/datum-statemachine",
-  "crates/datum-documents",
-  "crates/datum-customfields",
-  "crates/datum-module",
-  "crates/datum-server",
-  "crates/datum-test",          # NEW; Wave 2 does not own this crate
+  "crates/wicket-core",
+  "crates/wicket-db",
+  "crates/wicket-audit",
+  "crates/wicket-identity",
+  "crates/wicket-esign",
+  "crates/wicket-uom",
+  "crates/wicket-numbering",
+  "crates/wicket-events",
+  "crates/wicket-jobs",
+  "crates/wicket-ledger",
+  "crates/wicket-statemachine",
+  "crates/wicket-documents",
+  "crates/wicket-customfields",
+  "crates/wicket-module",
+  "crates/wicket-server",
+  "crates/wicket-test",          # NEW; Wave 2 does not own this crate
 ]
 
 [workspace.package]
@@ -154,21 +154,21 @@ publish = false
 
 [workspace.dependencies]
 # path crates — versions inherit workspace.package
-datum-core          = { path = "crates/datum-core" }
-datum-db            = { path = "crates/datum-db" }
-datum-audit         = { path = "crates/datum-audit" }
-datum-identity      = { path = "crates/datum-identity" }
-datum-esign         = { path = "crates/datum-esign" }
-datum-uom           = { path = "crates/datum-uom" }
-datum-numbering     = { path = "crates/datum-numbering" }
-datum-events        = { path = "crates/datum-events" }
-datum-jobs          = { path = "crates/datum-jobs" }
-datum-ledger        = { path = "crates/datum-ledger" }
-datum-statemachine  = { path = "crates/datum-statemachine" }
-datum-customfields  = { path = "crates/datum-customfields" }
-datum-documents     = { path = "crates/datum-documents" }
-datum-module        = { path = "crates/datum-module" }
-datum-test          = { path = "crates/datum-test" }
+wicket-core          = { path = "crates/wicket-core" }
+wicket-db            = { path = "crates/wicket-db" }
+wicket-audit         = { path = "crates/wicket-audit" }
+wicket-identity      = { path = "crates/wicket-identity" }
+wicket-esign         = { path = "crates/wicket-esign" }
+wicket-uom           = { path = "crates/wicket-uom" }
+wicket-numbering     = { path = "crates/wicket-numbering" }
+wicket-events        = { path = "crates/wicket-events" }
+wicket-jobs          = { path = "crates/wicket-jobs" }
+wicket-ledger        = { path = "crates/wicket-ledger" }
+wicket-statemachine  = { path = "crates/wicket-statemachine" }
+wicket-customfields  = { path = "crates/wicket-customfields" }
+wicket-documents     = { path = "crates/wicket-documents" }
+wicket-module        = { path = "crates/wicket-module" }
+wicket-test          = { path = "crates/wicket-test" }
 
 # closed allow-list of third-party crates. New entries = escalation.
 # pin exact versions in Wave 1 so Cargo.lock is complete for Wave 2.
@@ -186,7 +186,7 @@ rust_decimal  = { version = "1", features = ["serde-str"] }
 tracing       = "0.1"
 proptest      = "1"
 anyhow        = "1"            # binaries / tests only, not kernel libs
-axum          = "0.8"          # datum-server stub only
+axum          = "0.8"          # wicket-server stub only
 tower         = "0.5"
 tower-http    = { version = "0.6", features = ["trace"] }
 clap          = { version = "4", features = ["derive", "env"] }
@@ -212,11 +212,11 @@ expect_used = "warn"
 
 **`unused_crate_dependencies`:** every dependency listed in a crate `Cargo.toml` must appear in a signature, a re-export, or a `use` that is not cfg-gated away. Otherwise Wave 1 CI fails.
 
-### 4.4 Per-crate `Cargo.toml` (template — `datum-uom` shown)
+### 4.4 Per-crate `Cargo.toml` (template — `wicket-uom` shown)
 
 ```toml
 [package]
-name = "datum-uom"
+name = "wicket-uom"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -228,9 +228,9 @@ description = "Kernel units of measure (stub API; Wave 2 fills the engine)."
 workspace = true
 
 [dependencies]
-datum-core.workspace = true
-datum-db.workspace = true
-datum-audit.workspace = true
+wicket-core.workspace = true
+wicket-db.workspace = true
+wicket-audit.workspace = true
 sqlx.workspace = true          # used: migrate! and (later) query!
 serde.workspace = true
 thiserror.workspace = true
@@ -239,29 +239,29 @@ rust_decimal.workspace = true
 
 [features]
 default = []
-test-utils = ["datum-test"]    # never default; Wave 2 tests opt in
+test-utils = ["wicket-test"]    # never default; Wave 2 tests opt in
 
-[dependencies.datum-test]
+[dependencies.wicket-test]
 workspace = true
 optional = true
 
 [dev-dependencies]
-datum-test.workspace = true
+wicket-test.workspace = true
 proptest.workspace = true
 tokio.workspace = true
 ```
 
 Rules:
 
-- Package `name` **is** the crate name in PLAN §5. No `datum_uom` vs `datum-uom` games; Cargo maps hyphens to underscores in Rust, keep the hyphen in toml.
+- Package `name` **is** the crate name in PLAN §5. No `wicket_uom` vs `wicket-uom` games; Cargo maps hyphens to underscores in Rust, keep the hyphen in toml.
 - `version` / `edition` / `rust-version` / `license` **always** `.workspace = true`.
 - `[lints] workspace = true` on **every** member. Forgetting this is how workspace clippy config silently does nothing (well-known Cargo 1.74+ footgun).
-- Features: `default = []`. `test-utils` is the only extra feature Wave 1 is allowed to add, and it may only enable `datum-test` plus extra test constructors. Wave 2 may add features inside the crate without renaming `test-utils`.
+- Features: `default = []`. `test-utils` is the only extra feature Wave 1 is allowed to add, and it may only enable `wicket-test` plus extra test constructors. Wave 2 may add features inside the crate without renaming `test-utils`.
 - Dependencies **exactly** the PLAN §5 graph. No extra kernel edges. Third-party crates only from the workspace allow-list.
-- `datum-server` is the only stub allowed to depend on `axum` / `clap`.
-- `datum-core` depends on **nothing** in the graph. Third-party: `thiserror`, `serde`, `uuid`, `rust_decimal` (and `chrono` if `Actor` timestamps live here — prefer not; time is a server concern per ADR 0005).
+- `wicket-server` is the only stub allowed to depend on `axum` / `clap`.
+- `wicket-core` depends on **nothing** in the graph. Third-party: `thiserror`, `serde`, `uuid`, `rust_decimal` (and `chrono` if `Actor` timestamps live here — prefer not; time is a server concern per ADR 0005).
 
-`datum-ledger` crate template is the same shape with deps `datum-core`, `datum-db`, `datum-audit`, `datum-uom` plus the shared third-party set.
+`wicket-ledger` crate template is the same shape with deps `wicket-core`, `wicket-db`, `wicket-audit`, `wicket-uom` plus the shared third-party set.
 
 ### 4.5 `.cargo/config.toml`
 
@@ -303,16 +303,16 @@ Wave 1 CI must call these. A stub that cannot `just clippy` and `just test-lib` 
 
 Every public error enum is `#[non_exhaustive]` so Wave 2 can add variants without a metadata dance. Downstream crates must use `?` / `match` with a wildcard.
 
-### 5.1 `datum-core` — implement for real, do not stub
+### 5.1 `wicket-core` — implement for real, do not stub
 
-PLAN §5: primitives with no database dependency; "the crate most expensive to get wrong." Empty newtypes are the whole crate. Wave 1 should **ship a complete `datum-core`**, not a stub, **after** the Quantity decision (slice 5) lands. Pulling core out of the Wave 2 fan-out is the single highest-leverage PLAN change in this slice.
+PLAN §5: primitives with no database dependency; "the crate most expensive to get wrong." Empty newtypes are the whole crate. Wave 1 should **ship a complete `wicket-core`**, not a stub, **after** the Quantity decision (slice 5) lands. Pulling core out of the Wave 2 fan-out is the single highest-leverage PLAN change in this slice.
 
 Until slice 5 decides, Wave 1 **must not freeze** `Quantity<U>` vs a runtime `UnitId`. A wrong freeze contaminates every Wave 2 signature.
 
 Minimum surface that other crates will name (names are PLAN's; shapes are placeholders pending slice 5):
 
 ```rust
-//! crates/datum-core/src/lib.rs
+//! crates/wicket-core/src/lib.rs
 #![forbid(unsafe_code)]
 
 mod actor;
@@ -331,17 +331,17 @@ pub use quantity::Quantity;
 | Type | Must be real | Notes |
 |---|---|---|
 | `Identifier` | yes | Newtype over `uuid::Uuid` (v7). `Copy`, `Eq`, `Hash`, `Serialize`, `Display`. `Identifier::generate()` / `Identifier::from_uuid`. |
-| `Actor` | yes | Newtype id + kind enum `{ User, ServicePrincipal }`. No DB. RBAC is `datum-identity`. |
+| `Actor` | yes | Newtype id + kind enum `{ User, ServicePrincipal }`. No DB. RBAC is `wicket-identity`. |
 | `Money` | yes | Amount + currency code + **explicit scale**. Do not use `f64`. `rust_decimal::Decimal`. No implicit rounding. |
 | `Quantity` | **gated on slice 5** | PLAN says type parameter. Slice 5 may kill that. Freeze only after DECISION. |
 | `Error` | yes | `#[non_exhaustive]`, `thiserror`. Variants other crates will match: `Invariant`, `Overflow`, `Unimplemented` (core itself should not need Unimplemented if complete). |
 | `Result<T>` | yes | `type Result<T> = std::result::Result<T, Error>;` |
 
-Re-exports: core re-exports **nothing** from other datum crates (it has no deps). Other crates **may** re-export core types from their crate root so callers write `datum_ledger::Identifier` — **do not do that in stubs.** Re-export sugar is a Wave 2/3 convenience and causes glob-import collisions. Callers use `datum_core::Identifier`.
+Re-exports: core re-exports **nothing** from other wicket crates (it has no deps). Other crates **may** re-export core types from their crate root so callers write `wicket_ledger::Identifier` — **do not do that in stubs.** Re-export sugar is a Wave 2/3 convenience and causes glob-import collisions. Callers use `wicket_core::Identifier`.
 
 Derives on every value type: `Debug, Clone, Copy` (if true), `Eq, PartialEq, Hash, Serialize, Deserialize`. `Copy` on `Money`/`Quantity` only if the inner Decimal is Copy (it is).
 
-### 5.2 `datum-db` stub
+### 5.2 `wicket-db` stub
 
 Real types / traits:
 
@@ -358,15 +358,15 @@ Must **not** contain: the sealed Write interceptor (Wave 2 db + audit), real rol
 
 Migrations: no-op pair, see §5.8.
 
-### 5.3 `datum-audit` stub — example of a dependency the ledger names
+### 5.3 `wicket-audit` stub — example of a dependency the ledger names
 
 ```rust
-//! crates/datum-audit/src/lib.rs
+//! crates/wicket-audit/src/lib.rs
 #![forbid(unsafe_code)]
 
-use datum_core::{Actor, Identifier, Result as CoreResult};
+use wicket_core::{Actor, Identifier, Result as CoreResult};
 
-pub use datum_core::{Actor, Identifier};
+pub use wicket_core::{Actor, Identifier};
 
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -374,9 +374,9 @@ pub enum Error {
     #[error("audit stub: not implemented")]
     Unimplemented,
     #[error(transparent)]
-    Core(#[from] datum_core::Error),
+    Core(#[from] wicket_core::Error),
     #[error(transparent)]
-    Db(#[from] datum_db::Error),
+    Db(#[from] wicket_db::Error),
 }
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -400,7 +400,7 @@ pub struct AuditEntry {
 // pub entity: String,
 
 /// The write path other crates call. Body is a stub error, not todo!().
-pub async fn record(_tx: &mut datum_db::Tx<'_>, _ctx: &AuditCtx, _entry: AuditEntry) -> Result<Identifier> {
+pub async fn record(_tx: &mut wicket_db::Tx<'_>, _ctx: &AuditCtx, _entry: AuditEntry) -> Result<Identifier> {
     Err(Error::Unimplemented)
 }
 
@@ -409,19 +409,19 @@ pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
 Freeze `AuditEntry.entity` as `String` (not `&'static str`) so Wave 2 does not have to change the signature. I flag the `&'static` version above as a trap.
 
-Traits other crates will impl or take as generics: if slice 2 decides "sealed Write trait in datum-db", that trait lives in `datum-db`, not here. Audit stub only needs the types ledger/identity/esign will name.
+Traits other crates will impl or take as generics: if slice 2 decides "sealed Write trait in wicket-db", that trait lives in `wicket-db`, not here. Audit stub only needs the types ledger/identity/esign will name.
 
 `#[cfg(test)]` / `test-utils`: `AuditCtx::test(actor: Actor) -> Self`. No recording fake — recording fakes belong in the **consumer** crate so Wave 2 audit does not merge-conflict on them.
 
-### 5.4 `datum-uom` stub — the other ledger dependency
+### 5.4 `wicket-uom` stub — the other ledger dependency
 
 Pending slice 5 for `Quantity`. Assuming PLAN-as-written until DECISION:
 
 ```rust
-//! crates/datum-uom/src/lib.rs
+//! crates/wicket-uom/src/lib.rs
 #![forbid(unsafe_code)]
 
-pub use datum_core::{Identifier, Quantity};
+pub use wicket_core::{Identifier, Quantity};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct UnitId(Identifier);
@@ -446,9 +446,9 @@ pub enum Error {
     #[error("unknown unit")]
     UnknownUnit,
     #[error(transparent)]
-    Core(#[from] datum_core::Error),
+    Core(#[from] wicket_core::Error),
     #[error(transparent)]
-    Db(#[from] datum_db::Error),
+    Db(#[from] wicket_db::Error),
 }
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -457,7 +457,7 @@ pub fn convert<U>(_qty: Quantity<U>, _to: UnitId) -> Result<Quantity<U>> {
     Err(Error::Unimplemented)
 }
 
-pub async fn load_unit(_pool: &datum_db::Pool, _id: UnitId) -> Result<UnitId> {
+pub async fn load_unit(_pool: &wicket_db::Pool, _id: UnitId) -> Result<UnitId> {
     Err(Error::Unimplemented)
 }
 
@@ -467,7 +467,7 @@ pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 **`test-utils` extra (feature-gated, constructable, no conversion tables):**
 
 ```rust
-// crates/datum-uom/src/test_utils.rs, compiled only with feature = "test-utils"
+// crates/wicket-uom/src/test_utils.rs, compiled only with feature = "test-utils"
 impl UnitId {
     pub fn test_count() -> Self { Self::from_id(Identifier::from_uuid(uuid::Uuid::nil())) }
 }
@@ -483,7 +483,7 @@ pub trait Convert {
 
 Wave 2 uom implements `Convert` for the real engine. Wave 2 ledger tests impl `Convert` for `IdentityUom` locally. The stub does **not** ship `IdentityUom`.
 
-### 5.5 `datum-ledger` stub — types only, no engine
+### 5.5 `wicket-ledger` stub — types only, no engine
 
 The Wave 2 ledger lane replaces this file. Keep it small so the replacement is obvious.
 
@@ -501,7 +501,7 @@ The Wave 2 ledger lane replaces this file. Keep it small so the replacement is o
 | `query!` SQL | **MUST NOT exist in the stub** | no schema, no `.sqlx` (see §7) |
 | Property tests | **MUST NOT exist in the stub** | they would fail against Unimplemented, fail CI, and conflict with Wave 2 tests |
 
-Re-exports: `pub use datum_core::{Actor, Identifier, Money, Quantity};` — **forbidden in stubs** (see 5.1). Downstream writes `datum_core::Quantity`.
+Re-exports: `pub use wicket_core::{Actor, Identifier, Money, Quantity};` — **forbidden in stubs** (see 5.1). Downstream writes `wicket_core::Quantity`.
 
 ### 5.6 Other crates (pattern)
 
@@ -528,7 +528,7 @@ Minimum named types by crate (non-exhaustive; opus SPEC may extend, not shrink):
 | module | `ModuleId`, `Manifest`, `Error` |
 | server | `fn main` in `src/main.rs` that returns, does not bind a port in tests; `lib.rs` empty `pub fn version() -> &'static str` |
 
-`datum-server` is a binary. Stub it as a library+binary that compiles and whose `main` prints version and exits 0, so `cargo test --workspace` does not start a server.
+`wicket-server` is a binary. Stub it as a library+binary that compiles and whose `main` prints version and exits 0, so `cargo test --workspace` does not start a server.
 
 ### 5.7 What MUST NOT be in a stub
 
@@ -550,10 +550,10 @@ Minimum named types by crate (non-exhaustive; opus SPEC may extend, not shrink):
 **Normative:** ship a **no-op reversible placeholder**, not an empty folder.
 
 ```
-crates/datum-uom/migrations/
+crates/wicket-uom/migrations/
   00000000000000_placeholder.up.sql      -- SELECT 1;
   00000000000000_placeholder.down.sql    -- SELECT 1;
-crates/datum-uom/build.rs                -- sqlx migrate build-script (picks up new files)
+crates/wicket-uom/build.rs                -- sqlx migrate build-script (picks up new files)
 ```
 
 Why a no-op, not empty:
@@ -565,7 +565,7 @@ Why a no-op, not empty:
 
 `SELECT 1;` is the whole file. No `CREATE SCHEMA` in the placeholder unless opus decides on one schema per crate in Wave 1 — that would be a real design freeze and belongs in the db SPEC, not a stealth stub. Default: public schema, Wave 2 db lane owns grants/roles.
 
-Aggregator: `datum-db` exports
+Aggregator: `wicket-db` exports
 
 ```rust
 pub fn migrators() -> Vec<&'static sqlx::migrate::Migrator> { /* dependency order */ }
@@ -575,13 +575,13 @@ listing every crate migrator. Wave 1 can implement this as a **real** function (
 
 ### 5.9 Test helpers and `test-utils`
 
-**Do not put `TestDb` in `datum-db`.** Wave 2 `datum-db` owns that directory and will rewrite it. A working TestDb written in Wave 1 then rewritten in Wave 2 is a conflict and a period where 12 other lanes have a broken TestDb.
+**Do not put `TestDb` in `wicket-db`.** Wave 2 `wicket-db` owns that directory and will rewrite it. A working TestDb written in Wave 1 then rewritten in Wave 2 is a conflict and a period where 12 other lanes have a broken TestDb.
 
-**New crate `datum-test` (Wave 1, not in the Wave 2 exclusive set, not in PLAN §5 — PLAN amendment):**
+**New crate `wicket-test` (Wave 1, not in the Wave 2 exclusive set, not in PLAN §5 — PLAN amendment):**
 
 ```
-crates/datum-test/
-  Cargo.toml          # depends on sqlx, tokio, datum-core, datum-db
+crates/wicket-test/
+  Cargo.toml          # depends on sqlx, tokio, wicket-core, wicket-db
   src/lib.rs          # TestDb, compose/url helpers, skip-if-no-pg
 ```
 
@@ -593,7 +593,7 @@ pub struct TestDb { /* pool, url, drop-on-drop if ephemeral */ }
 impl TestDb {
     /// Connects to DATABASE_URL. Err if unset and no embedded/server.
     pub async fn connect() -> Result<Self, Error>;
-    pub fn pool(&self) -> &datum_db::Pool;
+    pub fn pool(&self) -> &wicket_db::Pool;
     /// Runs migrators() in graph order.
     pub async fn migrate(&self) -> Result<(), Error>;
 }
@@ -602,7 +602,7 @@ impl TestDb {
 pub fn postgres_available() -> Result<(), String>;
 ```
 
-Wave 1 implements this **for real** (thin: parse `DATABASE_URL`, `PgPoolOptions::connect`, run migrators). It may use testcontainers or a CI service; pick one in the workspace SPEC and stick to it. Embedded postgres on Windows is hostile (slice 7); **CI service + local docker compose is the Wave 1 choice.** Tests that need Postgres `return` if `postgres_available()` fails, except in CI where `DATUM_REQUIRE_PG=1` makes that a hard fail.
+Wave 1 implements this **for real** (thin: parse `DATABASE_URL`, `PgPoolOptions::connect`, run migrators). It may use testcontainers or a CI service; pick one in the workspace SPEC and stick to it. Embedded postgres on Windows is hostile (slice 7); **CI service + local docker compose is the Wave 1 choice.** Tests that need Postgres `return` if `postgres_available()` fails, except in CI where `WICKET_REQUIRE_PG=1` makes that a hard fail.
 
 Feature `test-utils` on each kernel crate: enables extra constructors (`UnitId::test_count`, `AuditCtx::test`). Those constructors are **stable API** of the stub and Wave 2 must keep them.
 
@@ -614,7 +614,7 @@ Feature `test-utils` on each kernel crate: enables extra constructors (`UnitId::
 
 ### 6.1 Members list — confirm
 
-**Confirmed:** the workspace lane must list every member up front, including Wave 3's `datum-server` and `datum-module`, plus `datum-test`. Wave 2 lanes own crate dirs exclusively and **must not** edit `[workspace].members`. If they need a new crate, they escalate.
+**Confirmed:** the workspace lane must list every member up front, including Wave 3's `wicket-server` and `wicket-module`, plus `wicket-test`. Wave 2 lanes own crate dirs exclusively and **must not** edit `[workspace].members`. If they need a new crate, they escalate.
 
 ### 6.2 `[workspace.dependencies]` — PLAN hole
 
@@ -645,7 +645,7 @@ Even crate-local new deps dirty `Cargo.lock` at the workspace root. 13-way lockf
 | `justfile` | **no** |
 | `.cargo/**` | **no** |
 | `dev/**` | **no** |
-| `crates/datum-test/**` | **no** (Wave 1 owns for the life of the build) |
+| `crates/wicket-test/**` | **no** (Wave 1 owns for the life of the build) |
 | workspace-root `.sqlx/**` | **no — must not exist** |
 
 ---
@@ -687,7 +687,7 @@ This is not theoretical. sqlx#1770 / #1223 / #3644 are this class of workspace/c
 3. Wave 1 stubs contain **zero** `query!` macros, so Wave 1 commits **no** cache files (or an empty dir with a `.gitkeep` — empty cache is useless and `migrate!` does not use `.sqlx`). Do not add `.gitkeep` in `.sqlx`; it is not a query file and may confuse globbers. Leave the directory absent until the first `query!`.
 4. CI: **not** `cargo sqlx prepare --check --workspace`. CI runs per-crate `--check` for crates that have a `.sqlx` directory, or a just recipe that loops members. After Wave 2 merge this can be a shard.
 5. `SQLX_OFFLINE=true` in GitHub Actions and in developer docs. `DATABASE_URL` is set only for `prepare`, `migrate`, and integration tests — never for `cargo clippy` / `cargo test --lib` on CI images that should compile offline.
-6. Wave 2 `query!` may reference **only** tables created by that crate's migrations plus tables created by **already-merged** dependency crates. In Wave 2 isolation, dependency crates are stubs with placeholder migrations, so **they have no tables**. Therefore Wave 2 `query!` may only hit **that crate's own tables**. Joins to `uom_units` from `datum-ledger` are illegal until uom has merged to main and ledger rebases. Ledger property tests that need a unit store a `UnitId` newtype; they do not join.
+6. Wave 2 `query!` may reference **only** tables created by that crate's migrations plus tables created by **already-merged** dependency crates. In Wave 2 isolation, dependency crates are stubs with placeholder migrations, so **they have no tables**. Therefore Wave 2 `query!` may only hit **that crate's own tables**. Joins to `uom_units` from `wicket-ledger` are illegal until uom has merged to main and ledger rebases. Ledger property tests that need a unit store a `UnitId` newtype; they do not join.
 7. Runtime `sqlx::query()` (not the macro) is allowed in Wave 2 if a crate wants to avoid prepare entirely, at the cost of losing compile-time checking. The workspace SPEC should **prefer `query!` + per-crate `.sqlx`** so CI can `prepare --check`. Do not mix styles inside one crate.
 8. `dev/compose.yml` Postgres is a Wave 1 deliverable. Without it, Wave 2 cannot `prepare` and cannot run migration tests. PLAN is silent. **This is a missing Wave 1 subtask.**
 9. sqlx-cli version is pinned in the justfile / CI (`cargo install sqlx-cli --version 0.8.x --no-default-features --features rustls,postgres`) so prepare hashes stay stable.
@@ -699,10 +699,10 @@ A ledger worktree:
 - Sees Wave 1 uom stub (no `uom_units` table).
 - Adds `postings` migrations and `query!("select … from postings")`.
 - Starts compose Postgres, runs **ledger** migrator (placeholder from deps + real ledger migrations).
-- `cargo sqlx prepare` in `crates/datum-ledger`.
-- Commits `crates/datum-ledger/.sqlx/*.json` and the new migrations.
+- `cargo sqlx prepare` in `crates/wicket-ledger`.
+- Commits `crates/wicket-ledger/.sqlx/*.json` and the new migrations.
 
-Compile in CI after merge: `SQLX_OFFLINE=true`, no database, macros read `crates/datum-ledger/.sqlx`. Sibling crates still have no `query!`. This works.
+Compile in CI after merge: `SQLX_OFFLINE=true`, no database, macros read `crates/wicket-ledger/.sqlx`. Sibling crates still have no `query!`. This works.
 
 Compile in the ledger worktree *before* prepare, with `SQLX_OFFLINE=true`: **fails**. Developer docs / just recipe must say: first `query!` in a crate requires `just db-up && just migrate && cargo sqlx prepare -- --all-targets --all-features` from that crate. Wave 1 should encode this in CONTRIBUTING — but CONTRIBUTING is `doc-repo`. Put the rule in `justfile` comments and in the workspace SPEC so both lanes copy it.
 
@@ -740,7 +740,7 @@ The workspace lane as PLAN writes it is: root manifests + toolchain + cargo conf
 |---|---|
 | workspace-skeleton vs stub-APIs | every `crates/*/Cargo.toml` and `src/lib.rs` |
 | stub-APIs vs CI | `justfile`, GHA test command, `test-utils` feature names |
-| CI vs `datum-db` TestDb | resolved by moving TestDb to `datum-test` |
+| CI vs `wicket-db` TestDb | resolved by moving TestDb to `wicket-test` |
 | workspace vs `doc-repo` | `.gitignore`, LICENSE, CONTRIBUTING sqlx instructions |
 | workspace vs `doc-adr` | ADR 0006 license string in `Cargo.toml` |
 
@@ -750,19 +750,19 @@ The workspace lane as PLAN writes it is: root manifests + toolchain + cargo conf
 
 Optional serial fast-follow, same agent or a second lane after merge:
 
-1. **`workspace-contract`** (the PLAN `workspace` lane): toolchain, root + per-crate Cargo.toml, stub `lib.rs` APIs per this SPEC, placeholder migrations, build.rs, `datum-test` **types + real TestDb**, `dev/compose.yml`, rustfmt/clippy, `.cargo/config.toml`, `justfile`, `.env.example`, rust bits of `.gitignore`.
+1. **`workspace-contract`** (the PLAN `workspace` lane): toolchain, root + per-crate Cargo.toml, stub `lib.rs` APIs per this SPEC, placeholder migrations, build.rs, `wicket-test` **types + real TestDb**, `dev/compose.yml`, rustfmt/clippy, `.cargo/config.toml`, `justfile`, `.env.example`, rust bits of `.gitignore`.
 2. **`workspace-ci`** (optional, after 1): GitHub Actions matrix (linux/macos/windows), sqlx-cli install, `SQLX_OFFLINE`, postgres service, shard stubs. Collides with `justfile` recipes if 1 already wrote them — so fold CI **into** lane 1 unless GHA yaml is the only leftover.
 
 **Do not blind-race this.** Four agents inventing crate APIs is four incompatible contracts. Blind-race is for hard algorithms (ledger engine), not for a file tree that must be identical.
 
-**Do extract `datum-core` as a named, complete implementation inside this lane** (or a 1.5 serial lane immediately after Quantity DECISION, before fan-out). Deep-audit core on its own.
+**Do extract `wicket-core` as a named, complete implementation inside this lane** (or a 1.5 serial lane immediately after Quantity DECISION, before fan-out). Deep-audit core on its own.
 
 **Gating:** workspace-contract must not start until:
 
 - opus DECISION on Quantity (slice 5) — otherwise core freezes the wrong shape;
 - opus accepts this stub SPEC (or a tightened rewrite);
 - ADR 0006 either closes or the SPEC's `UNLICENSED` workaround is accepted;
-- slice 2's interception choice is known enough to know whether `SessionCtx` lives in `datum-db` (if unknown, freeze a tiny `SessionCtx` in db and let slice 2 add, `#[non_exhaustive]`).
+- slice 2's interception choice is known enough to know whether `SessionCtx` lives in `wicket-db` (if unknown, freeze a tiny `SessionCtx` in db and let slice 2 add, `#[non_exhaustive]`).
 
 ---
 
@@ -774,7 +774,7 @@ Optional serial fast-follow, same agent or a second lane after merge:
 |---|---|
 | Blind-race? | **No.** Divergent stubs are worse than a slow single pass. |
 | Provider | **grok** (must read ADRs + this SPEC + PLAN graph; this is contract literacy, not volume-only typing). Cursor is acceptable *against a frozen SPEC* if grok is busy; then the SPEC is the whole prompt. |
-| opus first? | **Yes.** DECISION: accept this SPEC (Quantity shape, `datum-test` crate, per-crate `.sqlx`, no-op migrations, `UNLICENSED` until 0006, core-is-real). The executor types; opus does not. |
+| opus first? | **Yes.** DECISION: accept this SPEC (Quantity shape, `wicket-test` crate, per-crate `.sqlx`, no-op migrations, `UNLICENSED` until 0006, core-is-real). The executor types; opus does not. |
 | Hard/risky? | The **decision** is hard. The **typing** is not. Do not spend `caps.blind_race_attempts` here. |
 
 Wave 1 docs lanes stay as PLAN (cursor/grok 1:1). `workspace` is the grok-shaped code lane in that wave.
@@ -783,7 +783,7 @@ Wave 1 docs lanes stay as PLAN (cursor/grok 1:1). `workspace` is the grok-shaped
 
 PLAN says **deep**. **Agree.** This lane is contract-bearing and gates thirteen others. Recommend `audit.double: true` (cross-family second auditor). A miss here is multiplied by 13.
 
-Audit checklist (for the later auditor, not this review): every member listed; every crate has `[lints] workspace = true`; no `todo!()`; clippy `-D warnings` green; `cargo test --workspace --lib` green without Postgres; `migrate!` compiles; no workspace-root `.sqlx`; `SQLX_OFFLINE` documented; TestDb in `datum-test` not in `datum-db`; PLAN graph edges match `[dependencies]`; no `query!`.
+Audit checklist (for the later auditor, not this review): every member listed; every crate has `[lints] workspace = true`; no `todo!()`; clippy `-D warnings` green; `cargo test --workspace --lib` green without Postgres; `migrate!` compiles; no workspace-root `.sqlx`; `SQLX_OFFLINE` documented; TestDb in `wicket-test` not in `wicket-db`; PLAN graph edges match `[dependencies]`; no `query!`.
 
 ### SHARD of `cargo test --workspace` after Wave 2
 
@@ -795,15 +795,15 @@ Wave 2 landed, honest estimate:
 |---|---|---|
 | `cargo clippy --workspace --all-targets -D warnings` | 5–15 min on GHA, worse on Windows (ADR 0002 compile-tax) | yes, own shard; sccache/rust-cache mandatory in Wave 1 CI |
 | `cargo test --workspace --lib` (unit, no pg) | 3–10 min compile-dominated | maybe; keep as one shard until measured |
-| `cargo test -p datum-ledger` proptest in-memory | 1–5 min at 256 cases if no IO | keep with ledger; raise cases carefully |
-| `cargo test -p datum-ledger` proptest against Postgres | **will exceed 10 min** at 256 × N ops × roundtrips (slice 6's problem) | **yes**: `gates-shard-ledger-prop` |
+| `cargo test -p wicket-ledger` proptest in-memory | 1–5 min at 256 cases if no IO | keep with ledger; raise cases carefully |
+| `cargo test -p wicket-ledger` proptest against Postgres | **will exceed 10 min** at 256 × N ops × roundtrips (slice 6's problem) | **yes**: `gates-shard-ledger-prop` |
 | per-crate migration up/down | minutes + Docker | **yes**: `gates-shard-migrate` |
 | `cargo sqlx prepare --check` per crate | compile-sized | fold into clippy shard or a sqlx shard |
 | Windows + sqlx macros + 15 crates | often 15–25 min cold | matrix OS is already a shard; do not add Linux+Windows serial |
 
 **PLAN amendment:** Wave 1 CI is already sharded (`fmt` ∥ `clippy` ∥ `test-lib`). Wave 2 phase-end `cargo test --workspace` is **not** one job. Caps `gate_shard_max_min` = 10 applies. Pre-declare `gates-shard-unit`, `gates-shard-ledger-prop`, `gates-shard-migrate`. Do not discover this at INTEGRATE.
 
-`DATUM_REQUIRE_PG=1` on CI so skipped tests cannot green-wash a missing service.
+`WICKET_REQUIRE_PG=1` on CI so skipped tests cannot green-wash a missing service.
 
 ---
 
@@ -815,11 +815,11 @@ Wave 2 landed, honest estimate:
 4. No TestDb / Postgres-for-tests in Wave 1. Cannot run PLAN §7 migration tests or `query!` prepare.
 5. Property-test AC does not distinguish in-memory vs Postgres vs cross-crate.
 6. Wave 2 file-ownership does not explicitly forbid editing workspace manifests, lockfile policy, or `.sqlx` location.
-7. `datum-test` crate missing from §5.
-8. `datum-core` treated as a stub peer of `datum-ledger`; it should be complete in Wave 1 (gated on Quantity DECISION).
+7. `wicket-test` crate missing from §5.
+8. `wicket-core` treated as a stub peer of `wicket-ledger`; it should be complete in Wave 1 (gated on Quantity DECISION).
 9. ADR 0006 Open vs `[workspace.package].license`.
 10. `.gitignore` dual-owned with `doc-repo`.
-11. Wave 2 "13 lanes" vs 15 crates — list members anyway; do not let the off-by-one drop `datum-module` from the stub set.
+11. Wave 2 "13 lanes" vs 15 crates — list members anyway; do not let the off-by-one drop `wicket-module` from the stub set.
 12. `missing_docs = deny` / `clippy::todo` will fail empty stubs; lint policy must match stub bodies.
 13. No pin of sqlx-cli, sqlx version, or rustc.
 14. No rule that Wave 2 `query!` cannot join unmerged sibling tables.
@@ -834,14 +834,14 @@ Wave 2 landed, honest estimate:
 **Acceptance.**
 
 - [ ] `rust-toolchain.toml` pins `1.98.1` (or the then-current stable, exact version) + rustfmt + clippy.
-- [ ] `[workspace].members` lists all 15 PLAN crates plus `datum-test`.
+- [ ] `[workspace].members` lists all 15 PLAN crates plus `wicket-test`.
 - [ ] Dependency graph in crate manifests matches PLAN §5 exactly.
 - [ ] `[workspace.dependencies]` closed allow-list; `[lints] workspace = true` on every member.
-- [ ] `datum-core` is a complete primitive crate (post-Quantity-decision), not `Unimplemented`.
+- [ ] `wicket-core` is a complete primitive crate (post-Quantity-decision), not `Unimplemented`.
 - [ ] Every other library crate exports the types in §5 of this report; fallible bodies return `Error::Unimplemented`; **zero** `todo!`/`unimplemented!`.
 - [ ] Every db-backed crate has `migrate!`, `build.rs`, and a reversible `00000000000000_placeholder` migration; no real tables.
 - [ ] Zero `sqlx::query!` macros. Zero workspace-root `.sqlx/`.
-- [ ] `crates/datum-test` implements `TestDb::connect` / `migrate` / `postgres_available`.
+- [ ] `crates/wicket-test` implements `TestDb::connect` / `migrate` / `postgres_available`.
 - [ ] `dev/compose.yml` Postgres 16/17; `.env.example` documents `DATABASE_URL` and does **not** set `SQLX_OFFLINE`.
 - [ ] CI: fmt, clippy `-D warnings`, test-lib, cached toolchain; Postgres service present but not required for test-lib.
 - [ ] `justfile` recipes in §4.6.

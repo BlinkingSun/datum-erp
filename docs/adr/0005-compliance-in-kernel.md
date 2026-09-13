@@ -123,13 +123,13 @@ The mechanism is only half of this decision. The other half is the sentence a cu
 repeats to an investigator, which must be true, must name its own boundary, and must not
 be improved upon by anyone writing marketing copy. It is:
 
-> Every change to a regulated record in Datum is written to the audit trail by the
+> Every change to a regulated record in Wicket is written to the audit trail by the
 > database itself, inside the same transaction as the change, with the operator's
 > identity, the server time, the prior and new values, and the reason where one is
 > required; a write that cannot be attributed to an authenticated operator is refused
 > rather than recorded as unknown. The application — including any module, and including
 > a defective one — can read the audit trail but cannot insert, alter, or delete an
-> entry: that is enforced by database privileges, not by application code. Datum does not
+> entry: that is enforced by database privileges, not by application code. Wicket does not
 > claim the trail cannot be altered by someone with administrative control of the database
 > server itself; instead, each transaction is sealed into a hash chain whose head is
 > published off the server on a schedule you control, so that any later alteration of

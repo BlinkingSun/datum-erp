@@ -14,7 +14,7 @@ DECISION D-W1-5 (installation profiles).
 
 As of the foundation build (`PLAN.md` §2): `docs/00` through `docs/04`, the ADRs, the
 decision records in `research/decisions/`, and the design mockups exist. **No application
-code ships yet.** Wave 1 is in flight: workspace stubs, a complete `datum-core`, the test
+code ships yet.** Wave 1 is in flight: workspace stubs, a complete `wicket-core`, the test
 harness, and the remaining foundation documentation. Until Wave 1 integrates and Wave 2
 batch 2.4 (the ledger) passes its property suite, there is nothing to install and
 nothing to demo beyond documents and contracts.
@@ -29,16 +29,16 @@ Wave names and contents match `PLAN.md` v2 §3.
 
 | | |
 |---|---|
-| **What lands** | Root workspace (`CONTRACT-workspace.md`), compiling kernel stubs for every crate except `datum-core` and `datum-test`, complete `datum-core` (D1), `datum-test` plus `dev/sql` roles and grants, CI recipes, and parallel doc lanes (`docs/05`, `06`, `07`, `08`, `10`, repository files). Real pieces in the `datum-db` stub: pool, transaction-local actor, `Tx::begin`. |
+| **What lands** | Root workspace (`CONTRACT-workspace.md`), compiling kernel stubs for every crate except `wicket-core` and `wicket-test`, complete `wicket-core` (D1), `wicket-test` plus `dev/sql` roles and grants, CI recipes, and parallel doc lanes (`docs/05`, `06`, `07`, `08`, `10`, repository files). Real pieces in the `wicket-db` stub: pool, transaction-local actor, `Tx::begin`. |
 | **What it proves** | Every Wave 2 lane can compile against frozen public types, dependency edges, and lint policy without inventing its own session protocol or money types. Documentation and code contracts agree on names, invariants, and the slice example set. |
 | **What a shop can do** | Nothing yet. This wave produces no runnable product. |
-| **Gate** | Integrated tree: placeholders absent, `just ci` green, `just ci-db` green with `DATUM_REQUIRE_PG=1`, dependency graph matches the contract (`CONTRACT-workspace.md` §10). Nothing in Wave 2 starts until this gate passes. |
+| **Gate** | Integrated tree: placeholders absent, `just ci` green, `just ci-db` green with `WICKET_REQUIRE_PG=1`, dependency graph matches the contract (`CONTRACT-workspace.md` §10). Nothing in Wave 2 starts until this gate passes. |
 
 ### 2.2 Wave 2 — kernel, slice-first (batches 2.1–2.6)
 
 | | |
 |---|---|
-| **What lands** | Batches in dependency order: `datum-db` (DDL, migrations, roles, version stamping); `datum-audit` (trigger attachment, hash chain); `datum-identity`, `datum-numbering`, `datum-uom`, `datum-events`; **`datum-ledger` (the gate)**; `datum-statemachine`, `datum-jobs`; minimal `datum-module` with profile configuration frozen per D-W1-5. |
+| **What lands** | Batches in dependency order: `wicket-db` (DDL, migrations, roles, version stamping); `wicket-audit` (trigger attachment, hash chain); `wicket-identity`, `wicket-numbering`, `wicket-uom`, `wicket-events`; **`wicket-ledger` (the gate)**; `wicket-statemachine`, `wicket-jobs`; minimal `wicket-module` with profile configuration frozen per D-W1-5. |
 | **What it proves** | Postings conserve per balance slice; withdrawals allocate; audit rows attach to every mutating write; actors are mandatory; the deferred constraint canary fails when armed; state transitions can require signatures by declaration (refused under `NoSignatures` until Wave 2b). |
 | **What a shop can do** | Nothing yet. Still no HTTP API and no inventory screens. |
 | **Gate** | Wave 2 does not close until `PLAN.md` §7 ledger property suite passes in **commit mode** with the canary armed. Batch 2.6 consumes `_team/specs/SPEC-profiles.md` (eleven keys from D-W1-5). |
@@ -56,7 +56,7 @@ Wave names and contents match `PLAN.md` v2 §3.
 
 | | |
 |---|---|
-| **What lands** | `datum-esign` (implements `SignatureGate`), `datum-customfields`, `datum-documents`, `datum-print`, in batches 2b.1–2b.3. Additive tables only. |
+| **What lands** | `wicket-esign` (implements `SignatureGate`), `wicket-customfields`, `wicket-documents`, `wicket-print`, in batches 2b.1–2b.3. Additive tables only. |
 | **What it proves** | Regulated transitions can verify real signatures; controlled documents and archival print exist without retro-fitting columns that already carry history. Identity's signing credential reserved in batch 2.3 is consumed here. |
 | **What a shop can do** | Still no full quality or doc-control modules. Kernel capabilities exist for later Phase 4 modules; the slice remains the operational demo until Wave 3 and later catalog phases. |
 | **Gate** | Each batch's spec acceptance; no migration may alter historical columns. Release builds with a `Required` signature edge cannot bind `NoSignatures` (startup failure per D-W1-4). |
@@ -109,7 +109,7 @@ binary, one license, one schema, and runtime enablement of compiled-in modules
 
 | Profile | Enablement | What differs |
 |---|---|---|
-| **`regulated-device`** | Enables modules marked `regulated = true` (CAPA, complaints, calibration, training gates, e-signature workflows, validation navigation, and the rest per catalog). | Signature-bearing transitions are declared on regulated modules; `datum-esign` binds after Wave 2b. Validation/IQ navigation visible. |
+| **`regulated-device`** | Enables modules marked `regulated = true` (CAPA, complaints, calibration, training gates, e-signature workflows, validation navigation, and the rest per catalog). | Signature-bearing transitions are declared on regulated modules; `wicket-esign` binds after Wave 2b. Validation/IQ navigation visible. |
 | **`plain-shop`** | Enables **no** module with `regulated = true`. | No signature-bearing edges because no regulated module is enabled — not because the profile overrides module declarations. Hides Validation/IQ and regulated module navigation. |
 
 **Shared and not configurable:** audit trigger and hash chain, server-side time, actor on
@@ -176,7 +176,7 @@ quarters.
 | Dependency | Reason |
 |---|---|
 | Audit trigger before any application table | Tables created without the trigger are permanently unaudited (`PLAN.md` Wave 2 batch 2.2; `research/decisions/audit-persistence.md`). |
-| `datum-db` session protocol before module DDL | Actor and transaction id must exist before any mutating write (invariant 5). |
+| `wicket-db` session protocol before module DDL | Actor and transaction id must exist before any mutating write (invariant 5). |
 | Identity (and signing credential reservation) before electronic signatures | Wave 2b must not add columns to tables that already carry history (`PLAN.md` batch 2.3, invariant 14). |
 | Ledger before inventory and production modules | Inventory **is** postings; modules call `PostingSink`, not a parallel quantity store (`docs/04-module-catalog.md` Phase 1). |
 | Ledger property suite before Wave 2 close | Everything downstream assumes conservation, allocation, and canary-armed constraints (`PLAN.md` §7). |
@@ -189,7 +189,7 @@ quarters.
 | Area | Flexibility |
 |---|---|
 | Wave 1 doc lanes | Any order; must merge before Wave 2. |
-| Batch 2.3 crates | `datum-identity`, `datum-numbering`, `datum-uom`, `datum-events` are independent of each other (`PLAN.md` batch 2.3). |
+| Batch 2.3 crates | `wicket-identity`, `wicket-numbering`, `wicket-uom`, `wicket-events` are independent of each other (`PLAN.md` batch 2.3). |
 | Wave 2s.1 | `mod-items`, `mod-locations`, `mod-lots` in parallel. |
 | Wave 2s.3 | `mod-production-min` and `mod-genealogy` in parallel once inventory exists. |
 | Wave 2b batches | 2b.1 (`esign`, `customfields`) before 2b.2–2b.3, but esign and customfields do not depend on each other within 2b.1. |
@@ -199,7 +199,7 @@ quarters.
 
 ## 7. How to help now
 
-1. **Kernel crates** — Wave 1 owns `datum-core` and stubs; Wave 2 lanes own real
+1. **Kernel crates** — Wave 1 owns `wicket-core` and stubs; Wave 2 lanes own real
    implementations per `CONTRACT-workspace.md` §4. Pick a crate whose spec exists for the
    current batch; do not add workspace dependencies or kernel edges without escalation.
 
@@ -212,7 +212,7 @@ quarters.
    more than another abstract layer diagram. If you run manufacturing operations, recording
    one honest workflow against the catalog modules list is high leverage.
 
-4. **Repository** — Public tree `github.com/BlinkingSun/datum-erp`; license
+4. **Repository** — Public tree `github.com/BlinkingSun/wicket-erp`; license
    AGPL-3.0-or-later with DCO (ADR 0006). Do not push from lane worktrees until
    integration.
 

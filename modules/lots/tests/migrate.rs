@@ -2,9 +2,9 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, unused_crate_dependencies)]
 
-use datum_mod_lots::MIGRATOR;
-use datum_test::db_case;
 use sqlx::{migrate::Migrator, query_scalar};
+use wicket_mod_lots::MIGRATOR;
+use wicket_test::db_case;
 
 fn lots_migrator() -> Migrator {
     let mut migrator = Migrator::with_migrations(MIGRATOR.iter().cloned().collect());
@@ -15,17 +15,17 @@ fn lots_migrator() -> Migrator {
 #[tokio::test]
 async fn reverse_migration_tested() {
     let db = db_case!("lots_rev");
-    datum_db::migrate::run(
+    wicket_db::migrate::run(
         db.migrate_pool(),
         &[
-            ("datum-db", &datum_db::MIGRATOR),
-            ("datum-audit", &datum_audit::MIGRATOR),
+            ("wicket-db", &wicket_db::MIGRATOR),
+            ("wicket-audit", &wicket_audit::MIGRATOR),
         ],
     )
     .await
     .expect("kernel");
     let boot = db.bootstrap_pool().await.expect("bootstrap");
-    datum_audit::install_privileged(&boot)
+    wicket_audit::install_privileged(&boot)
         .await
         .expect("install_privileged");
     boot.close().await;

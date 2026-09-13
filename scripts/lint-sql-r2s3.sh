@@ -14,12 +14,12 @@ command -v rg >/dev/null 2>&1 || {
 
 cd "$REPO_ROOT" || exit 1
 
-# Explicit, minimal exemption set. datum-module is not listed: KERNEL_AUDIT_RELS
+# Explicit, minimal exemption set. wicket-module is not listed: KERNEL_AUDIT_RELS
 # names ledger tables as strings, which is not SQL DML (FROM/JOIN/INTO/UPDATE/TABLE).
-# datum-uom's SELECT ledger.has_postings($1) is the published function, not a table read.
+# wicket-uom's SELECT ledger.has_postings($1) is the published function, not a table read.
 # Dynamic construction of ledger./transient. (format/quote_ident/'schema.' concat)
 # is scripts/lint-sql-dynamic.sh, same exemption list.
-R2S3_EXEMPT='datum-ledger datum-db datum-audit datum-test datum-jobs datum-events datum-identity'
+R2S3_EXEMPT='wicket-ledger wicket-db wicket-audit wicket-test wicket-jobs wicket-events wicket-identity'
 
 # Parse rg -n "file:line:text", including an optional Windows drive letter (C:).
 # Sets HIT_FILE, HIT_LINE, HIT_TEXT. Returns 0 on success.
@@ -118,9 +118,9 @@ hit_is_comment() {
 # Parser fixtures for Windows-shaped rg hits (just lint-sql-selftest).
 run_hit_selftest() {
   fail=0
-  win_hit='C:\ci\datum-erp\modules\locations\src\store.rs:403:                   SELECT 1 FROM transient.balance_projection'
+  win_hit='C:\ci\wicket-erp\modules\locations\src\store.rs:403:                   SELECT 1 FROM transient.balance_projection'
   rel_hit='modules/locations/src/store.rs:403:                   SELECT 1 FROM transient.balance_projection'
-  win_file='C:\ci\datum-erp\modules\locations\src\store.rs'
+  win_file='C:\ci\wicket-erp\modules\locations\src\store.rs'
   rel_file='modules/locations/src/store.rs'
   expect_text='                   SELECT 1 FROM transient.balance_projection'
 
@@ -226,7 +226,7 @@ for tree in modules crates; do
         file="$hit"
       fi
       printf '%s\n' "$hit"
-      echo "lint-sql: R-2s-3: SQL table token ledger.* or transient.* in ${file} (use datum_ledger::has_postings / has_quantity_at; modules must not read those schemas directly)" >&2
+      echo "lint-sql: R-2s-3: SQL table token ledger.* or transient.* in ${file} (use wicket_ledger::has_postings / has_quantity_at; modules must not read those schemas directly)" >&2
       hit_count=$((hit_count + 1))
       lint_fail=1
     done <<EOF

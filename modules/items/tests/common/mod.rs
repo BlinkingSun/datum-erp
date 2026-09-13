@@ -2,20 +2,20 @@
 
 #![allow(dead_code, unused_imports)]
 
-use datum_core::{
+use rust_decimal::Decimal;
+use sqlx::{PgPool, query_scalar as sql_query_scalar};
+use wicket_core::{
     Actor, ActorKind, AnyQuantity, Boundary, CostElement, DimensionKind, Identifier, ItemId,
     LocationId, Money, PostingIntent, PostingSink, QuantityPosting, UnitId, ValueAccount,
     ValuePosting,
 };
-use datum_db::{Tx, WriteContext, WritePool};
-use datum_identity::rbac::{RoleBundle, assign_role, seed_bundles};
-use datum_identity::{PrincipalKind, create_principal};
-use datum_ledger::{CostMethod, GroupBuilder, upsert_location};
-use datum_mod_items::{DOC_TYPE, Kind, NewItem};
-use datum_module::{Kernel, KernelBuilder, Profile};
-use datum_statemachine::DocRef;
-use rust_decimal::Decimal;
-use sqlx::{PgPool, query_scalar as sql_query_scalar};
+use wicket_db::{Tx, WriteContext, WritePool};
+use wicket_identity::rbac::{RoleBundle, assign_role, seed_bundles};
+use wicket_identity::{PrincipalKind, create_principal};
+use wicket_ledger::{CostMethod, GroupBuilder, upsert_location};
+use wicket_mod_items::{DOC_TYPE, Kind, NewItem};
+use wicket_module::{Kernel, KernelBuilder, Profile};
+use wicket_statemachine::DocRef;
 
 pub const EA: UnitId = UnitId(1);
 pub const MM: UnitId = UnitId(2);
@@ -23,22 +23,22 @@ pub const MM: UnitId = UnitId(2);
 /// D-2b-13: one published order. `install_upto` is not on this tree yet
 /// (glue lane); fall back to kernel prefix/suffix then `wave_2s1_migrators`
 /// / `slice_migrators`, with `audit_attach` up before this crate's DDL.
-pub async fn install_through(db: &datum_test::TestDb, crate_name: &str) {
-    datum_module::migrate_prefix(db.migrate_pool())
+pub async fn install_through(db: &wicket_test::TestDb, crate_name: &str) {
+    wicket_module::migrate_prefix(db.migrate_pool())
         .await
         .expect("migrate prefix");
-    datum_module::migrate_suffix(db.migrate_pool())
+    wicket_module::migrate_suffix(db.migrate_pool())
         .await
         .unwrap_or_else(|e| panic!("migrate suffix: {e:#}"));
     let boot = db.bootstrap_pool().await.expect("bootstrap pool");
-    datum_audit::install_privileged(&boot)
+    wicket_audit::install_privileged(&boot)
         .await
         .expect("install_privileged");
     boot.close().await;
 
     let mut found = false;
-    for (name, migrator) in datum_module::wave_2s1_migrators().expect("wave_2s1") {
-        datum_db::migrate::run(db.migrate_pool(), &[(name, migrator)])
+    for (name, migrator) in wicket_module::wave_2s1_migrators().expect("wave_2s1") {
+        wicket_db::migrate::run(db.migrate_pool(), &[(name, migrator)])
             .await
             .unwrap_or_else(|e| panic!("migrate {name}: {e:#}"));
         if name == crate_name {
@@ -47,8 +47,8 @@ pub async fn install_through(db: &datum_test::TestDb, crate_name: &str) {
         }
     }
     if !found {
-        for (name, migrator) in datum_module::slice_migrators() {
-            datum_db::migrate::run(db.migrate_pool(), &[(name, migrator)])
+        for (name, migrator) in wicket_module::slice_migrators() {
+            wicket_db::migrate::run(db.migrate_pool(), &[(name, migrator)])
                 .await
                 .unwrap_or_else(|e| panic!("migrate {name}: {e:#}"));
             if name == crate_name {
@@ -58,24 +58,24 @@ pub async fn install_through(db: &datum_test::TestDb, crate_name: &str) {
         }
     }
     assert!(found, "{crate_name} not in published wave_2s1/slice order");
-    datum_module::attach_kernel_audit(db.migrate_pool())
+    wicket_module::attach_kernel_audit(db.migrate_pool())
         .await
         .expect("attach_kernel_audit");
 }
 
-pub async fn migrate_all(db: &datum_test::TestDb) {
-    install_through(db, "datum-mod-items").await;
+pub async fn migrate_all(db: &wicket_test::TestDb) {
+    install_through(db, "wicket-mod-items").await;
 }
 
-pub async fn boot_kernel(db: &datum_test::TestDb) -> Kernel {
+pub async fn boot_kernel(db: &wicket_test::TestDb) -> Kernel {
     migrate_all(db).await;
     let mut builder = Kernel::builder(db.app_pool().clone(), Profile::plain_shop().unwrap());
-    datum_mod_items::register(&mut builder, &Profile::plain_shop().unwrap())
+    wicket_mod_items::register(&mut builder, &Profile::plain_shop().unwrap())
         .expect("register items");
     builder.build().await.expect("kernel build")
 }
 
-pub fn write_pool(db: &datum_test::TestDb) -> WritePool {
+pub fn write_pool(db: &wicket_test::TestDb) -> WritePool {
     WritePool::new(db.app_pool().clone())
 }
 
@@ -172,7 +172,7 @@ pub async fn actor_with_item_perms(write: &WritePool) -> Actor {
 pub fn boot_ctx() -> WriteContext {
     let mut ctx = WriteContext::new(
         Actor {
-            id: Identifier::from_uuid(datum_identity::SYSTEM_ID),
+            id: Identifier::from_uuid(wicket_identity::SYSTEM_ID),
             kind: ActorKind::ServicePrincipal,
         },
         "items.boot",
@@ -231,7 +231,7 @@ pub async fn count_audit_action(pool: &PgPool, action: &str, table: &str) -> i64
 }
 
 fn usd(n: i64) -> Money {
-    Money::new(Decimal::from(n), datum_core::CurrencyId(840)).expect("usd")
+    Money::new(Decimal::from(n), wicket_core::CurrencyId(840)).expect("usd")
 }
 
 fn qty_ea(n: i64) -> AnyQuantity {
@@ -251,8 +251,8 @@ pub async fn post_one_receipt(tx: &mut Tx<'_>, item: ItemId) {
         .await
         .expect("supplier loc");
     let mut b = GroupBuilder::new(
-        datum_core::GroupKind::Movement,
-        datum_core::PostingGroupHeader {
+        wicket_core::GroupKind::Movement,
+        wicket_core::PostingGroupHeader {
             source_kind: "purchase_order".into(),
             source_id: None,
             work_order_id: None,
@@ -297,5 +297,5 @@ pub async fn post_one_receipt(tx: &mut Tx<'_>, item: ItemId) {
         values: None,
     }))
     .expect("ap");
-    datum_ledger::post(tx, b).await.expect("post receipt");
+    wicket_ledger::post(tx, b).await.expect("post receipt");
 }

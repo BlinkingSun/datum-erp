@@ -1,0 +1,13 @@
+error[E0369]: cannot add `wicket_core::Quantity<wicket_core::CountDim>` to `wicket_core::Money`
+ --> tests/compile_fail/money_plus_quantity.rs:8:19
+  |
+8 |     let _ = money + qty;
+  |             ----- ^ --- wicket_core::Quantity<wicket_core::CountDim>
+  |             |
+  |             wicket_core::Money
+  |
+note: `wicket_core::Money` does not implement `Add<wicket_core::Quantity<wicket_core::CountDim>>`
+ --> src/money.rs
+  |
+  | pub struct Money {
+  | ^^^^^^^^^^^^^^^^ `wicket_core::Money` is defined in another crate

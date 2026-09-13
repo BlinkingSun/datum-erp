@@ -7,4 +7,4 @@ DROP TABLE IF EXISTS inventory.document_line;
 DROP TABLE IF EXISTS inventory.document;
 DROP SCHEMA IF EXISTS inventory;
 
-DELETE FROM datum.schema_class WHERE nspname IN ('inventory', 'inventory_transient');
+DELETE FROM wicket.schema_class WHERE nspname IN ('inventory', 'inventory_transient');

@@ -4,28 +4,28 @@
 -- No ON DELETE CASCADE. No DELETE on app tables.
 
 SELECT
-  pg_catalog.set_config('datum.actor_id',      '00000000-0000-4000-8000-000000000002', true),
-  pg_catalog.set_config('datum.actor_kind',    'migration', true),
-  pg_catalog.set_config('datum.actor_display', 'migration', true),
-  pg_catalog.set_config('datum.txid',          pg_catalog.pg_current_xact_id()::text, true),
-  pg_catalog.set_config('datum.action',        'production.migrate', true),
-  pg_catalog.set_config('datum.source_kind',   'migration', true);
+  pg_catalog.set_config('wicket.actor_id',      '00000000-0000-4000-8000-000000000002', true),
+  pg_catalog.set_config('wicket.actor_kind',    'migration', true),
+  pg_catalog.set_config('wicket.actor_display', 'migration', true),
+  pg_catalog.set_config('wicket.txid',          pg_catalog.pg_current_xact_id()::text, true),
+  pg_catalog.set_config('wicket.action',        'production.migrate', true),
+  pg_catalog.set_config('wicket.source_kind',   'migration', true);
 
-CREATE SCHEMA IF NOT EXISTS production_min AUTHORIZATION datum_migrate;
+CREATE SCHEMA IF NOT EXISTS production_min AUTHORIZATION wicket_migrate;
 
 REVOKE ALL ON SCHEMA production_min FROM PUBLIC;
-GRANT USAGE ON SCHEMA production_min TO datum_app;
-GRANT USAGE, CREATE ON SCHEMA production_min TO datum_migrate, datum_owner;
+GRANT USAGE ON SCHEMA production_min TO wicket_app;
+GRANT USAGE, CREATE ON SCHEMA production_min TO wicket_migrate, wicket_owner;
 
-INSERT INTO datum.schema_class (nspname, class) VALUES ('production_min', 'app')
+INSERT INTO wicket.schema_class (nspname, class) VALUES ('production_min', 'app')
 ON CONFLICT (nspname) DO UPDATE SET class = EXCLUDED.class;
 
-ALTER DEFAULT PRIVILEGES FOR ROLE datum_migrate IN SCHEMA production_min
-  GRANT SELECT, INSERT, UPDATE ON TABLES TO datum_app;
-ALTER DEFAULT PRIVILEGES FOR ROLE datum_migrate IN SCHEMA production_min
-  GRANT TRIGGER ON TABLES TO datum_owner;
-ALTER DEFAULT PRIVILEGES FOR ROLE datum_owner IN SCHEMA production_min
-  GRANT SELECT, INSERT, UPDATE ON TABLES TO datum_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE wicket_migrate IN SCHEMA production_min
+  GRANT SELECT, INSERT, UPDATE ON TABLES TO wicket_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE wicket_migrate IN SCHEMA production_min
+  GRANT TRIGGER ON TABLES TO wicket_owner;
+ALTER DEFAULT PRIVILEGES FOR ROLE wicket_owner IN SCHEMA production_min
+  GRANT SELECT, INSERT, UPDATE ON TABLES TO wicket_app;
 
 CREATE TABLE production_min.work_order (
   id                      uuid PRIMARY KEY,
@@ -51,7 +51,7 @@ CREATE TABLE production_min.work_order (
     status IN ('draft', 'cancelled') OR number IS NOT NULL
   )
 );
-ALTER TABLE production_min.work_order OWNER TO datum_owner;
+ALTER TABLE production_min.work_order OWNER TO wicket_owner;
 CREATE UNIQUE INDEX work_order_number_uidx
   ON production_min.work_order (number)
   WHERE number IS NOT NULL;
@@ -74,7 +74,7 @@ CREATE TABLE production_min.issue_line (
     quantity_dimension IN ('Count','Length','Mass','Time','Volume','Area')
   )
 );
-ALTER TABLE production_min.issue_line OWNER TO datum_owner;
+ALTER TABLE production_min.issue_line OWNER TO wicket_owner;
 CREATE INDEX issue_line_wo_idx ON production_min.issue_line (work_order_id);
 
 CREATE TABLE production_min.completion (
@@ -97,17 +97,17 @@ CREATE TABLE production_min.completion (
     quantity_scrap_dimension IN ('Count','Length','Mass','Time','Volume','Area')
   )
 );
-ALTER TABLE production_min.completion OWNER TO datum_owner;
+ALTER TABLE production_min.completion OWNER TO wicket_owner;
 CREATE INDEX completion_wo_idx ON production_min.completion (work_order_id);
 
 SELECT audit.attach('production_min.work_order'::regclass);
 SELECT audit.attach('production_min.issue_line'::regclass);
 SELECT audit.attach('production_min.completion'::regclass);
 
-GRANT SELECT, INSERT, UPDATE ON production_min.work_order TO datum_app;
-GRANT SELECT, INSERT, UPDATE ON production_min.issue_line TO datum_app;
-GRANT SELECT, INSERT, UPDATE ON production_min.completion TO datum_app;
+GRANT SELECT, INSERT, UPDATE ON production_min.work_order TO wicket_app;
+GRANT SELECT, INSERT, UPDATE ON production_min.issue_line TO wicket_app;
+GRANT SELECT, INSERT, UPDATE ON production_min.completion TO wicket_app;
 REVOKE DELETE ON production_min.work_order, production_min.issue_line, production_min.completion
-  FROM PUBLIC, datum_app;
+  FROM PUBLIC, wicket_app;
 
-ALTER SCHEMA production_min OWNER TO datum_owner;
+ALTER SCHEMA production_min OWNER TO wicket_owner;

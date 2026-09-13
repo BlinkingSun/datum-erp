@@ -11,7 +11,7 @@ Product files were not edited.
 
 **Not realistic for v1.** Shipping and lifecycle-managing a PostgreSQL cluster inside a desktop installer on all three platforms, silently, without a DBA, without Docker, and in under ten minutes, is not a Wave 1–3 foundation task. It is a packaging product of its own.
 
-Keep **PostgreSQL as the only dialect** (ADR 0003 first sentence). **Defer bundling.** Make the escape hatch the v1 product: the installer (or first-run wizard) asks for a connection string, or documents a one-page “install Postgres, then Datum” path.
+Keep **PostgreSQL as the only dialect** (ADR 0003 first sentence). **Defer bundling.** Make the escape hatch the v1 product: the installer (or first-run wizard) asks for a connection string, or documents a one-page “install Postgres, then Wicket” path.
 
 This is an **ADR 0003 revisit**. The ADR already names the cost (“installer complexity, which is genuine work”) and already lists the revisit trigger (“bundled-cluster upgrade path proves genuinely unreliable”). The honest move is to fire that trigger **before** writing the sidecar, not after a shop loses a ledger to a half-finished `pg_upgrade`.
 
@@ -29,9 +29,9 @@ This is an **ADR 0003 revisit**. The ADR already names the cost (“installer co
 | Escape hatch for shops that already run Postgres | ADR 0003 | Already designed. Unused if bundling is mandatory for v1 |
 | Deferrable constraints, exclusion constraints, grants, PITR, logical replication | ADR 0003 Consequences | These require **real** Postgres, not PGlite |
 | Application role has INSERT/SELECT on audit, not UPDATE/DELETE | ADR 0005, PLAN invariant 3 | Grants are theater if the same Windows user owns the cluster and can `psql` as superuser |
-| Typical topology: one office machine, LAN browsers and tablets, no internet | architecture §6 | Postgres can stay on `127.0.0.1`; **Datum** must bind the LAN → Windows Firewall still fires |
+| Typical topology: one office machine, LAN browsers and tablets, no internet | architecture §6 | Postgres can stay on `127.0.0.1`; **Wicket** must bind the LAN → Windows Firewall still fires |
 | Wave 1 workspace owns `justfile`, `.github/workflows/`, `dev/` | PLAN §3 | No Postgres-for-tests strategy |
-| Wave 3: `datum-server`, modules, web shell, Tauri desktop shell | PLAN §3 | Bundling is **implied**, not named |
+| Wave 3: `wicket-server`, modules, web shell, Tauri desktop shell | PLAN §3 | Bundling is **implied**, not named |
 | Out of scope: Phase 2 modules, GL, multi-tenancy, runtime plugins | PLAN §10 | **Bundling is not listed.** It is therefore accidentally in-scope via Wave 3 Tauri, with zero lanes, zero acceptance, zero OS split |
 
 PLAN is silent on how `cargo test` gets a Postgres before any installer exists. That is a missing Wave 1 `workspace` subtask, not a Wave 3 packaging surprise.
@@ -50,18 +50,18 @@ A 30-person medical-device shop on a spare office PC is the **Windows** case. ma
 
 The ten-minute test is adversarial on purpose:
 
-1. Double-click Datum.msi / .exe on a stock Windows 10/11 shop PC.
+1. Double-click Wicket.msi / .exe on a stock Windows 10/11 shop PC.
 2. No admin / UAC (vision: “no database administrator”; shops lock local admin).
 3. No Docker Desktop (vision: “no container runtime”).
 4. Existing Postgres on 5432 from an old Odoo / EDB / Docker leftover is allowed by reality, not by the spec.
 5. Defender is on. Firewall is on. Fast Startup / Fast User Switching are on.
 6. Someone logs off at 17:00. Tablets on the floor must keep scanning.
 7. Power blip. WAL replay. App comes back without a DBA.
-8. Six months later, Datum ships a Postgres major bump. Unattended `pg_upgrade`. Both binaries present.
+8. Six months later, Wicket ships a Postgres major bump. Unattended `pg_upgrade`. Both binaries present.
 
 Steps 2, 6, 7, and 8 fail if Postgres is a user process. Steps 2 and 6 fail if it is a Windows Service (admin to register). Step 4 fails unless the installer owns port selection. Step 3 is the entire point. **The test is not passable on Windows in v1 without lying about “silent” or “no admin.”**
 
-Honest v1 ten-minute story: “Postgres is already running, or you install EDB/Postgres.app/apt first (5–15 min, possibly with admin), then Datum connects in under two.” That **fails** success criterion 1 as written. Amend the criterion rather than the physics.
+Honest v1 ten-minute story: “Postgres is already running, or you install EDB/Postgres.app/apt first (5–15 min, possibly with admin), then Wicket connects in under two.” That **fails** success criterion 1 as written. Amend the criterion rather than the physics.
 
 ---
 
@@ -77,17 +77,17 @@ The documented Windows way to survive logoff is `pg_ctl register` — a **system
 
 Odoo’s all-in-one installer chose the service path and **requires UAC**. Their own docs say Windows packaging is “for testing or running single-user local instances” and **production on Windows is discouraged** (`https://www.odoo.com/documentation/saas-18.2/administration/on_premise/packages.html`). That is the most successful ERP-adjacent analog, and they flinched.
 
-If Datum stays a user process so it can skip admin: the first person to log off the office PC stops production. Fast User Switching is not a logoff but still isolates the session. A dedicated “always logged in” kiosk account is an SOP, not an installer feature, and IT will not bless it at a regulated shop.
+If Wicket stays a user process so it can skip admin: the first person to log off the office PC stops production. Fast User Switching is not a logoff but still isolates the session. A dedicated “always logged in” kiosk account is an SOP, not an installer feature, and IT will not bless it at a regulated shop.
 
 **Cite:** pg_ctl register is Windows-only and creates a system service; BUG #6201 (logoff can crash backends even when Postgres **is** a service: `https://www.postgresql.org/message-id/201109092059.p89KxoVr078697@wwwmaster.postgresql.org`); Session 0 isolation (`https://kb.firedaemon.com/support/solutions/articles/4000086228-microsoft-windows-session-0-isolation-and-interactive-services-detection`).
 
 ### P0-2. Firewall first-run prompt vs LAN topology
 
-Architecture §6: office machine serves browsers and tablets on the LAN. Postgres itself can listen only on `127.0.0.1` (Datum proxies). That avoids a **postgres.exe** firewall dialog. It does **not** avoid a **datum-server.exe** prompt the first time the Rust binary binds `0.0.0.0`.
+Architecture §6: office machine serves browsers and tablets on the LAN. Postgres itself can listen only on `127.0.0.1` (Wicket proxies). That avoids a **postgres.exe** firewall dialog. It does **not** avoid a **wicket-server.exe** prompt the first time the Rust binary binds `0.0.0.0`.
 
 Windows Defender Firewall’s “Windows Firewall has blocked some features of this app” is an interactive dialog. Adding a rule silently needs admin (`New-NetFirewallRule`). A ten-minute **silent** install cannot click Allow.
 
-If someone naively sets `listen_addresses = '*'` on the bundled cluster so tablets can hit Postgres directly, they get a second prompt, an exposed superuser, and a compliance finding. Do not do that. Keep Postgres loopback-only. Still: Datum’s LAN bind is the prompt.
+If someone naively sets `listen_addresses = '*'` on the bundled cluster so tablets can hit Postgres directly, they get a second prompt, an exposed superuser, and a compliance finding. Do not do that. Keep Postgres loopback-only. Still: Wicket’s LAN bind is the prompt.
 
 **Cite:** EDB/Postgres Pro installers treat firewall as an installer checkbox, not a silent default (`https://postgrespro.com/docs/enterprise/9.6/binary-installation-on-windows`). Remote-access guides require an explicit inbound rule (`https://postgre-sql.github.io/postgresql-allow-remote-connections.html`).
 
@@ -109,15 +109,15 @@ ADR 0003 already admits “some antivirus and endpoint products dislike a bundle
 
 Postgres is designed to recover from `immediate` shutdown and power loss **if fsync actually hit the disk**. Shop PCs: consumer SSDs with DRAM-less controllers, Windows write cache, “Fast Startup” (hybrid shutdown that is not a real shutdown), Defender holding a WAL file, UPS optional.
 
-`pg_ctl stop -m immediate` “will lead to a crash-recovery cycle during the next server start” (official pg_ctl docs). That is fine when a DBA watches the log. Unattended, a failed recovery (`pre-existing shared memory block is still in use` — BUG #6201) leaves Datum showing a connection error to a machinist with gloves on.
+`pg_ctl stop -m immediate` “will lead to a crash-recovery cycle during the next server start” (official pg_ctl docs). That is fine when a DBA watches the log. Unattended, a failed recovery (`pre-existing shared memory block is still in use` — BUG #6201) leaves Wicket showing a connection error to a machinist with gloves on.
 
-WAL replay is a reason to pick Postgres, not a reason to pretend the installer owns it. An external Postgres running as a service is the same physics with twenty years of ops lore. A bundled cluster has to **reimplement** that lore inside Datum.
+WAL replay is a reason to pick Postgres, not a reason to pretend the installer owns it. An external Postgres running as a service is the same physics with twenty years of ops lore. A bundled cluster has to **reimplement** that lore inside Wicket.
 
 ### P1-3. Major-version upgrade: both binaries must ship
 
 `pg_upgrade` **requires old and new bindirs and datadirs**. Official docs: “Always run the pg_upgrade binary of the new server, not the old one.” Windows: “you must be logged into an administrative account” and quote paths with spaces (`https://www.postgresql.org/docs/current/pgupgrade.html`). It needs write permission in the current working directory (`pg_upgrade_internal.log` failures are a Windows classic: `https://stackoverflow.com/questions/34664236/pg-upgrade-on-windows-cannot-write-to-log-file-pg-upgrade-internal-log`).
 
-So every major bump of a bundled Datum must:
+So every major bump of a bundled Wicket must:
 
 1. Ship both PostgreSQL N and N+1 (~hundreds of MB extra).
 2. Stop the cluster (production down).
@@ -136,7 +136,7 @@ PLAN invariant 3 / ADR 0005: application role has INSERT+SELECT on audit, not UP
 
 That user can:
 
-- Read the superuser password from Datum’s config / credential file in their own `%AppData%`.
+- Read the superuser password from Wicket’s config / credential file in their own `%AppData%`.
 - Flip `pg_hba.conf` to `trust` and restart.
 - Run `psql -U postgres` and `UPDATE`/`DELETE` the audit table.
 - Copy the data directory off the box.
@@ -151,27 +151,27 @@ Default port 5432 collides with EDB, Odoo’s bundled `PostgreSQL_For_Odoo`, Doc
 
 Windows has no Unix-socket tradition. Recent Postgres can use AF_UNIX on Windows 10 1803+, with path-length limits. Default is TCP. Named pipes are not the Postgres-on-Windows default.
 
-`localhost` on Windows is dual-stack and **IPv6-first**. If `listen_addresses` is `127.0.0.1` only, clients connecting to `localhost` try `::1` first: connection refused or a ~10s fallback (`https://dev.to/skucherenko/the-localhost-trap-a-10-second-database-connection-on-windows-3le7`; Craig Ringer on `::1`: `https://stackoverflow.com/questions/17648677/is-the-server-running-on-host-localhost-1-and-accepting-tcp-ip-connections`). Shop-floor 500ms scan budget dies on a 10s connect. **Datum must connect to `127.0.0.1`, never `localhost`, and listen on both or only v4 explicitly.**
+`localhost` on Windows is dual-stack and **IPv6-first**. If `listen_addresses` is `127.0.0.1` only, clients connecting to `localhost` try `::1` first: connection refused or a ~10s fallback (`https://dev.to/skucherenko/the-localhost-trap-a-10-second-database-connection-on-windows-3le7`; Craig Ringer on `::1`: `https://stackoverflow.com/questions/17648677/is-the-server-running-on-host-localhost-1-and-accepting-tcp-ip-connections`). Shop-floor 500ms scan budget dies on a 10s connect. **Wicket must connect to `127.0.0.1`, never `localhost`, and listen on both or only v4 explicitly.**
 
 ### P2-2. VC++ redistributable, ICU, codepage vs UTF8
 
 EDB’s Windows installer installs VC++ runtimes by default. Unattended with `install_runtimes=0` fails on a machine without `msvcp140.dll` (`https://github.com/EnterpriseDB/edb-installers/issues/155`). zonkyio/embedded-postgres historically required **VC++ 2013** specifically (`https://github.com/zonkyio/embedded-postgres` README: “Running tests on Windows does not work” without that redist).
 
-A Tauri sidecar that shells out to `postgres.exe` built with MSVC will fail identically unless Datum ships or prerequisites the matching redist. Installing a redist is often another UAC.
+A Tauri sidecar that shells out to `postgres.exe` built with MSVC will fail identically unless Wicket ships or prerequisites the matching redist. Installing a redist is often another UAC.
 
-**UTF8 is not the unconditional Windows default.** `initdb` default locale provider is still **libc**; encoding is derived from the Windows locale (e.g. `English_United States.1252` → WIN1252). ICU provider defaults encoding to UTF8, but libc settings are still initialized (`https://www.postgresql.org/docs/15/app-initdb.html`). On Windows, UTF8 **can** be used with any libc locale (`https://www.postgresql.org/docs/15/multibyte.html`). Datum must pass `-E UTF8` (and a chosen locale) on every `initdb`, not trust the shop PC’s codepage. Collation differences across shop PCs will otherwise make tests and backups non-portable.
+**UTF8 is not the unconditional Windows default.** `initdb` default locale provider is still **libc**; encoding is derived from the Windows locale (e.g. `English_United States.1252` → WIN1252). ICU provider defaults encoding to UTF8, but libc settings are still initialized (`https://www.postgresql.org/docs/15/app-initdb.html`). On Windows, UTF8 **can** be used with any libc locale (`https://www.postgresql.org/docs/15/multibyte.html`). Wicket must pass `-E UTF8` (and a chosen locale) on every `initdb`, not trust the shop PC’s codepage. Collation differences across shop PCs will otherwise make tests and backups non-portable.
 
 ### P2-3. Restricted token: Postgres refuses to run as Administrator
 
 `initdb`/`postgres` on Windows re-exec with a restricted token that drops Administrators. Data dirs whose ACLs are “Administrators only” (including some `mkdtemp` trees, and often `Program Files`) then fail with permission denied (`https://stackoverflow.com/questions/30936467/executing-batch-file-for-postgre-dbinit-with-nsis-gives-permission-denied`; Coverity: “Execution of PostgreSQL by a user with administrative permissions is not permitted”). Software Restriction Policies yield error 1260.
 
-If the Datum installer is elevated (to create a service / firewall rule), `initdb` as that token **fails** unless it creates the datadir and ACLs **before** dropping privileges, as a dedicated service account. This is the entire EDB installer. It is not a sidecar one-liner.
+If the Wicket installer is elevated (to create a service / firewall rule), `initdb` as that token **fails** unless it creates the datadir and ACLs **before** dropping privileges, as a dedicated service account. This is the entire EDB installer. It is not a sidecar one-liner.
 
 Python `embedded-postgres` 18.6 documents the same trap on Windows Administrator accounts (`https://pypi.org/project/embedded-postgres/18.6.2/`).
 
 ### P2-4. Path length, spaces, AppData vs ProgramData, multiple users
 
-`MAX_PATH` is 260 unless the process and OS opt into long paths (`https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation`). Postgres relation files under a deep `%LOCALAPPDATA%\Datum ERP\postgresql\data\...` plus a long database name will hit it. EDB default `C:\Program Files\PostgreSQL\N\data` works only because it is short **and** the installer is admin.
+`MAX_PATH` is 260 unless the process and OS opt into long paths (`https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation`). Postgres relation files under a deep `%LOCALAPPDATA%\Wicket ERP\postgresql\data\...` plus a long database name will hit it. EDB default `C:\Program Files\PostgreSQL\N\data` works only because it is short **and** the installer is admin.
 
 Spaces in `Program Files` and `Application Data` require quoting everywhere. Trailing backslash inside quotes is a known `pg_ctl` footgun (`https://www.postgresql.org/message-id/200410271716.i9RHGXg22084@candle.pha.pa.us`).
 
@@ -223,7 +223,7 @@ ADR 0003: “a few hundred megabytes.” Postgres.app single-version ~120MB down
 | Plane | compose / AIO | Docker Postgres | yes | no |
 | Twenty | docker-compose; discussion #5449 | Docker `db` service; people rip it out to point at Supabase | **yes** | no |
 | Odoo all-in-one Windows | https://www.odoo.com/documentation/saas-18.2/administration/on_premise/packages.html · NSIS `setup.nsi` | Embeds EDB installer `--mode unattended`, service `PostgreSQL_For_Odoo`, service account `openpgsvc` | no | **admin required**; production on Windows discouraged |
-| Metabase (analog, not PG-bundled) | product docs | H2 for easy start, **real DB for production** | n/a | The honest ten-minute cheat. Datum already rejected SQLite/H2 on capability |
+| Metabase (analog, not PG-bundled) | product docs | H2 for easy start, **real DB for production** | n/a | The honest ten-minute cheat. Wicket already rejected SQLite/H2 on capability |
 | Coverity Connect | Black Duck article | “Embedded database” = bundled PG as a service | no | admin; still hits restricted-token / 1260 |
 
 **Named production desktop app that silently lifecycle-manages Postgres on Windows without admin and without Docker:** none found. If one exists it is obscure. Odoo is the existence proof that “bundle on Windows” means **UAC + service**, and even they tell you not to put production there.
@@ -241,19 +241,19 @@ Facts (`https://github.com/electric-sql/pglite/`):
 - `btree_gist` ships, so exclusion constraints are not automatically dead (`https://pglite.dev/extensions/`). Deferrable constraints are core Postgres and should work **inside one session**.
 - `CREATE INDEX CONCURRENTLY` has been broken (single-connection). Concurrent shop-floor writers do not exist; they serialize.
 - No PITR, no logical replication, no `pg_upgrade` (logical dump only; grants/triggers/RLS often out of scope — `pglite-migrate`).
-- Datum is a **Rust Axum** server. PGlite is a JS/TS library. Embedding it means a JS runtime or a separate WASM build. That is not ADR 0002.
+- Wicket is a **Rust Axum** server. PGlite is a JS/TS library. Embedding it means a JS runtime or a separate WASM build. That is not ADR 0002.
 
 ADR 0003 bought Postgres **because of** deferrable constraints, exclusion/range types, grants, PITR, replication, and concurrent writes. PGlite keeps the SQL dialect and drops the operational properties. Architecture performance: shop-floor scan <500ms with several tablets is a **multi-connection** workload. Serialized WASM is the opposite.
 
 SQLite was already rejected in ADR 0003 on capability. PGlite is SQLite’s shape (in-process file, no daemon) with a Postgres accent. Same rejection, plus WASM operational risk.
 
-Use PGlite (or a WASM PG) only if Datum later wants a **read-only offline cache** on a tablet — which ADR 0003 already filed as a new decision.
+Use PGlite (or a WASM PG) only if Wicket later wants a **read-only offline cache** on a tablet — which ADR 0003 already filed as a new decision.
 
 ---
 
 ## Wave 1–2 test-time Postgres (PLAN is silent)
 
-Kernel crates (`datum-db`, ledger property tests, migration round-trips) need a real Postgres **before** any installer. This is a **Wave 1 `workspace` subtask** (that lane already owns `justfile`, `.github/workflows/`, `dev/`).
+Kernel crates (`wicket-db`, ledger property tests, migration round-trips) need a real Postgres **before** any installer. This is a **Wave 1 `workspace` subtask** (that lane already owns `justfile`, `.github/workflows/`, `dev/`).
 
 Recommended strategy, in order:
 
@@ -263,7 +263,7 @@ Recommended strategy, in order:
 4. **`testcontainers-rs` / `testcontainers-modules` postgres** as an **optional** path when Docker is present. Do not make Docker the default: vision forbids a container runtime for *customers*, and the Windows shop PC may not have it for *developers* either. testcontainers is a CI luxury, not the harness.
 5. Pin the major version in one place (`dev/postgres-version` or a workspace env) so tests, CI, and the future bundle cannot drift.
 
-Do **not** use PGlite for `datum-ledger` property tests. Deferrable constraints and concurrent sessions are the point of those tests.
+Do **not** use PGlite for `wicket-ledger` property tests. Deferrable constraints and concurrent sessions are the point of those tests.
 
 ---
 
@@ -291,13 +291,13 @@ If the project lead refuses the §10 amendment and insists on ten-minute-no-DBA 
 
 - **Keep:** PostgreSQL only. No dialect abstraction. Deferrable constraints, exclusion constraints, grants, PITR remain the reason.
 - **Defer:** “Bundled with the desktop installer. The user never learns it is there.”
-- **Promote to v1:** “With an escape hatch” becomes the default path, not the exception. First-run: connection string, or fail closed with a short “install PostgreSQL, then paste DATABASE_URL” page. Link EDB / Postgres.app / distro packages. Do not shell out to their installers from Datum in v1.
+- **Promote to v1:** “With an escape hatch” becomes the default path, not the exception. First-run: connection string, or fail closed with a short “install PostgreSQL, then paste DATABASE_URL” page. Link EDB / Postgres.app / distro packages. Do not shell out to their installers from Wicket in v1.
 - **Revisit trigger (already in the ADR):** fire it now, as a planning decision, not after field failure.
 
 **Vision success criterion 1:** rewrite or split:
 
-- v1: “A shop with a running PostgreSQL can install Datum on three OSes in under ten minutes.”
-- Later: “A shop with no DBA and no container runtime can install Datum+Postgres in under ten minutes on macOS and Linux; Windows requires admin for a service or an external Postgres.”
+- v1: “A shop with a running PostgreSQL can install Wicket on three OSes in under ten minutes.”
+- Later: “A shop with no DBA and no container runtime can install Wicket+Postgres in under ten minutes on macOS and Linux; Windows requires admin for a service or an external Postgres.”
 
 Do not keep the current sentence and also defer bundling. That is a documented lie.
 
@@ -326,7 +326,7 @@ Option 3 is how you miss the beachhead ship date. Option 1 is how every serious 
 ## Cross-links
 
 - Slice 2 (grant-level audit): P1-4 above. Bundled cluster on a user-owned Windows datadir cannot make GRANTs a Part 11 control.
-- Architecture §6 LAN topology: keep Postgres on `127.0.0.1`; Firewall still hits Datum. Connect via `127.0.0.1` not `localhost`.
+- Architecture §6 LAN topology: keep Postgres on `127.0.0.1`; Firewall still hits Wicket. Connect via `127.0.0.1` not `localhost`.
 - PLAN Wave 1 `workspace`: missing test-Postgres subtask. Do not wait for Wave 3.
 
 ---

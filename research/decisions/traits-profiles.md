@@ -12,7 +12,7 @@
 
 Costs first. Every field added to §6.2 is frozen for the life of the major version and is copied
 by hand into a race that is already running; every rule added is a test somebody must write in
-`datum-ledger` or `datum-statemachine` before Wave 2s can close. So I add one type, four error
+`wicket-ledger` or `wicket-statemachine` before Wave 2s can close. So I add one type, four error
 variants and four normative bullets, and I refuse everything else the slice proposed.
 
 Against the four postings of the slice: a **receipt** is `+qty` at a bin plus `−qty` at
@@ -47,7 +47,7 @@ catch a wrong-item layer either; bullet 5 does.
 ### (b) `finalize` belongs on the trait
 
 On the trait, with the object-safe by-value receiver. The transition executor lives in
-`datum-statemachine`, which **must not** depend on `datum-ledger` — that edge is the cycle R5
+`wicket-statemachine`, which **must not** depend on `wicket-ledger` — that edge is the cycle R5
 broke and CONTRACT §4 forbids. If `finalize` existed only on the ledger's concrete builder, the
 only callers left are the ledger (which cannot know when the hooks are done) or the composition
 root (which puts the P0 obligation outside the transaction), i.e. exactly the "remember to call
@@ -162,7 +162,7 @@ pub trait PostingSink {
 pub struct NoPostings;   // contribute -> Err(NoSink); finalize -> Err(NoSink)
 ```
 
-Normative rules (`datum-ledger` and `datum-statemachine` enforce them and are audited on them):
+Normative rules (`wicket-ledger` and `wicket-statemachine` enforce them and are audited on them):
 
 1. **One sink per transaction**, `&mut dyn PostingSink` to every hook in the hook order below,
    then one `finalize`. Two sinks in one transaction is a defect (D2 §9.4). A sink that received
@@ -174,7 +174,7 @@ Normative rules (`datum-ledger` and `datum-statemachine` enforce them and are au
 3. **Withdrawals are allocated, explicitly or automatically, never left unallocated.** A
    `boundary == None`, negative quantity intent must, by `finalize`, be covered by `Consumption`
    intents whose quantity and money sums reproduce it (D2 P3). Explicit picks come from hooks;
-   otherwise `datum-ledger`'s allocator produces them at `finalize` from the item's cost method
+   otherwise `wicket-ledger`'s allocator produces them at `finalize` from the item's cost method
    and layers re-derived from the ledger — never from the withdrawal's own numbers (D2 §9.2), and
    never from the consuming posting's value rows. Short layers → `AllocationRequired`; explicit
    edges that do not add up → `AllocationMismatch`; no clamping, no invented layer.
@@ -188,10 +188,10 @@ Normative rules (`datum-ledger` and `datum-statemachine` enforce them and are au
    quantity intent at a real location must be the `consuming` side of at least one `Consumption`
    edge naming the postings it was made from; else `LineageRequired`. P3 makes *withdrawals*
    total; only this rule makes the forward and backward traces of Wave 2s acceptance 8 agree.
-7. **Enum bijection.** `datum-ledger` owns the Rust↔SQL enum mapping (D2 §5.1) and carries an
+7. **Enum bijection.** `wicket-ledger` owns the Rust↔SQL enum mapping (D2 §5.1) and carries an
    exhaustive round-trip test over every variant.
 8. **Hook order** is dependency-topological over the registering modules, ties broken by module
-   id; `datum-statemachine` documents and tests it (`docs/03` §3.2). A value intent may only price
+   id; `wicket-statemachine` documents and tests it (`docs/03` §3.2). A value intent may only price
    a handle contributed earlier in that order.
 9. Boundary-matrix violations (D2 §4.2) fail at insert, i.e. at `finalize`; an implementation may
    reject earlier, never later.
@@ -221,7 +221,7 @@ which is where 11.200(a)(3) is enforced; disagreement with the row is `Invalid`.
 Per action class is rejected twice over: "action class" is a taxonomy nobody has specified, and it
 *permits* one signature to authorise two different mutations — a second signing event with no
 signing, against 11.200/11.70's record-to-signature link. Per record version is the same defect
-and is already implied by the hash check. So: `datum-esign` claims the row with
+and is already implied by the hash check. So: `wicket-esign` claims the row with
 `UPDATE … SET consumed_at = now() WHERE signature_id = $1 AND consumed_at IS NULL RETURNING`
 **inside the transition's own transaction**, so a rollback releases the claim and a legitimate
 retry still works; a claim that returns no row is `Consumed`. Named cost: a workflow that wants one
@@ -234,13 +234,13 @@ mutation, so the gate stays shareable across hooks.
 It closes unsigned-by-omission-of-the-*call* and leaves unsigned-by-omission-of-the-*declaration*
 open, which is plan-audit R3 and the precise failure ADR 0005 rejected for audit: a manifest a
 validator can read is a human remembering, one review away from a WO release that was never
-signed. So the kernel must make omission unrepresentable where it matters: `datum-statemachine`'s
+signed. So the kernel must make omission unrepresentable where it matters: `wicket-statemachine`'s
 edge metadata carries a **total** declaration, not an `Option` —
 `enum SignatureDeclaration { Required(SignatureRequirement), NotRequired { reason: &'static str } }`
 with no `Default` — and every edge of a module whose manifest says `regulated = true` must supply
 one, so an omission is a compile error in that module's registration. Non-regulated modules keep
 absence-means-none, because charging a bracket-shop module author for an annotation buys nothing.
-The type lives in `datum-statemachine`, not core: core needs `SignatureRequirement` and the gate,
+The type lives in `wicket-statemachine`, not core: core needs `SignatureRequirement` and the gate,
 nothing more, and freezing the edge shape in core would also freeze it as *one* requirement per
 edge — dual signature (review then approve) stays a Wave 2b statemachine change with no core
 surface change. The executor calls `verify` before the mutation, aborts the transaction on any
@@ -301,7 +301,7 @@ pub struct NoSignatures;   // verify -> Err(SignatureError::NoProvider)
 ```
 
 Normative rules: as amended, with three edits — (i) `verify` is authoritative only in
-`datum-esign` (Wave 2b), which loads the row by `token.signature` and confirms both identification
+`wicket-esign` (Wave 2b), which loads the row by `token.signature` and confirms both identification
 components at mint, the stored hash, the live record at `record.version`, the **permission
 snapshot taken at mint** (a live RBAC read would need a database in core and is rejected), the
 meaning, and the single-use claim; (ii) single use is per signature, claimed in the transition's
@@ -323,7 +323,7 @@ call site the design depends on.
 "pragmatic split" keeps `ConsumptionPosting` out of core and admits in the same sentence that
 "then hooks cannot do issues". That is the whole Wave 2s slice: `mod-inventory` issuing operator-
 picked lots is the only path that gives P3 two genuinely independent quantity sources (Q1c), and
-the alternative routes allocation through a ledger type that `datum-statemachine` would have to
+the alternative routes allocation through a ledger type that `wicket-statemachine` would have to
 name — the dependency edge R5 removed. Cost of keeping it in core is one struct and one enum arm.
 
 **`BoundaryRejected` / a core-side boundary matrix — CONTRACT wins, the slice's optional variant
@@ -369,12 +369,12 @@ Wave 2s acceptance script, which must pass unchanged under both profiles (PLAN �
    `regulated = true` modules. `plain-shop`'s `Required` set is empty **and asserted empty**, not
    assumed. A profile may not rewrite either side.
 4. **`signature_gate_binding`** — which `SignatureGate` the composition root binds per profile and
-   build: `NoSignatures` pre-Wave-2b and in tests only, `datum-esign` from 2b; plus the startup
+   build: `NoSignatures` pre-Wave-2b and in tests only, `wicket-esign` from 2b; plus the startup
    guard — any `Required` edge in the enabled set with `NoSignatures` bound is a release-build
    startup failure, and a CI check that no release profile binds `NoSignatures`.
 5. **`validation_manifest`** — always generated in both profiles (`docs/03` §8), with its content
    hash recorded; freeze its route/CLI, the permission key that reads it, and the fact that the
-   only thing a profile hides is *navigation*: `datum iq`, `datum audit export` and
+   only thing a profile hides is *navigation*: `wicket iq`, `wicket audit export` and
    `/api/v1/audit` stay available as admin tools, permission-gated, in both profiles (they are
    kernel SELECTs, not module routes — plan-audit R4).
 6. **`navigation`** — the per-profile visible nav set, as the single place profile-driven hiding is

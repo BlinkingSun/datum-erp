@@ -8,19 +8,19 @@
 
 mod common;
 
-use datum_core::{
+use rust_decimal::Decimal;
+use wicket_core::{
     AnyQuantity, Boundary, DimensionKind, GroupKind, Identifier, ItemId, PostingGroupHeader,
     PostingIntent, PostingSink, QuantityPosting, UnitId,
 };
-use datum_db::Tx;
-use datum_ledger::{CostMethod, GroupBuilder, boundary_sql, upsert_location, upsert_stock_item};
-use datum_mod_locations::{
+use wicket_db::Tx;
+use wicket_ledger::{CostMethod, GroupBuilder, boundary_sql, upsert_location, upsert_stock_item};
+use wicket_mod_locations::{
     CreateLocation, Error, ListFilter, Location, LocationKind, LocationStatus, LocationTreeNode,
     UpdateLocation, boundary_code, ensure_wip, install, list, list_locations, migrate,
     seed_install, store,
 };
-use datum_test::db_case;
-use rust_decimal::Decimal;
+use wicket_test::db_case;
 
 use common::{boot_kernel, has_audit, migrate_kernel, pg_code, write_ctx, write_pool};
 
@@ -60,7 +60,7 @@ async fn install_seeds_seven_boundary_locations_once() {
             .unwrap();
     assert_eq!(count.0, 7);
 
-    for b in datum_mod_locations::BOUNDARY_VARIANTS {
+    for b in wicket_mod_locations::BOUNDARY_VARIANTS {
         let code = boundary_code(b);
         let row: (String,) = sqlx::query_as("SELECT code FROM locations.location WHERE code = $1")
             .bind(code)
@@ -191,12 +191,12 @@ async fn deactivate_refused_while_on_hand() {
     let db = db_case!("loc_onhand");
     migrate_kernel(&db).await;
     migrate(db.migrate_pool()).await.unwrap();
-    datum_db::migrate::run(db.migrate_pool(), &[("datum-uom", &datum_uom::MIGRATOR)])
+    wicket_db::migrate::run(db.migrate_pool(), &[("wicket-uom", &wicket_uom::MIGRATOR)])
         .await
         .unwrap();
-    datum_db::migrate::run(
+    wicket_db::migrate::run(
         db.migrate_pool(),
-        &[("datum-ledger", &datum_ledger::MIGRATOR)],
+        &[("wicket-ledger", &wicket_ledger::MIGRATOR)],
     )
     .await
     .unwrap();
@@ -273,7 +273,7 @@ async fn deactivate_refused_while_on_hand() {
             entered: None,
         }))
         .unwrap();
-    datum_ledger::post(&mut tx, builder).await.unwrap();
+    wicket_ledger::post(&mut tx, builder).await.unwrap();
     tx.commit().await.unwrap();
 
     let mut tx = Tx::begin(&pool, &write_ctx("locations.deact"))
@@ -357,7 +357,7 @@ async fn registry_row_matches_location() {
     let mut tx = Tx::begin(&pool, &write_ctx("locations.reg")).await.unwrap();
     seed_install(&mut tx).await.unwrap();
 
-    for b in datum_mod_locations::BOUNDARY_VARIANTS {
+    for b in wicket_mod_locations::BOUNDARY_VARIANTS {
         let id = store::boundary_location_id(&mut tx, b).await.unwrap();
         let seeded = store::get(&mut tx, id).await.unwrap();
         assert_eq!(seeded.kind, LocationKind::Virtual);
@@ -415,7 +415,7 @@ async fn registry_row_matches_location() {
 }
 
 #[tokio::test]
-async fn every_locations_table_is_audited_and_owned_by_datum_owner() {
+async fn every_locations_table_is_audited_and_owned_by_wicket_owner() {
     let db = db_case!("loc_audit");
     let kernel = boot_kernel(&db).await;
     migrate(db.migrate_pool()).await.unwrap();
@@ -438,7 +438,7 @@ async fn every_locations_table_is_audited_and_owned_by_datum_owner() {
         .fetch_one(db.migrate_pool())
         .await
         .unwrap();
-        assert_eq!(owner.0.as_deref(), Some("datum_owner"));
+        assert_eq!(owner.0.as_deref(), Some("wicket_owner"));
     }
     db.finish().await.unwrap();
 }
@@ -622,7 +622,7 @@ async fn generated_and_seeded_ids_are_uuid_v7() {
     seed_install(&mut tx).await.unwrap();
     let site = store::default_site_id(&mut tx).await.unwrap();
     assert_uuid_v7(site.as_uuid(), "site MAIN");
-    for b in datum_mod_locations::BOUNDARY_VARIANTS {
+    for b in wicket_mod_locations::BOUNDARY_VARIANTS {
         let id = store::boundary_location_id(&mut tx, b).await.unwrap();
         assert_uuid_v7(id.as_uuid(), boundary_code(b));
     }

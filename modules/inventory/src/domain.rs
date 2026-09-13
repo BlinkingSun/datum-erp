@@ -1,8 +1,8 @@
 //! Inventory document entities and posting inputs. No I/O.
 
-use datum_core::{AnyQuantity, Identifier, ItemId, LocationId, LotId, Money, SerialId};
-use datum_mod_lots::PackageId;
 use serde::{Deserialize, Serialize};
+use wicket_core::{AnyQuantity, Identifier, ItemId, LocationId, LotId, Money, SerialId};
+use wicket_mod_lots::PackageId;
 
 use crate::error::{Error, Result};
 

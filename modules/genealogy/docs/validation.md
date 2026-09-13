@@ -10,7 +10,7 @@ kernel lot entities, never text columns (PLAN §3).
 
 | Id | Requirement | Source |
 |---|---|---|
-| G1 | Reads only through `datum_ledger::trace_backward` / `trace_forward` | SPEC; R-2s-3 |
+| G1 | Reads only through `wicket_ledger::trace_backward` / `trace_forward` | SPEC; R-2s-3 |
 | G2 | Forward from the heat and backward from the finished lot are the same tree | PLAN §3 item 8 |
 | G3 | `impact(lot)` is the forward closure to CUSTOMER (recall list) | D2 case g; mockup |
 | G4 | Traversals over more than N postings run as `genealogy.trace` with progress | DESIGN §2 |
@@ -27,8 +27,8 @@ kernel lot entities, never text columns (PLAN §3).
 | `reversal_edges_are_negative_and_do_not_double_count` | signed edges |
 | `large_trace_runs_as_job_with_progress` | DESIGN §2; 202 + job |
 | `cache_is_rebuildable_and_never_authoritative` | drop cache; identical |
-| `module_reads_only_through_datum_ledger_api` | no SQL against ledger.* |
+| `module_reads_only_through_wicket_ledger_api` | no SQL against ledger.* |
 | `writes_go_through_tx` | CONTRACT §5a |
-| `every_genealogy_table_is_audited_and_owned_by_datum_owner` | every table audited |
+| `every_genealogy_table_is_audited_and_owned_by_wicket_owner` | every table audited |
 | `reversible_migration_drops_genealogy_schema` | PLAN §6 invariant 8 |
 | `where_used_walks_item_revision` | `where_used(item, revision)` |

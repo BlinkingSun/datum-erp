@@ -2,6 +2,6 @@
 
 ALTER TABLE items.item_revision_history
   ADD COLUMN application_version text NOT NULL
-    DEFAULT coalesce(nullif(current_setting('datum.app_version', true), ''), ''),
+    DEFAULT coalesce(nullif(current_setting('wicket.app_version', true), ''), ''),
   ADD COLUMN configuration_version text NOT NULL
-    DEFAULT coalesce(nullif(current_setting('datum.config_version', true), ''), '');
+    DEFAULT coalesce(nullif(current_setting('wicket.config_version', true), ''), '');

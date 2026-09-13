@@ -1,6 +1,6 @@
-//! SHA-256 hex for idempotency body hashes (via `datum-audit`).
+//! SHA-256 hex for idempotency body hashes (via `wicket-audit`).
 
-use datum_audit::sha256::{digest, hex};
+use wicket_audit::sha256::{digest, hex};
 
 /// SHA-256 digest of `data` as lowercase hex (64 chars).
 pub fn sha256_hex(data: &[u8]) -> String {

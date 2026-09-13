@@ -1,10 +1,10 @@
 //! HTTP-facing DTOs and handlers (`docs/10-api-conventions.md`).
 //!
-//! Route wiring lives in `datum-server`; this crate exposes typed operations only.
+//! Route wiring lives in `wicket-server`; this crate exposes typed operations only.
 
-use datum_core::LocationId;
-use datum_db::Tx;
 use serde_json::{Value, json};
+use wicket_core::LocationId;
+use wicket_db::Tx;
 
 use crate::domain::{CreateLocation, ListFilter, Location, LocationTreeNode, UpdateLocation};
 use crate::store;
@@ -185,7 +185,7 @@ pub fn openapi_document() -> Value {
         let method = route.method.to_ascii_lowercase();
         path_item[method] = json!({
             "operationId": route.operation_id,
-            "x-datum-permission": route.permission,
+            "x-wicket-permission": route.permission,
             "responses": {
                 "200": { "description": "ok" },
                 "201": { "description": "created" },
@@ -219,7 +219,7 @@ pub fn openapi_document() -> Value {
     json!({
         "openapi": "3.0.3",
         "info": {
-            "title": "Datum locations API",
+            "title": "Wicket locations API",
             "version": "0.1.0"
         },
         "paths": paths,

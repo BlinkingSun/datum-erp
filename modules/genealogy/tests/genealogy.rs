@@ -6,37 +6,37 @@ mod common;
 
 use std::path::PathBuf;
 
-use datum_core::{LotId, SerialId};
-use datum_db::Tx;
-use datum_mod_genealogy::{
+use sqlx::query as sql_query;
+use sqlx::query_scalar as sql_query_scalar;
+use wicket_core::{LotId, SerialId};
+use wicket_db::Tx;
+use wicket_mod_genealogy::{
     Direction, TRACE_JOB, TraceBody, TraceOrigin, TraceOutcome, TraceRequest, drop_cache, impact,
     job_status, signed_edge_sum, trace, trace_inline, undirected_edges, where_used,
 };
-use datum_module::Kernel;
-use datum_test::db_case;
-use sqlx::query as sql_query;
-use sqlx::query_scalar as sql_query_scalar;
+use wicket_module::Kernel;
+use wicket_test::db_case;
 
 use common::{
     World, action_ctx, boot_kernel, complete_wo, has_zz_audit, issue_heat, pg_code, receive_heat,
     release_heat, seed_world, ship_fg, table_owner, write_pool,
 };
 
-fn contains_lot(nodes: &[datum_mod_genealogy::TreeNode], lot: LotId) -> bool {
-    fn walk(n: &datum_mod_genealogy::TreeNode, lot: LotId) -> bool {
+fn contains_lot(nodes: &[wicket_mod_genealogy::TreeNode], lot: LotId) -> bool {
+    fn walk(n: &wicket_mod_genealogy::TreeNode, lot: LotId) -> bool {
         n.lot == Some(lot) || n.children.iter().any(|c| walk(c, lot))
     }
     nodes.iter().any(|n| walk(n, lot))
 }
 
-fn contains_serial(nodes: &[datum_mod_genealogy::TreeNode], serial: SerialId) -> bool {
-    fn walk(n: &datum_mod_genealogy::TreeNode, serial: SerialId) -> bool {
+fn contains_serial(nodes: &[wicket_mod_genealogy::TreeNode], serial: SerialId) -> bool {
+    fn walk(n: &wicket_mod_genealogy::TreeNode, serial: SerialId) -> bool {
         n.serial == Some(serial) || n.children.iter().any(|c| walk(c, serial))
     }
     nodes.iter().any(|n| walk(n, serial))
 }
 
-async fn graph(w: &World, pool: &datum_db::WritePool) {
+async fn graph(w: &World, pool: &wicket_db::WritePool) {
     receive_heat(w, pool).await;
     release_heat(w, pool).await;
     complete_wo(w, pool).await;
@@ -156,7 +156,7 @@ async fn impact_lists_customer_shipments_and_units() {
     let w = seed_world(&db, kernel).await;
     let pool = write_pool(&db);
     graph(&w, &pool).await;
-    let order = datum_core::Identifier::generate();
+    let order = wicket_core::Identifier::generate();
     let doc = ship_fg(&w, &pool, order).await;
     let ctx = action_ctx(w.actor, "genealogy.view");
     let mut tx = Tx::begin(&pool, &ctx).await.expect("begin");
@@ -198,7 +198,7 @@ async fn reversal_edges_are_negative_and_do_not_double_count() {
         TraceBody::Both { forward, .. } => forward.nodes,
     };
     let group = issue.posted_group_id.expect("group");
-    datum_ledger::reverse(&mut tx, group, "void issue")
+    wicket_ledger::reverse(&mut tx, group, "void issue")
         .await
         .expect("reverse");
     let after = match trace_inline(
@@ -229,7 +229,7 @@ async fn reversal_edges_are_negative_and_do_not_double_count() {
     let issued = rust_decimal::Decimal::new(20, 0);
     let pair: rust_decimal::Decimal = {
         fn walk(
-            n: &datum_mod_genealogy::TreeNode,
+            n: &wicket_mod_genealogy::TreeNode,
             abs: rust_decimal::Decimal,
             acc: &mut rust_decimal::Decimal,
         ) {
@@ -298,7 +298,7 @@ async fn large_trace_runs_as_job_with_progress() {
         st.progress_pct
     );
     assert!(
-        st.state == datum_jobs::JobState::Succeeded || st.progress_pct > 0,
+        st.state == wicket_jobs::JobState::Succeeded || st.progress_pct > 0,
         "job must run with progress"
     );
     db.finish().await.expect("finish");
@@ -328,7 +328,7 @@ async fn cache_is_rebuildable_and_never_authoritative() {
 }
 
 #[tokio::test]
-async fn module_reads_only_through_datum_ledger_api() {
+async fn module_reads_only_through_wicket_ledger_api() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut saw_back = false;
     let mut saw_fwd = false;
@@ -387,7 +387,7 @@ async fn writes_go_through_tx() {
 }
 
 #[tokio::test]
-async fn every_genealogy_table_is_audited_and_owned_by_datum_owner() {
+async fn every_genealogy_table_is_audited_and_owned_by_wicket_owner() {
     let db = db_case!("gen_audit");
     boot_kernel(&db).await;
     assert!(
@@ -396,7 +396,7 @@ async fn every_genealogy_table_is_audited_and_owned_by_datum_owner() {
     );
     assert_eq!(
         table_owner(db.migrate_pool(), "genealogy_transient", "trace_cache").await,
-        "datum_owner"
+        "wicket_owner"
     );
     db.finish().await.expect("finish");
 }

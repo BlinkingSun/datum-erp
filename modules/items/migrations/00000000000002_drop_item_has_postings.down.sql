@@ -1,4 +1,4 @@
 -- Reverse of 0002: do not recreate items.item_has_postings.
 -- R-2s-8: modules may not define SECURITY DEFINER functions. Recreating a
 -- shim that SELECTed ledger.posting would also violate R-2s-3 (modules
--- never read ledger.*). D2 R5 is served by datum_ledger::has_postings.
+-- never read ledger.*). D2 R5 is served by wicket_ledger::has_postings.

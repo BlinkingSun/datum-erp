@@ -61,8 +61,8 @@ the decision records do.
 
 Decisions made during the foundation build (2026-09-12), promoted from the run's `_team/reports/`:
 
-- `decisions/w1-contracts.md` — D-W1-1 (money column `numeric(24,6)`, `unit_cost_applied numeric(24,8)`; AMENDMENT A1 to `ledger-invariant.md` §5.2) and D-W1-2 (`datum_app` holds DELETE only in schema `transient`; invariant 16 reworded to records).
+- `decisions/w1-contracts.md` — D-W1-1 (money column `numeric(24,6)`, `unit_cost_applied numeric(24,8)`; AMENDMENT A1 to `ledger-invariant.md` §5.2) and D-W1-2 (`wicket_app` holds DELETE only in schema `transient`; invariant 16 reworded to records).
 - `decisions/traits-profiles.md` — D-W1-3 (`PostingSink`, final text), D-W1-4 (`SignatureGate`, final text, total `SignatureDeclaration` on regulated edges), D-W1-5 (installation profiles: runtime enablement, module-owned signature requirements, the eleven `SPEC-profiles` keys).
 - `decisions/w2-rulings.md` — Wave 2 (kernel) rulings and adjudications, promoted at the Wave 2 close.
 - `decisions/w2s-rulings.md` — Wave 2s (module slices) rulings R-2s-1…
-- `decisions/w2b-rulings.md` — Wave 2b rulings D-2b-1…9 (datum-esign semantics)
+- `decisions/w2b-rulings.md` — Wave 2b rulings D-2b-1…9 (wicket-esign semantics)

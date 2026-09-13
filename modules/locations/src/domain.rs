@@ -1,6 +1,6 @@
 //! Location entities and validation (no I/O).
 
-use datum_core::{Boundary, Identifier, LocationId};
+use wicket_core::{Boundary, Identifier, LocationId};
 
 /// Lifecycle status of a location row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

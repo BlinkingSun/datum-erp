@@ -4,11 +4,11 @@ Conforms to: [ADR 0005](adr/0005-compliance-in-kernel.md) as amended, and
 `research/decisions/audit-persistence.md` (D3/D4).
 
 This document is the map a customer's quality lead can read, and the index a
-contributor uses to find the load-bearing line. It does not claim Datum ships
+contributor uses to find the load-bearing line. It does not claim Wicket ships
 validated, and it does not claim an installation that has not been validated.
 Status in the map is where the requirement lives in the design: **kernel now**
 means a Wave 1 / Wave 2 kernel crate or invariant; **Wave 2b** means
-`datum-esign`, `datum-documents`, `datum-print`, or `datum-customfields`; **module
+`wicket-esign`, `wicket-documents`, `wicket-print`, or `wicket-customfields`; **module
 later** means a module that does not yet exist. Wave 1 of this repository ships
 stubs. The slice does not already have a Wave 2b crate or a later module.
 
@@ -143,28 +143,28 @@ not in the slice.
 
 | Requirement | Citation | Where it lives | Status |
 |---|---|---|---|
-| Append-only audit trail, written independently of the operator, per-record queryable, reason captured on the write path | `research/background/regulatory.md` §1.1 item 1, §2.3 (11.10(e); preamble comments 73, 76) | inv 3; `datum-audit` | kernel now |
-| Electronic signature as a first-class object bound to a record version | `research/background/regulatory.md` §1.1 item 2, §§2.6–2.7 (11.50, 11.70) | inv 14, 15; `datum-esign` (implements `SignatureGate`) | Wave 2b |
-| Record immutability and a reconstructible version chain | `research/background/regulatory.md` §1.1 item 3 (11.10(b)–(c)) | inv 16 (no hard delete of a record); `datum-documents` (version chain) | kernel now (inv 16); Wave 2b (version chain) |
-| Lot- or unit-aware append-only ledger with genealogy edges | `research/background/regulatory.md` §1.1 item 4 (ISO 7.5.1, 7.5.9; 820.35(c); 806.10(c)(9)–(11); 821.25(a)) | inv 1, 2, 10; `datum-ledger` | kernel now |
-| Server-side time; client clocks never stored as time of record | `research/background/regulatory.md` §1.1 item 5 (11.10(e) "computer-generated, time-stamped") | inv 4; `datum-audit`, `datum-db` | kernel now |
-| Identity lifecycle: no deletion, no identifier reuse | `research/background/regulatory.md` §1.1 item 6 (11.100(a), 11.300(a)) | inv 13; `datum-identity` | kernel now |
-| Signing credential separable from login; session boundaries audited. The 11.200(a)(1)(i) continuous-session relaxation is not implemented | `research/background/regulatory.md` §1.1 item 7 (11.200(a)(1)–(3)); design in `research/decisions/audit-persistence.md` §9 | inv 14; `datum-identity`; `datum-esign` | Wave 2b |
-| Server-side workflow state machines enforcing permitted sequencing, including 11.10(h) device identity on the audit row | `research/background/regulatory.md` §1.1 item 8 (11.10(f)–(h)) | `datum-statemachine`; `source_device_id` on `datum-audit` | kernel now (state machine and device column); module later (device-check enforcement) |
-| Effectivity and revision on master data, distinct from record versioning; work order snapshots the revision set at release | `research/background/regulatory.md` §1.1 item 9 (ISO 4.2.3 / 4.2.4; MDF to DHR) | `datum-documents`; BOM, routing, spec, packaging, and label artwork modules consume it | Wave 2b |
-| Deterministic record-rendering service, versioned independently of the UI | `research/background/regulatory.md` §1.1 item 10 (11.10(b), 11.50(b)) | `datum-print` | Wave 2b |
-| Content-addressed immutable blob storage for signed attachments | `research/background/regulatory.md` §1.1 item 11 (11.70) | `datum-documents` | Wave 2b |
-| Retention clock, legal hold, and no hard delete of a record, enforced at the database | `research/background/regulatory.md` §1.1 item 12 (ISO 4.2.5; 821.60; 806.20(c); 830.360) | inv 16; `datum-db` grants. Expected life as an item-master attribute that drives the clock is module-owned | kernel now (inv 16); module later (retention clock) |
-| Tenancy with a data-residency boundary | `research/background/regulatory.md` §1.1 item 13 (821.50(b); 11.10(b)) | Installation identity and declared residency in `datum-module`. No `tenant_id`. ADR 0008. | kernel now |
-| Software version and configuration version stamped on every record | `research/background/regulatory.md` §1.1 item 14 | inv 17; `datum-audit` | kernel now |
-| Declarative configuration layer with its own versioning, approval, and audit trail | `research/background/regulatory.md` §1.1 item 15 | inv 18; `datum-module`. Approval of a configuration change uses `datum-documents` / `datum-esign` | kernel now (the layer); Wave 2b (approval) |
-| Package hierarchy (each, inner, case, pallet, contained quantity, parent link) | `research/background/regulatory.md` §1.0.2 (830.50(b) is the DI rule; the hierarchy is inventory) | inv 11; consumed by `datum-ledger` | kernel now. DI-per-package-level is module later |
-| Lot and serial identifiers constrained at generation: `[0-9A-Z-]`, at most 20 characters | `research/background/regulatory.md` §1.0.4; three sources in §4.1 below | inv 9; `datum-numbering` | kernel now |
+| Append-only audit trail, written independently of the operator, per-record queryable, reason captured on the write path | `research/background/regulatory.md` §1.1 item 1, §2.3 (11.10(e); preamble comments 73, 76) | inv 3; `wicket-audit` | kernel now |
+| Electronic signature as a first-class object bound to a record version | `research/background/regulatory.md` §1.1 item 2, §§2.6–2.7 (11.50, 11.70) | inv 14, 15; `wicket-esign` (implements `SignatureGate`) | Wave 2b |
+| Record immutability and a reconstructible version chain | `research/background/regulatory.md` §1.1 item 3 (11.10(b)–(c)) | inv 16 (no hard delete of a record); `wicket-documents` (version chain) | kernel now (inv 16); Wave 2b (version chain) |
+| Lot- or unit-aware append-only ledger with genealogy edges | `research/background/regulatory.md` §1.1 item 4 (ISO 7.5.1, 7.5.9; 820.35(c); 806.10(c)(9)–(11); 821.25(a)) | inv 1, 2, 10; `wicket-ledger` | kernel now |
+| Server-side time; client clocks never stored as time of record | `research/background/regulatory.md` §1.1 item 5 (11.10(e) "computer-generated, time-stamped") | inv 4; `wicket-audit`, `wicket-db` | kernel now |
+| Identity lifecycle: no deletion, no identifier reuse | `research/background/regulatory.md` §1.1 item 6 (11.100(a), 11.300(a)) | inv 13; `wicket-identity` | kernel now |
+| Signing credential separable from login; session boundaries audited. The 11.200(a)(1)(i) continuous-session relaxation is not implemented | `research/background/regulatory.md` §1.1 item 7 (11.200(a)(1)–(3)); design in `research/decisions/audit-persistence.md` §9 | inv 14; `wicket-identity`; `wicket-esign` | Wave 2b |
+| Server-side workflow state machines enforcing permitted sequencing, including 11.10(h) device identity on the audit row | `research/background/regulatory.md` §1.1 item 8 (11.10(f)–(h)) | `wicket-statemachine`; `source_device_id` on `wicket-audit` | kernel now (state machine and device column); module later (device-check enforcement) |
+| Effectivity and revision on master data, distinct from record versioning; work order snapshots the revision set at release | `research/background/regulatory.md` §1.1 item 9 (ISO 4.2.3 / 4.2.4; MDF to DHR) | `wicket-documents`; BOM, routing, spec, packaging, and label artwork modules consume it | Wave 2b |
+| Deterministic record-rendering service, versioned independently of the UI | `research/background/regulatory.md` §1.1 item 10 (11.10(b), 11.50(b)) | `wicket-print` | Wave 2b |
+| Content-addressed immutable blob storage for signed attachments | `research/background/regulatory.md` §1.1 item 11 (11.70) | `wicket-documents` | Wave 2b |
+| Retention clock, legal hold, and no hard delete of a record, enforced at the database | `research/background/regulatory.md` §1.1 item 12 (ISO 4.2.5; 821.60; 806.20(c); 830.360) | inv 16; `wicket-db` grants. Expected life as an item-master attribute that drives the clock is module-owned | kernel now (inv 16); module later (retention clock) |
+| Tenancy with a data-residency boundary | `research/background/regulatory.md` §1.1 item 13 (821.50(b); 11.10(b)) | Installation identity and declared residency in `wicket-module`. No `tenant_id`. ADR 0008. | kernel now |
+| Software version and configuration version stamped on every record | `research/background/regulatory.md` §1.1 item 14 | inv 17; `wicket-audit` | kernel now |
+| Declarative configuration layer with its own versioning, approval, and audit trail | `research/background/regulatory.md` §1.1 item 15 | inv 18; `wicket-module`. Approval of a configuration change uses `wicket-documents` / `wicket-esign` | kernel now (the layer); Wave 2b (approval) |
+| Package hierarchy (each, inner, case, pallet, contained quantity, parent link) | `research/background/regulatory.md` §1.0.2 (830.50(b) is the DI rule; the hierarchy is inventory) | inv 11; consumed by `wicket-ledger` | kernel now. DI-per-package-level is module later |
+| Lot and serial identifiers constrained at generation: `[0-9A-Z-]`, at most 20 characters | `research/background/regulatory.md` §1.0.4; three sources in §4.1 below | inv 9; `wicket-numbering` | kernel now |
 | Expiry stored with a precision, never a bare date | `research/background/regulatory.md` §1.0.5; `research/background/regulatory-udi-aidc.md` §E (`yymmd0`, `YYMM00`) | inv 12 | kernel now |
 | Catalogue number (the identifier the UDI module derives DIs from) is no-edit and no-reuse | `research/background/regulatory.md` §1.0.6 (830.40(c)) | Item-master number (`PLAN.md` §3 Wave 2s `mod-items`). Compressed PCN is a module field. | kernel field with the item record (Wave 2s); compressed PCN is module later |
-| Stable UDI attachment point on lot, serial, and shipment records | `research/background/regulatory.md` §1.0.7 (820.35(c)) | Native nullable kernel column on lot, serial, and shipment records (`PLAN.md` §3 Wave 2s `mod-lots`; shipping later). Never `datum-customfields`. | kernel column with the record (Wave 2s); population = module later |
+| Stable UDI attachment point on lot, serial, and shipment records | `research/background/regulatory.md` §1.0.7 (820.35(c)) | Native nullable kernel column on lot, serial, and shipment records (`PLAN.md` §3 Wave 2s `mod-lots`; shipping later). Never `wicket-customfields`. | kernel column with the record (Wave 2s); population = module later |
 
-Invariant 19 (gap-free regulated document numbers; `datum-numbering`) is not in
+Invariant 19 (gap-free regulated document numbers; `wicket-numbering`) is not in
 the §1 list. It is a D3 obligation (`research/decisions/audit-persistence.md` §8)
 and is stated in §3.7 so it is not lost.
 
@@ -193,12 +193,12 @@ application role holds `SELECT` on the audit table and holds no `INSERT`,
 `UPDATE`, `DELETE`, or `TRUNCATE`. Entries reach the table only through the
 security-definer trigger (`PLAN.md` §6 inv 3; ADR 0005 as amended;
 `research/decisions/audit-persistence.md`). A module author cannot forget an
-audit row, because they never write one. That is kernel now, in `datum-audit`.
+audit row, because they never write one. That is kernel now, in `wicket-audit`.
 It is not a log file. It is a store with a per-record retrieval path.
 
 A record — anything an audit trigger attests to, or that a history-bearing
 table references — is retired by state change, never by `DELETE`. This is a
-privilege fact: `datum_app` holds no `DELETE` on schema `app` and no `TRUNCATE`
+privilege fact: `wicket_app` holds no `DELETE` on schema `app` and no `TRUNCATE`
 in any schema. Working state that carries no history (sessions, idempotency
 keys, completed job rows, projection caches) lives in schema `transient`, where
 `DELETE` is granted and expected. `ON DELETE CASCADE` is prohibited in every
@@ -216,7 +216,7 @@ timestamp is a bound parameter. Storage is `timestamptz`, UTC
 (`research/decisions/audit-persistence.md` §4; `PLAN.md` §6 inv 4).
 
 The time source is the **host clock**. Clock administration is a customer SOP.
-Datum records clock changes it can observe (`audit.log_event` on detected
+Wicket records clock changes it can observe (`audit.log_event` on detected
 backward jumps between statements). 11.10(e) requires "time-stamped", not
 traceable to UTC via authenticated NTP
 (`research/background/regulatory.md` §2.3; `research/decisions/audit-persistence.md`
@@ -227,7 +227,7 @@ Preamble comment 101: the signer's local time is the one to be recorded
 (`research/background/regulatory.md` §2.6). The signature row therefore stores the
 UTC instant plus the signer's IANA zone captured at signing. A bare UTC stamp
 cannot reconstruct that; a bare local stamp cannot be ordered. Capturing the zone
-is Wave 2b (`datum-esign`).
+is Wave 2b (`wicket-esign`).
 
 ### 3.3 Identity lifecycle
 
@@ -236,7 +236,7 @@ not be reused by, or reassigned to, anyone else. 11.300(a): no two individuals
 have the same combination of identification code and password
 (`research/background/regulatory.md` §2.8). Users deactivate. They are never
 deleted. Usernames are never recycled. The user record outlives every record it
-signed (`PLAN.md` §6b inv 13; `datum-identity`; kernel now). An administrator who
+signed (`PLAN.md` §6b inv 13; `wicket-identity`; kernel now). An administrator who
 deletes `jsmith` and later recreates `jsmith` makes every old signature on a bone
 screw DHR ambiguous (`research/background/regulatory.md` §1.3 trap 4).
 
@@ -265,12 +265,12 @@ render time (`PLAN.md` §6b inv 15). Comment 101: store UTC plus the signer's
 zone, as §3.2. Meaning is an enumerated value on the signature, not inferred from
 the screen (`research/background/regulatory.md` §2.6).
 
-`datum-esign` stores the manifestation. `datum-print` renders it inline on the
+`wicket-esign` stores the manifestation. `wicket-print` renders it inline on the
 human-readable copy. Both are Wave 2b. The slice does not have them. A transition
 that declares a signature requirement and runs under `NoSignatures` is refused
 with a typed error (`PLAN.md` §5, `SignatureGate`).
 
-Every signing uses all identification components, every time. Datum does not
+Every signing uses all identification components, every time. Wicket does not
 implement the 11.200(a)(1)(i) continuous-session relaxation in v1. A session cookie
 on a shared work-centre tablet next to a mill turning titanium bone screws is not
 a component "designed to be used only by the individual"
@@ -290,7 +290,7 @@ The design: sign a content hash of the exact serialized record version; store th
 hash on the signature; make verification a first-class operation
 (`research/decisions/audit-persistence.md` §9; ADR 0005). `SignatureToken`
 carries `record_content_hash` (SHA-256 of the canonical record bytes at
-`record.version`). `datum-esign` loads the row, confirms both identification
+`record.version`). `wicket-esign` loads the row, confirms both identification
 components at mint, the stored hash, the live record at that version, the
 permission snapshot taken at mint, the meaning, and the single-use claim
 (DECISION D-W1-4, `research/decisions/traits-profiles.md` Q2; Wave 2b). The
@@ -303,13 +303,13 @@ while `NoSignatures` is bound fails at startup.
 The sentence the project uses, quoted from `research/decisions/audit-persistence.md`
 §7, and not improved upon:
 
-> Every change to a regulated record in Datum is written to the audit trail by the
+> Every change to a regulated record in Wicket is written to the audit trail by the
 > database itself, inside the same transaction as the change, with the operator's
 > identity, the server time, the prior and new values, and the reason where one is
 > required; a write that cannot be attributed to an authenticated operator is refused
 > rather than recorded as unknown. The application — including any module, and including
 > a defective one — can read the audit trail but cannot insert, alter, or delete an
-> entry: that is enforced by database privileges, not by application code. Datum does not
+> entry: that is enforced by database privileges, not by application code. Wicket does not
 > claim the trail cannot be altered by someone with administrative control of the
 > database server itself; instead, each transaction is sealed into a hash chain whose
 > head is published off the server on a schedule you control, so that any later
@@ -327,7 +327,7 @@ Regulated document numbers — a work order, a DHR, a nonconformance — are
 allocated from a counter row in the caller's transaction, never from a
 PostgreSQL sequence. A committed number is never reused. Cancellation is a visible
 status, not a missing number (`PLAN.md` §6b inv 19;
-`research/decisions/audit-persistence.md` §8; `datum-numbering`; kernel now).
+`research/decisions/audit-persistence.md` §8; `wicket-numbering`; kernel now).
 `nextval()` leaves a gap when a transaction rolls back. "Why is there no work
 order WO-2026-0416" is a question an inspector asks; a voided document with a
 reason is an answer.
@@ -340,7 +340,7 @@ reason is an answer.
 
 The kernel mints lot and serial numbers. The generator is constrained to
 `[0-9A-Z-]`, at most twenty characters, before the first lot of mill heat is
-written (`PLAN.md` §6b inv 9; `datum-numbering`). Lots already etched on a bone
+written (`PLAN.md` §6b inv 9; `wicket-numbering`). Lots already etched on a bone
 screw in the field cannot be renumbered. Three sources, none of them optional:
 
 1. GS1 AI (10) batch/lot and AI (21) serial are `X..20`, CSET 82 — cap 20
@@ -368,7 +368,7 @@ primary key of every downstream table — WIP, pick, pack, shipment line, return
 service, complaint. The tracked entity is a lot **or** a unit within a lot, from
 the first posting (`PLAN.md` §6b inv 10). A finished serial of a titanium bone
 screw traces to its lot and its mill heat. This is kernel now. Genealogy is a
-directed acyclic graph of consumption edges on `datum-ledger`, not a parent
+directed acyclic graph of consumption edges on `wicket-ledger`, not a parent
 column (`research/background/regulatory.md` §7.3).
 
 ### 4.3 Package hierarchy
@@ -388,7 +388,7 @@ packaging: multiple barrier levels are not a packaging level for GTIN allocation
 (`research/background/regulatory-udi-aidc.md` §A1). `is_sterile_barrier` is
 therefore a module-owned column on a **kernel** packaging-level table, not on
 the item master. That column lands with the UDI module; the table it hangs on
-is kernel now. `datum-customfields` (Wave 2b) is the extension mechanism that
+is kernel now. `wicket-customfields` (Wave 2b) is the extension mechanism that
 must support module columns on kernel tables.
 
 ### 4.4 Expiry precision
@@ -411,7 +411,7 @@ Block D, and device tracking all require UDI **alongside** lot and serial
 carry a native, nullable, module-populated kernel column so the UDI module does
 not have to alter the ledger. The column is created with those records
 (`PLAN.md` §3 Wave 2s `mod-lots`; shipping later). It is never a
-`datum-customfields` field. Populating it, allocating DIs, submitting to GUDID,
+`wicket-customfields` field. Populating it, allocating DIs, submitting to GUDID,
 and encoding symbols are the Phase 6 UDI module, later.
 
 One catalogue number the UDI module derives DIs from is not recycled. 830.40(c)
@@ -428,7 +428,7 @@ document does not pick one.
 
 ## 5. Validation posture
 
-Datum is not "validated software". The customer validates their installation
+Wicket is not "validated software". The customer validates their installation
 against their intended use. GPSV §4.10, which survived the February 2026 CSA
 revision of GPSV §6: regardless of the distribution of tasks, contractual
 relations, source of components, or the development environment, **the device
@@ -503,7 +503,7 @@ that installation into a stricter validation category permanently, including
 every future change to it. That looks like a product decision. It is an
 architectural one. GAMP 5 category designations in the research are
 secondary-sourced (`research/background/regulatory.md` §6.3); this document
-does not assign Datum a category.
+does not assign Wicket a category.
 
 ---
 
@@ -515,7 +515,7 @@ Three things this project does not say, and will not say.
 host administrator. A clock set backwards, a restored VM snapshot, or a `date`
 command produces audit rows with whatever the box believed. A hash chain does
 not fix this — a backdated row hashes perfectly
-(`research/decisions/audit-persistence.md` §4). Datum records observed backward
+(`research/decisions/audit-persistence.md` §4). Wicket records observed backward
 jumps. It does not claim NTP, a timestamp authority, or traceability to UTC.
 
 **Tamper-proof storage.** Grants stop the application, including a defective
@@ -527,7 +527,7 @@ covers (`research/decisions/audit-persistence.md` §§6–7). Tamper-evident, no
 tamper-proof. "The audit trail cannot be altered" is not a sentence this project
 makes.
 
-**Compliance out of the box.** Installing Datum does not complete a customer's
+**Compliance out of the box.** Installing Wicket does not complete a customer's
 quality system, their validation, their Part 11 procedures, or their FDA
 correspondence. The kernel makes the record properties in §2 structurally
 present so they do not have to be retrofitted. The customer still validates the

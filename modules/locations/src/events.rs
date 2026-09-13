@@ -1,6 +1,6 @@
 //! Event contracts published by this module.
 
-use datum_events::{EventSchema, Field, SchemaRegistry};
+use wicket_events::{EventSchema, Field, SchemaRegistry};
 
 /// `locations.location_deactivated` v1.
 pub const LOCATION_DEACTIVATED: &str = "locations.location_deactivated";
@@ -18,6 +18,6 @@ pub fn register_schemas(registry: &mut SchemaRegistry) -> crate::Result<()> {
 
 /// Register this module's schemas on the process-global registry (`publish` reads it).
 pub fn register_schemas_global() -> crate::Result<()> {
-    let mut guard = datum_events::schema::global_mut()?;
+    let mut guard = wicket_events::schema::global_mut()?;
     register_schemas(&mut guard)
 }

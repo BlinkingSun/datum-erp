@@ -1,0 +1,37 @@
+[package]
+name = "wicket-audit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Kernel audit trail: database trigger, hash chain, and export bundle."
+build = "build.rs"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+test-utils = []
+
+[dependencies]
+chrono.workspace = true
+wicket-core.workspace = true
+wicket-db.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+chrono.workspace = true
+wicket-core.workspace = true
+wicket-db.workspace = true
+wicket-test.workspace = true
+proptest.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+uuid.workspace = true

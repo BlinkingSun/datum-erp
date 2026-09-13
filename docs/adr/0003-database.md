@@ -84,7 +84,7 @@ reuses the test harness the kernel crates need anyway, so it is nearly free.
 
 **What this costs.**
 
-- A bare machine needs PostgreSQL installed before Datum, which is a second download and
+- A bare machine needs PostgreSQL installed before Wicket, which is a second download and
   an administrator prompt on Windows. This is the real price and it is paid once.
 - Platform-specific packaging work, three times — but for our own service registration,
   not for a database supervisor.
@@ -144,7 +144,7 @@ container runtime; the closest analog requires elevation and discourages Windows
 production.
 
 **The finding that actually decided it**, which the evidence stopped one step short of:
-`datum-server` has the same problem. A server binary launched by the logged-in operator
+`wicket-server` has the same problem. A server binary launched by the logged-in operator
 dies at logoff exactly as `postgres.exe` does. Surviving a logoff requires a system
 service, so the administrator prompt was never a consequence of the database decision at
 all — it is the price of having a server. Bundling was being asked to buy something it

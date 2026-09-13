@@ -9,7 +9,7 @@ Decider:  project owner
 **AGPL-3.0-or-later for the code. Contributions under the Developer Certificate of Origin,
 version 1.1. No contributor license agreement.** Copyright is held by the project owner as an
 individual until a foundation or company is deliberately chosen; that choice is not blocked
-by this record. The public repository is `https://github.com/BlinkingSun/datum-erp`.
+by this record. The public repository is `https://github.com/BlinkingSun/wicket-erp`.
 
 The owner's stated reason is the one the recommendation below rests on: the project exists
 so that others can contribute. Declining a CLA gives up the option to sell commercial

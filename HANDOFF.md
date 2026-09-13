@@ -1,6 +1,6 @@
-# Handoff — Datum
+# Handoff — Wicket
 
-*Written 2026-09-11, at the end of the planning phase. **Update 2026-09-12:** the license is decided (ADR 0006 Accepted, AGPL-3.0-or-later + DCO) and the public repository exists at github.com/BlinkingSun/datum-erp; PLAN.md is at v2, see its section 0. For whoever picks this up next,
+*Written 2026-09-11, at the end of the planning phase. **Update 2026-09-12:** the license is decided (ADR 0006 Accepted, AGPL-3.0-or-later + DCO) and the public repository exists at github.com/BlinkingSun/wicket-erp; PLAN.md is at v2, see its section 0. For whoever picks this up next,
 including a future version of the person who started it.*
 
 ---
@@ -20,16 +20,16 @@ wrong, and finding that out before thirteen crates were built on them was the en
 
 | | |
 |---|---|
-| Phase | **Wave 1 integrated (2026-09-12).** Wave 2 batch 2.1 (`datum-db`) is next. |
-| Code | Workspace of 17 crates; `datum-core` complete (44+ tests); `datum-test` harness (8 tests, commit mode, canary); `datum-db` real transaction and pool parts; 14 compiling stubs. `just ci` and `just ci-db` green on `main`. |
+| Phase | **Wave 1 integrated (2026-09-12).** Wave 2 batch 2.1 (`wicket-db`) is next. |
+| Code | Workspace of 17 crates; `wicket-core` complete (44+ tests); `wicket-test` harness (8 tests, commit mode, canary); `wicket-db` real transaction and pool parts; 14 compiling stubs. `just ci` and `just ci-db` green on `main`. |
 | Plan audit | Cycle 2 of 2: APPROVE after closure check. |
 | Decisions | 9 ADRs (0003 and 0006 Accepted) + five build decisions D-W1-1..5 in `research/decisions/`. |
 | Blocked on | The visual approval gate (section 5). Nothing backend waits on it. |
-| Repository | Public `github.com/BlinkingSun/datum-erp`, `main` only, Actions off until the three-node local CI round. Private mirror `datum-dev`. |
+| Repository | Public `github.com/BlinkingSun/wicket-erp`, `main` only, Actions off until the three-node local CI round. Private mirror `wicket-dev`. |
 
 **How Wave 1 was built (for whoever resumes):** `PLAN.md` §0 lists what changed from v1; the integration
 contract is `docs/09-workspace-contract.md`; the Wave 2 specs for batches 2.1 and 2.2 are written
-(`_team/specs/SPEC-datum-db.md`, `SPEC-audit.md`) and the next batch spec is always written one batch ahead.
+(`_team/specs/SPEC-wicket-db.md`, `SPEC-audit.md`) and the next batch spec is always written one batch ahead.
 Tooling and process lessons of this run are in the ledger annotations (`_team/reports/AGENTS.md`) and in
 `CLOSURES.md`, which is the honest record of every failed slot, including the two the orchestrator caused.
 
@@ -77,7 +77,7 @@ record says so rather than overclaiming.
 **Rust, PostgreSQL, single tenant, no general ledger** (0002, 0003, 0007, 0008). Each with
 its costs written down.
 
-**Datum never owns a database process lifecycle** (0003). On any operating system, in any
+**Wicket never owns a database process lifecycle** (0003). On any operating system, in any
 version.
 
 ## 5. What is not settled, and why it is blocking
@@ -182,7 +182,7 @@ substantive output was copied into `research/` and is tracked.
 decision about who holds copyright. Those were scoped as a Wave 1 documentation lane and
 have not been written.
 
-**The name** is a placeholder. Datum is the reference feature everything else is measured
+**The name** is a placeholder. Wicket is the reference feature everything else is measured
 from in geometric tolerancing, and it is also the singular of data. It appears in one
 constant so it stays cheap to change. Three alternatives are listed in
 `docs/01-vision-and-scope.md`.

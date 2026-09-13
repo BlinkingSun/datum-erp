@@ -1,6 +1,6 @@
--- 90-gc.sql — drop orphaned datum_t_* case databases (not run by db-reset; use just db-gc).
--- Requires psql variable gc_minutes (just db-gc sets it from DATUM_DB_GC_MIN, default 60).
--- -v template=… -v dbname=… exclude the standing pair (defaults: datum_test_template, datum_test).
+-- 90-gc.sql — drop orphaned wicket_t_* case databases (not run by db-reset; use just db-gc).
+-- Requires psql variable gc_minutes (just db-gc sets it from WICKET_DB_GC_MIN, default 60).
+-- -v template=… -v dbname=… exclude the standing pair (defaults: wicket_test_template, wicket_test).
 
 \set ON_ERROR_STOP on
 
@@ -10,25 +10,25 @@
 \endif
 \if :{?template}
 \else
-\set template datum_test_template
+\set template wicket_test_template
 \endif
 \if :{?dbname}
 \else
-\set dbname datum_test
+\set dbname wicket_test
 \endif
 
-CREATE TEMP TABLE datum_gc_params (thresh_minutes integer NOT NULL);
-INSERT INTO datum_gc_params (thresh_minutes) VALUES (:gc_minutes);
+CREATE TEMP TABLE wicket_gc_params (thresh_minutes integer NOT NULL);
+INSERT INTO wicket_gc_params (thresh_minutes) VALUES (:gc_minutes);
 
-CREATE TEMP TABLE datum_gc_report (
+CREATE TEMP TABLE wicket_gc_report (
   action text NOT NULL,
   datname name NOT NULL,
   detail text NOT NULL
 );
 
-INSERT INTO datum_gc_report (action, datname, detail)
+INSERT INTO wicket_gc_report (action, datname, detail)
 WITH params AS (
-  SELECT thresh_minutes FROM datum_gc_params
+  SELECT thresh_minutes FROM wicket_gc_params
 ),
 candidates AS (
   SELECT db.datname, d.description
@@ -37,7 +37,7 @@ candidates AS (
     ON d.objoid = db.oid
    AND d.classoid = 'pg_catalog.pg_database'::pg_catalog.regclass
   CROSS JOIN params p
-  WHERE db.datname LIKE 'datum\_t\_%' ESCAPE '\'
+  WHERE db.datname LIKE 'wicket\_t\_%' ESCAPE '\'
     AND db.datname NOT IN (:'dbname', :'template')
 ),
 parsed AS (
@@ -45,8 +45,8 @@ parsed AS (
     c.datname,
     COALESCE(
       CASE
-        WHEN c.description LIKE 'datum.harness_created_at=%' THEN
-          (regexp_match(c.description, '^datum\.harness_created_at=(.+)$'))[1]::timestamptz
+        WHEN c.description LIKE 'wicket.harness_created_at=%' THEN
+          (regexp_match(c.description, '^wicket\.harness_created_at=(.+)$'))[1]::timestamptz
         ELSE NULL
       END,
       CASE
@@ -108,15 +108,15 @@ FROM scored
 ORDER BY datname;
 
 SELECT format('DROP DATABASE %I WITH (FORCE)', datname)
-FROM datum_gc_report
+FROM wicket_gc_report
 WHERE action = 'to_drop'
 ORDER BY datname
 \gexec
 
-UPDATE datum_gc_report SET action = 'dropped' WHERE action = 'to_drop';
+UPDATE wicket_gc_report SET action = 'dropped' WHERE action = 'to_drop';
 
-\echo 'datum db-gc: dropped'
-SELECT datname, detail FROM datum_gc_report WHERE action = 'dropped' ORDER BY datname;
+\echo 'wicket db-gc: dropped'
+SELECT datname, detail FROM wicket_gc_report WHERE action = 'dropped' ORDER BY datname;
 
-\echo 'datum db-gc: skipped'
-SELECT datname, detail FROM datum_gc_report WHERE action = 'skipped' ORDER BY datname;
+\echo 'wicket db-gc: skipped'
+SELECT datname, detail FROM wicket_gc_report WHERE action = 'skipped' ORDER BY datname;

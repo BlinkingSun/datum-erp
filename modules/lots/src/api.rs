@@ -1,12 +1,12 @@
 //! HTTP DTOs and handlers. Routes are declared in `module.toml` and registered
-//! through [`datum_module::KernelBuilder::apply_manifest`]. `datum-server` is the
-//! only crate allowed `axum`; this module exposes typed handlers over [`datum_db::Tx`].
+//! through [`wicket_module::KernelBuilder::apply_manifest`]. `wicket-server` is the
+//! only crate allowed `axum`; this module exposes typed handlers over [`wicket_db::Tx`].
 
 use chrono::Datelike;
-use datum_core::{AnyQuantity, ItemId, LotId, SerialId};
-use datum_db::{Tx, WriteContext};
-use datum_module::Kernel;
 use serde::{Deserialize, Serialize};
+use wicket_core::{AnyQuantity, ItemId, LotId, SerialId};
+use wicket_db::{Tx, WriteContext};
+use wicket_module::Kernel;
 
 use crate::domain::{
     CreateLot, Expiry, ExpiryPrecision, Lot, LotStatus, Package, PackageLevel, Serial, StatusTarget,
@@ -44,7 +44,7 @@ impl ExpiryWire {
             ExpiryPrecision::Day => {
                 let date =
                     chrono::NaiveDate::parse_from_str(&self.value, "%Y-%m-%d").map_err(|e| {
-                        Error::Core(datum_core::Error::Invariant(format!("expiry.value: {e}")))
+                        Error::Core(wicket_core::Error::Invariant(format!("expiry.value: {e}")))
                     })?;
                 Ok(Expiry::new(date, ExpiryPrecision::Day))
             }
@@ -53,10 +53,10 @@ impl ExpiryWire {
                     chrono::NaiveDate::parse_from_str(&format!("{}-01", self.value), "%Y-%m-%d")
                         .or_else(|_| chrono::NaiveDate::parse_from_str(&self.value, "%Y-%m-%d"))
                         .map_err(|e| {
-                            Error::Core(datum_core::Error::Invariant(format!("expiry.value: {e}")))
+                            Error::Core(wicket_core::Error::Invariant(format!("expiry.value: {e}")))
                         })?;
                 if date.day() != 1 && self.value.len() > 7 {
-                    return Err(Error::Core(datum_core::Error::Invariant(
+                    return Err(Error::Core(wicket_core::Error::Invariant(
                         "expiry.value carries a day for month precision".into(),
                     )));
                 }
@@ -64,11 +64,11 @@ impl ExpiryWire {
             }
             ExpiryPrecision::Year => {
                 let year: i32 = self.value.parse().map_err(|_| {
-                    Error::Core(datum_core::Error::Invariant("expiry.value year".into()))
+                    Error::Core(wicket_core::Error::Invariant("expiry.value year".into()))
                 })?;
                 Ok(Expiry::new(
                     chrono::NaiveDate::from_ymd_opt(year, 1, 1).ok_or_else(|| {
-                        Error::Core(datum_core::Error::Invariant("expiry.value year".into()))
+                        Error::Core(wicket_core::Error::Invariant("expiry.value year".into()))
                     })?,
                     ExpiryPrecision::Year,
                 ))
@@ -366,18 +366,18 @@ pub async fn list_packages(
 
 fn parse_lot_id(s: &str) -> Result<LotId> {
     let u = uuid::Uuid::parse_str(s)
-        .map_err(|e| Error::Core(datum_core::Error::Invariant(e.to_string())))?;
+        .map_err(|e| Error::Core(wicket_core::Error::Invariant(e.to_string())))?;
     Ok(LotId::from_uuid(u))
 }
 
 fn parse_serial_id(s: &str) -> Result<SerialId> {
     let u = uuid::Uuid::parse_str(s)
-        .map_err(|e| Error::Core(datum_core::Error::Invariant(e.to_string())))?;
+        .map_err(|e| Error::Core(wicket_core::Error::Invariant(e.to_string())))?;
     Ok(SerialId::from_uuid(u))
 }
 
 fn parse_package_id(s: &str) -> Result<crate::domain::PackageId> {
     let u = uuid::Uuid::parse_str(s)
-        .map_err(|e| Error::Core(datum_core::Error::Invariant(e.to_string())))?;
+        .map_err(|e| Error::Core(wicket_core::Error::Invariant(e.to_string())))?;
     Ok(crate::domain::PackageId::from_uuid(u))
 }

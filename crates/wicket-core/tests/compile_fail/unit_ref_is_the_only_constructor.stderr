@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+ --> tests/compile_fail/unit_ref_is_the_only_constructor.rs:5:57
+  |
+5 |     let _ = Quantity::<CountDim>::new(Decimal::from(1), UnitId(1));
+  |             -------------------------                   ^^^^^^^^^ expected `UnitRef<CountDim>`, found `UnitId`
+  |             |
+  |             arguments to this function are incorrect
+  |
+  = note: expected struct `UnitRef<wicket_core::CountDim>`
+             found struct `wicket_core::UnitId`
+note: associated function defined here
+ --> src/quantity.rs
+  |
+  |     pub fn new(amount: Decimal, unit: UnitRef<D>) -> Result<Self, QuantityError> {
+  |            ^^^

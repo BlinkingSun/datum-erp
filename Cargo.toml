@@ -1,23 +1,23 @@
 [workspace]
 resolver = "3"
 members = [
-  "crates/datum-core",
-  "crates/datum-test",
-  "crates/datum-db",
-  "crates/datum-audit",
-  "crates/datum-identity",
-  "crates/datum-numbering",
-  "crates/datum-uom",
-  "crates/datum-events",
-  "crates/datum-jobs",
-  "crates/datum-ledger",
-  "crates/datum-statemachine",
-  "crates/datum-esign",
-  "crates/datum-customfields",
-  "crates/datum-documents",
-  "crates/datum-print",
-  "crates/datum-module",
-  "crates/datum-server",
+  "crates/wicket-core",
+  "crates/wicket-test",
+  "crates/wicket-db",
+  "crates/wicket-audit",
+  "crates/wicket-identity",
+  "crates/wicket-numbering",
+  "crates/wicket-uom",
+  "crates/wicket-events",
+  "crates/wicket-jobs",
+  "crates/wicket-ledger",
+  "crates/wicket-statemachine",
+  "crates/wicket-esign",
+  "crates/wicket-customfields",
+  "crates/wicket-documents",
+  "crates/wicket-print",
+  "crates/wicket-module",
+  "crates/wicket-server",
   "modules/*",
 ]
 
@@ -27,25 +27,25 @@ edition = "2024"
 rust-version = "1.98.1"
 license = "AGPL-3.0-or-later"
 publish = false
-repository = "https://github.com/BlinkingSun/datum-erp"
+repository = "https://github.com/BlinkingSun/wicket-erp"
 
 [workspace.dependencies]
-datum-core          = { path = "crates/datum-core" }
-datum-test          = { path = "crates/datum-test" }
-datum-db            = { path = "crates/datum-db" }
-datum-audit         = { path = "crates/datum-audit" }
-datum-identity      = { path = "crates/datum-identity" }
-datum-numbering     = { path = "crates/datum-numbering" }
-datum-uom           = { path = "crates/datum-uom" }
-datum-events        = { path = "crates/datum-events" }
-datum-jobs          = { path = "crates/datum-jobs" }
-datum-ledger        = { path = "crates/datum-ledger" }
-datum-statemachine  = { path = "crates/datum-statemachine" }
-datum-esign         = { path = "crates/datum-esign" }
-datum-customfields  = { path = "crates/datum-customfields" }
-datum-documents     = { path = "crates/datum-documents" }
-datum-print         = { path = "crates/datum-print" }
-datum-module        = { path = "crates/datum-module" }
+wicket-core          = { path = "crates/wicket-core" }
+wicket-test          = { path = "crates/wicket-test" }
+wicket-db            = { path = "crates/wicket-db" }
+wicket-audit         = { path = "crates/wicket-audit" }
+wicket-identity      = { path = "crates/wicket-identity" }
+wicket-numbering     = { path = "crates/wicket-numbering" }
+wicket-uom           = { path = "crates/wicket-uom" }
+wicket-events        = { path = "crates/wicket-events" }
+wicket-jobs          = { path = "crates/wicket-jobs" }
+wicket-ledger        = { path = "crates/wicket-ledger" }
+wicket-statemachine  = { path = "crates/wicket-statemachine" }
+wicket-esign         = { path = "crates/wicket-esign" }
+wicket-customfields  = { path = "crates/wicket-customfields" }
+wicket-documents     = { path = "crates/wicket-documents" }
+wicket-print         = { path = "crates/wicket-print" }
+wicket-module        = { path = "crates/wicket-module" }
 
 # Closed allow-list. A new third-party crate is an escalation, not a commit.
 sqlx          = { version = "0.9", default-features = false, features = [

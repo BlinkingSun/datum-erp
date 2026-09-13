@@ -1,18 +1,18 @@
 //! One [`GroupBuilder`] per movement: transition and ledger post share the same sink (CONTRACT §6.2).
 
-use datum_core::{
+use rust_decimal::Decimal;
+use wicket_core::{
     GroupKind, PostingError, PostingGroupHeader, PostingHandle, PostingIntent, PostingSink,
 };
-use datum_db::Tx;
-use datum_ledger::{GroupBuilder, Layer};
-use datum_module::Kernel;
-use datum_statemachine::DocRef;
-use rust_decimal::Decimal;
+use wicket_db::Tx;
+use wicket_ledger::{GroupBuilder, Layer};
+use wicket_module::Kernel;
+use wicket_statemachine::DocRef;
 
 use crate::domain::{DOC_TYPE, DocumentKind};
 use crate::error::Result;
 
-/// Wrapper whose `finalize` is deferred to [`datum_ledger::post`] (same pattern as kernel `BoundSink`).
+/// Wrapper whose `finalize` is deferred to [`wicket_ledger::post`] (same pattern as kernel `BoundSink`).
 struct DeferredFinalize(GroupBuilder);
 
 impl PostingSink for DeferredFinalize {
@@ -40,11 +40,11 @@ impl PostingSink for DeferredFinalize {
 pub async fn post_via_transition(
     kernel: &Kernel,
     tx: &mut Tx<'_>,
-    ctx: &datum_db::WriteContext,
-    doc_id: datum_core::Identifier,
+    ctx: &wicket_db::WriteContext,
+    doc_id: wicket_core::Identifier,
     kind: DocumentKind,
     mut builder: GroupBuilder,
-) -> Result<Option<datum_core::Identifier>> {
+) -> Result<Option<wicket_core::Identifier>> {
     kernel.bind_sink(tx, &mut builder).await?;
     let watch = builder.clone();
     let doc = DocRef {
@@ -66,22 +66,22 @@ pub async fn post_via_transition(
     if !watch.unfinalized() {
         return Ok(None);
     }
-    Ok(Some(datum_ledger::post(tx, watch).await?))
+    Ok(Some(wicket_ledger::post(tx, watch).await?))
 }
 
 pub(crate) struct CoverEdge {
-    pub posting_id: datum_core::PostingId,
+    pub posting_id: wicket_core::PostingId,
     pub qty: Decimal,
-    pub amount: datum_core::Money,
+    pub amount: wicket_core::Money,
 }
 
 /// Layer money covering a positive `qty` withdrawal (FIFO walk).
 pub(crate) fn cover_layers(
     layers: &[Layer],
     qty: Decimal,
-    lot: Option<datum_core::LotId>,
-    serial: Option<datum_core::SerialId>,
-) -> Result<(datum_core::Money, Vec<CoverEdge>)> {
+    lot: Option<wicket_core::LotId>,
+    serial: Option<wicket_core::SerialId>,
+) -> Result<(wicket_core::Money, Vec<CoverEdge>)> {
     let mut left = qty;
     let mut edges = Vec::new();
     let mut total = Decimal::ZERO;
@@ -107,7 +107,8 @@ pub(crate) fn cover_layers(
         };
         total += amt;
         currency = Some(layer.currency);
-        let money = datum_core::Money::new(amt, layer.currency).map_err(datum_core::Error::from)?;
+        let money =
+            wicket_core::Money::new(amt, layer.currency).map_err(wicket_core::Error::from)?;
         edges.push(CoverEdge {
             posting_id: layer.posting_id,
             qty: take,
@@ -117,10 +118,10 @@ pub(crate) fn cover_layers(
     }
     if left > Decimal::ZERO {
         return Err(crate::error::Error::from(
-            datum_core::PostingError::AllocationRequired(datum_core::PostingHandle(0)),
+            wicket_core::PostingError::AllocationRequired(wicket_core::PostingHandle(0)),
         ));
     }
-    let currency = currency.unwrap_or(datum_core::CurrencyId(840));
-    let money = datum_core::Money::new(total, currency).map_err(datum_core::Error::from)?;
+    let currency = currency.unwrap_or(wicket_core::CurrencyId(840));
+    let money = wicket_core::Money::new(total, currency).map_err(wicket_core::Error::from)?;
     Ok((money, edges))
 }

@@ -12,22 +12,22 @@ pub enum Error {
     Unimplemented,
     /// Core error.
     #[error(transparent)]
-    Core(#[from] datum_core::Error),
+    Core(#[from] wicket_core::Error),
     /// Database error.
     #[error(transparent)]
-    Db(#[from] datum_db::Error),
+    Db(#[from] wicket_db::Error),
     /// Numbering / identifier generation.
     #[error(transparent)]
-    Numbering(#[from] datum_numbering::Error),
+    Numbering(#[from] wicket_numbering::Error),
     /// Event publish or schema registration.
     #[error(transparent)]
-    Events(#[from] datum_events::Error),
+    Events(#[from] wicket_events::Error),
     /// Module manifest / kernel registration.
     #[error(transparent)]
-    Module(#[from] datum_module::Error),
+    Module(#[from] wicket_module::Error),
     /// State machine declaration error.
     #[error(transparent)]
-    Statemachine(#[from] datum_statemachine::Error),
+    Statemachine(#[from] wicket_statemachine::Error),
     /// Identifier failed `^[0-9A-Z-]{1,20}$`.
     #[error("invalid identifier: {0}")]
     InvalidIdentifier(String),
