@@ -3,7 +3,7 @@
 use datum_core::{Boundary, Identifier, LocationId};
 use datum_db::Tx;
 use datum_events::Event;
-use datum_ledger::upsert_location;
+use datum_ledger::{has_quantity_at, upsert_location};
 use serde_json::json;
 
 use crate::domain::{
@@ -394,18 +394,7 @@ pub async fn ensure_wip(tx: &mut Tx<'_>, work_order_id: Identifier) -> Result<Lo
     Ok(id)
 }
 
-/// Whether any rebuildable balance row shows on-hand at `location`.
+/// Whether any quantity slice at `location` nets above zero (R-2s-3 ledger seam).
 pub async fn location_has_on_hand(tx: &mut Tx<'_>, location: LocationId) -> Result<bool> {
-    let row: (bool,) = tx
-        .fetch_one(
-            sqlx::query_as(
-                "SELECT EXISTS (
-                   SELECT 1 FROM transient.balance_projection
-                    WHERE location_id = $1 AND quantity <> 0
-                 )",
-            )
-            .bind(location.as_uuid()),
-        )
-        .await?;
-    Ok(row.0)
+    Ok(has_quantity_at(tx, location).await?)
 }
