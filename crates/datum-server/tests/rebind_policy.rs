@@ -4,7 +4,7 @@
 
 #[test]
 fn server_rust_never_rebinds_datum_session_gucs() {
-    for path in ["src/handlers.rs", "src/boot.rs", "src/session.rs"] {
+    for path in ["src/handlers/mod.rs", "src/boot.rs", "src/session.rs"] {
         let src =
             std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(path))
                 .unwrap_or_else(|e| panic!("read {path}: {e}"));

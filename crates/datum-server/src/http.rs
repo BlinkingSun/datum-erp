@@ -4,7 +4,8 @@ use std::net::SocketAddr;
 
 use axum::Router;
 use axum::extract::DefaultBodyLimit;
-use axum::routing::{get, post};
+#[allow(unused_imports)]
+use axum::routing::{delete, get, post, put};
 use tower::ServiceBuilder;
 use tower_http::trace::TraceLayer;
 
@@ -84,6 +85,9 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/esign/signatures/{id}/bundle",
             get(handlers::esign_bundle),
         )
+        // w3b:customfields
+        // w3b:documents
+        // w3b:print
         .layer(DefaultBodyLimit::max(1024 * 1024))
         .layer(axum::middleware::from_fn(limits_mw))
         .layer(axum::middleware::from_fn(request_id_mw))

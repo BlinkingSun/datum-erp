@@ -128,6 +128,10 @@ permissions = [
   "genealogy.view",
   "wo.release",
   "esign.bundle.read",
+  "customfields.view",
+  "documents.view",
+  "print.templates",
+  "print.render",
 ]
 
 [[seeded_permissions.bundles]]
@@ -138,6 +142,17 @@ permissions = [
   "calibration.approve",
   "validation.manifest.read",
   "esign.bundle.read",
+  "customfields.view",
+  "documents.view",
+  "print.templates",
+  "print.render",
+  "customfields.define",
+  "customfields.set",
+  "customfields.retire",
+  "documents.edit",
+  "print.archive",
+  "documents.approve",
+  "documents.release",
 ]
 
 [[seeded_permissions.bundles]]
@@ -154,6 +169,17 @@ permissions = [
   "wo.release",
   "calibration.approve",
   "esign.bundle.read",
+  "customfields.define",
+  "customfields.retire",
+  "customfields.view",
+  "customfields.set",
+  "documents.view",
+  "documents.edit",
+  "documents.approve",
+  "documents.release",
+  "print.render",
+  "print.archive",
+  "print.templates",
 ]
 
 [acceptance]

@@ -618,7 +618,7 @@ async fn server_manifest_matches_crate_wire_after_version_bump() {
 
 #[test]
 fn esign_mint_remembers_in_the_mint_transaction() {
-    let src = include_str!("../src/handlers.rs");
+    let src = include_str!("../src/handlers/mod.rs");
     let start = src
         .find("async fn esign_mint_inner")
         .expect("esign_mint_inner");
@@ -645,7 +645,7 @@ fn esign_mint_remembers_in_the_mint_transaction() {
 
 #[test]
 fn server_src_does_not_select_esign_schema() {
-    let handlers = include_str!("../src/handlers.rs");
+    let handlers = include_str!("../src/handlers/mod.rs");
     assert!(
         !handlers.contains("include_str!(\"esign_"),
         "sql includes must be deleted"
