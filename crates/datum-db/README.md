@@ -21,7 +21,8 @@ legal here (D3 §11). Event-trigger attach is `datum-audit`.
 - `runtime_kind` — `"tokio"`
 - `Error` / `Result` / `SqlState` — `Refused(42501)`, `Serialization(40001)`, `Ddl`, `Poisoned`
 - `Tx` — sealed write transaction (`begin`, `begin_serializable`, `execute`,
-  `fetch_one`/`optional`/`all`, `setting`, `pg_txid`, `commit`, `rollback`)
+  `fetch_one`/`optional`/`all`, `setting`, `pg_txid`, `bind_esign_id`, `commit`,
+  `rollback`)
 - `retry_serializable` — re-run on `Error::Serialization`
 - `ddl` — `ddl::check` (CASCADE ban, stray tables, app DELETE outside transient, TRUNCATE grants)
 - `migrate` — `migrate::run`, `migrate::ADVISORY_LOCK_KEY`
@@ -35,7 +36,8 @@ legal here (D3 §11). Event-trigger attach is `datum-audit`.
 
 ## Tests (`tests/`)
 
-- `tx_actor_bound_to_transaction_id` / `tx_sets_every_setting`
+- `tx_actor_bound_to_transaction_id` / `tx_sets_every_setting` /
+  `bind_esign_id_stamps_mid_transaction`
 - `connect_sets_utc_and_application_name` / `connection_defaults_survive_release`
 - `write_without_context_aborts` / `session_level_actor_is_refused` / `refused_maps_42501`
 - `pooled_connection_cannot_leak_actor` / `after_release_resets_state`

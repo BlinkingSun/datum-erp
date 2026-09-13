@@ -133,6 +133,47 @@ async fn tx_sets_every_setting() {
     db.finish().await.expect("finish");
 }
 
+/// Mid-Tx bind stamps `datum.esign_id` for remaining statements (D-2b-1).
+/// `WriteContext.esign_id` is the begin-time field and stays unchanged.
+#[tokio::test]
+async fn bind_esign_id_stamps_mid_transaction() {
+    let db = db_case!("bind_esign");
+    let write = write_pool(db.database(), 2).await;
+    let mut ctx = test_ctx();
+    ctx.esign_id = Some("begin-time".into());
+
+    let mut tx = Tx::begin(&write, &ctx).await.expect("begin");
+    assert_eq!(
+        tx.setting("datum.esign_id").await.expect("begin guc"),
+        "begin-time"
+    );
+    let id = datum_core::Identifier::generate().as_uuid().to_string();
+    tx.bind_esign_id(&id).await.expect("bind");
+    assert_eq!(tx.setting("datum.esign_id").await.expect("after"), id);
+    assert_eq!(
+        ctx.esign_id.as_deref(),
+        Some("begin-time"),
+        "WriteContext.esign_id is not mutated by the mid-Tx bind"
+    );
+    tx.commit().await.expect("commit");
+
+    let pool = datum_db::connect(&app_url(db.database()))
+        .await
+        .expect("probe pool");
+    let leaked: (Option<String>,) =
+        sqlx::query_as("SELECT pg_catalog.current_setting('datum.esign_id', true)")
+            .fetch_one(&pool)
+            .await
+            .expect("probe");
+    assert!(
+        leaked.0.as_deref().unwrap_or("").is_empty(),
+        "esign_id leaked after commit: {:?}",
+        leaked.0
+    );
+    pool.close().await;
+    db.finish().await.expect("finish");
+}
+
 /// D3 §10 row **c**: a write on a raw pool connection (no `Tx::begin`) into a
 /// table carrying the D3 trigger stub aborts with `42501` and the table is
 /// unchanged.
