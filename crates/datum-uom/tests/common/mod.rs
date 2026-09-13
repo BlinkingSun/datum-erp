@@ -7,8 +7,8 @@ use rust_decimal::Decimal;
 pub fn write_ctx(action: &str) -> WriteContext {
     let mut ctx = WriteContext::new(
         Actor {
-            id: Identifier::generate(),
-            kind: ActorKind::User,
+            id: Identifier::from_uuid(datum_identity::SYSTEM_ID),
+            kind: ActorKind::ServicePrincipal,
         },
         action,
         "ui",

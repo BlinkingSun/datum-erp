@@ -42,8 +42,8 @@ pub fn qty_ea(s: &str) -> AnyQuantity {
 
 pub fn actor() -> Actor {
     Actor {
-        id: Identifier::generate(),
-        kind: ActorKind::User,
+        id: Identifier::from_uuid(datum_identity::SYSTEM_ID),
+        kind: ActorKind::ServicePrincipal,
     }
 }
 
