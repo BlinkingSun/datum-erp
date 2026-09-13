@@ -32,7 +32,10 @@ the records they govern, and an approval machine registered with
 | `obsolete` | Effective | Obsolete | `documents.release` | NotRequired | NotRequired |
 | `void` | Draft | Void | `documents.edit` | NotRequired | NotRequired |
 
-Status changes go through `Engine::transition`. A raw status UPDATE is fail-class.
+Status changes go through `Engine::transition`. The denormalized `status` column
+is written only after the engine mutates `sm.instance`; BEFORE UPDATE triggers
+refuse a status write that does not match the live instance (a raw status UPDATE
+is fail-class) and refuse `Obsolete` while `legal_hold` is true.
 `legal_hold = true` refuses `obsolete`. Under `NoSignatures` a Required edge
 returns `SignatureError::NoProvider` and writes nothing.
 

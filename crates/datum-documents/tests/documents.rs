@@ -648,6 +648,124 @@ async fn overlapping_effectivity_refused() {
 }
 
 #[tokio::test]
+async fn raw_status_update_is_fail_class() {
+    for_each_profile(|profile| async move {
+        let Some(db) = open_db("doc_rawst", profile).await else {
+            return;
+        };
+        migrate(&db).await;
+        let write = write_pool(&db);
+        let eng = frozen_engine(profile);
+        persist_engine(&write, &eng, profile).await;
+        let mut tx = Tx::begin(&write, &write_ctx("documents.create", profile))
+            .await
+            .unwrap();
+        let id = create(&mut tx, &eng, "SOP", "Raw status", "quality")
+            .await
+            .unwrap();
+        let rev = new_revision(&mut tx, id, "A", Manifest::content(json!({})))
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        let mut tx = Tx::begin(&write, &write_ctx("documents.edit", profile))
+            .await
+            .unwrap();
+        let err = tx
+            .execute(
+                query("UPDATE documents.document SET status = 'Approved' WHERE document_id = $1")
+                    .bind(id.as_uuid()),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(db_sqlstate(&err), "P0001");
+        tx.rollback().await.ok();
+
+        let mut tx = Tx::begin(&write, &write_ctx("documents.edit", profile))
+            .await
+            .unwrap();
+        let err = tx
+            .execute(
+                query("UPDATE documents.document SET status = 'Obsolete' WHERE document_id = $1")
+                    .bind(id.as_uuid()),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(db_sqlstate(&err), "P0001");
+        tx.rollback().await.ok();
+
+        let mut tx = Tx::begin(&write, &write_ctx("documents.edit", profile))
+            .await
+            .unwrap();
+        let err = tx
+            .execute(
+                query("UPDATE documents.revision SET status = 'Approved' WHERE revision_id = $1")
+                    .bind(rev.as_uuid()),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(db_sqlstate(&err), "P0001");
+        tx.rollback().await.ok();
+
+        let mut tx = Tx::begin(&write, &write_ctx("documents.edit", profile))
+            .await
+            .unwrap();
+        set_legal_hold(&mut tx, id, true).await.unwrap();
+        tx.commit().await.unwrap();
+
+        let mut tx = Tx::begin(&write, &write_ctx("documents.edit", profile))
+            .await
+            .unwrap();
+        let err = tx
+            .execute(
+                query("UPDATE documents.document SET status = 'Obsolete' WHERE document_id = $1")
+                    .bind(id.as_uuid()),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(db_sqlstate(&err), "P0001");
+        tx.rollback().await.ok();
+
+        let mut tx = Tx::begin(&write, &write_ctx("documents.edit", profile))
+            .await
+            .unwrap();
+        let err = tx
+            .execute(
+                query("UPDATE documents.revision SET status = 'Obsolete' WHERE revision_id = $1")
+                    .bind(rev.as_uuid()),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(db_sqlstate(&err), "P0001");
+        tx.rollback().await.ok();
+
+        let status: String =
+            query_scalar("SELECT status FROM documents.document WHERE document_id = $1")
+                .bind(id.as_uuid())
+                .fetch_one(db.app_pool())
+                .await
+                .unwrap();
+        let rev_status: String =
+            query_scalar("SELECT status FROM documents.revision WHERE revision_id = $1")
+                .bind(rev.as_uuid())
+                .fetch_one(db.app_pool())
+                .await
+                .unwrap();
+        let hold: bool =
+            query_scalar("SELECT legal_hold FROM documents.document WHERE document_id = $1")
+                .bind(id.as_uuid())
+                .fetch_one(db.app_pool())
+                .await
+                .unwrap();
+        assert_eq!(status, "Draft");
+        assert_eq!(rev_status, "Draft");
+        assert!(hold);
+        db.finish().await.unwrap();
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn legal_hold_blocks_obsolete() {
     for_each_profile(|profile| async move {
         let Some(db) = open_db("doc_hold", profile).await else {

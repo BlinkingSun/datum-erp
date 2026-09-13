@@ -106,6 +106,25 @@ CREATE TABLE documents.link (
 );
 ALTER TABLE documents.link OWNER TO datum_owner;
 
+-- Live machine state for doc_type = 'document'. search_path is pg_catalog, pg_temp
+-- (R-2s-8), so the sm.instance identifier is qualified through format('%I').
+CREATE FUNCTION documents.live_machine_state(p_doc_id uuid) RETURNS text
+LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog, pg_temp AS $fn$
+DECLARE
+  live_state text;
+BEGIN
+  EXECUTE format(
+    'SELECT state FROM %I.%I WHERE doc_type = $1 AND doc_id = $2',
+    'sm',
+    'instance'
+  )
+  INTO live_state
+  USING 'document', p_doc_id;
+  RETURN live_state;
+END
+$fn$;
+ALTER FUNCTION documents.live_machine_state(uuid) OWNER TO datum_owner;
+
 CREATE FUNCTION documents.document_guard() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $fn$
 BEGIN
@@ -119,6 +138,16 @@ BEGIN
       RAISE EXCEPTION 'documents.document is immutable except status and legal_hold'
         USING ERRCODE = 'P0001';
     END IF;
+    IF NEW.status IS DISTINCT FROM OLD.status THEN
+      IF NEW.status = 'Obsolete' AND (NEW.legal_hold OR OLD.legal_hold) THEN
+        RAISE EXCEPTION 'legal hold refuses Obsolete'
+          USING ERRCODE = 'P0001';
+      END IF;
+      IF NEW.status IS DISTINCT FROM documents.live_machine_state(NEW.document_id) THEN
+        RAISE EXCEPTION 'documents.document.status must match the live machine instance'
+          USING ERRCODE = 'P0001';
+      END IF;
+    END IF;
   END IF;
   RETURN NEW;
 END
@@ -131,6 +160,8 @@ CREATE TRIGGER document_guard
 
 CREATE FUNCTION documents.revision_guard() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $fn$
+DECLARE
+  held boolean;
 BEGIN
   IF TG_OP = 'UPDATE' THEN
     IF NEW.revision_id IS DISTINCT FROM OLD.revision_id
@@ -146,6 +177,21 @@ BEGIN
        OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
       RAISE EXCEPTION 'documents.revision is immutable except status'
         USING ERRCODE = 'P0001';
+    END IF;
+    IF NEW.status IS DISTINCT FROM OLD.status THEN
+      IF NEW.status = 'Obsolete' THEN
+        SELECT d.legal_hold INTO held
+          FROM documents.document d
+         WHERE d.document_id = NEW.document_id;
+        IF COALESCE(held, false) THEN
+          RAISE EXCEPTION 'legal hold refuses Obsolete'
+            USING ERRCODE = 'P0001';
+        END IF;
+      END IF;
+      IF NEW.status IS DISTINCT FROM documents.live_machine_state(NEW.document_id) THEN
+        RAISE EXCEPTION 'documents.revision.status must match the live machine instance'
+          USING ERRCODE = 'P0001';
+      END IF;
     END IF;
   END IF;
   RETURN NEW;

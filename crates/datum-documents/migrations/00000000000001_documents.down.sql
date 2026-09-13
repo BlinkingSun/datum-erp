@@ -9,6 +9,7 @@ DROP TRIGGER IF EXISTS document_guard ON documents.document;
 DROP FUNCTION IF EXISTS documents.refuse_mutation();
 DROP FUNCTION IF EXISTS documents.revision_guard();
 DROP FUNCTION IF EXISTS documents.document_guard();
+DROP FUNCTION IF EXISTS documents.live_machine_state(uuid);
 
 DROP TABLE IF EXISTS documents.link;
 DROP TABLE IF EXISTS documents.attachment;
