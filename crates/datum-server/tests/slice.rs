@@ -1230,6 +1230,190 @@ async fn setup_released_wo(w: &World) -> (String, i64, String, String, String) {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn reverse_issue_restores_on_hand() {
+    if common::skip_if_no_pg() {
+        return;
+    }
+    let src = include_str!("../src/handlers.rs");
+    let start = src.find("async fn reverse_inner").expect("reverse_inner");
+    let rest = &src[start..];
+    let end = rest.find("/// Health.").unwrap_or(rest.len());
+    let fn_src = &rest[..end];
+    let begins = fn_src.matches("Tx::begin").count();
+    assert_eq!(
+        begins, 1,
+        "SPEC: reverse is one Tx::begin / one WriteContext:\n{fn_src}"
+    );
+    assert!(
+        !fn_src.contains("rebind_write"),
+        "R-2s-7: reverse must not rebind GUCs"
+    );
+
+    for profile in profiles() {
+        let w = common::boot(profile).await;
+        let (wo_id, wo_ver, loc, lot, item) = setup_released_wo(&w).await;
+        let oh_uri =
+            format!("/api/v1/inventory/on-hand?item_id={item}&location_id={loc}&lot_id={lot}");
+        let (st, oh0) = w.get(&oh_uri).await;
+        assert_eq!(st, StatusCode::OK, "on-hand before issue {oh0}");
+        let before: rust_decimal::Decimal = oh0["on_hand"].as_str().unwrap().parse().unwrap();
+        assert!(
+            before > rust_decimal::Decimal::ZERO,
+            "receipt must leave on-hand {oh0}"
+        );
+
+        let (st, issued) = w
+            .post_if_match(
+                &format!("/api/v1/production/work-orders/{wo_id}/issue"),
+                json!({
+                    "from_location_id": loc,
+                    "lines": [{
+                        "item_id": item,
+                        "lot_id": lot,
+                        "entered": qty("10", 1, "Count"),
+                    }]
+                }),
+                wo_ver,
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "issue {issued}");
+
+        let (st, oh1) = w.get(&oh_uri).await;
+        assert_eq!(st, StatusCode::OK, "on-hand after issue {oh1}");
+        let after_issue: rust_decimal::Decimal = oh1["on_hand"].as_str().unwrap().parse().unwrap();
+        assert!(
+            after_issue < before,
+            "issue must reduce on-hand {before} -> {after_issue}"
+        );
+
+        let issue_doc: uuid::Uuid = query_scalar(
+            "SELECT inventory_document_id FROM production_min.issue_line WHERE work_order_id = $1 LIMIT 1",
+        )
+        .bind(uuid::Uuid::parse_str(&wo_id).unwrap())
+        .fetch_one(&w.pool)
+        .await
+        .expect("issue document");
+        let issue_group: uuid::Uuid =
+            query_scalar("SELECT posted_group_id FROM inventory.document WHERE id = $1")
+                .bind(issue_doc)
+                .fetch_one(&w.pool)
+                .await
+                .expect("posted group");
+
+        let (st, missing) = w
+            .post(
+                "/api/v1/inventory/reversals",
+                json!({
+                    "document_id": uuid::Uuid::now_v7().to_string(),
+                    "reason": "unknown",
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::NOT_FOUND, "unknown issue {missing}");
+        assert_eq!(missing["error"]["code"], "NOT_FOUND", "{missing}");
+
+        let (st, rev) = w
+            .post(
+                "/api/v1/inventory/reversals",
+                json!({
+                    "document_id": issue_doc.to_string(),
+                    "reason": "wrong WO pick",
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::CREATED, "reverse {rev}");
+        assert_eq!(rev["id"], issue_doc.to_string(), "{rev}");
+        assert_eq!(rev["kind"], "issue", "{rev}");
+        assert!(
+            rev["reversal_group_id"].as_str().is_some(),
+            "reversal document {rev}"
+        );
+
+        let (st, oh2) = w.get(&oh_uri).await;
+        assert_eq!(st, StatusCode::OK, "on-hand after reverse {oh2}");
+        let after_rev: rust_decimal::Decimal = oh2["on_hand"].as_str().unwrap().parse().unwrap();
+        assert_eq!(after_rev, before, "on-hand restored {oh2}");
+
+        let rev_kind: String = query_scalar(
+            "SELECT kind::text FROM ledger.posting_group WHERE reverses_group_id = $1",
+        )
+        .bind(issue_group)
+        .fetch_one(&w.pool)
+        .await
+        .expect("reversal group");
+        assert_eq!(rev_kind, "REVERSAL", "issue group reversed");
+        let doc_status: String =
+            query_scalar("SELECT status FROM inventory.document WHERE id = $1")
+                .bind(issue_doc)
+                .fetch_one(&w.pool)
+                .await
+                .expect("issue status");
+        assert_eq!(
+            doc_status, "posted",
+            "issue document remains; ledger group is reversed"
+        );
+
+        for group in [issue_group] {
+            let qty_bad: i64 = query_scalar(
+                r#"SELECT count(*) FROM (
+                     SELECT item_id, uom_id
+                       FROM ledger.posting
+                      WHERE group_id = $1 AND measure = 'QUANTITY'
+                      GROUP BY item_id, uom_id
+                     HAVING SUM(quantity) <> 0
+                   ) s"#,
+            )
+            .bind(group)
+            .fetch_one(&w.pool)
+            .await
+            .unwrap();
+            assert_eq!(qty_bad, 0, "qty conserved in {group}");
+            let amt_bad: i64 = query_scalar(
+                r#"SELECT count(*) FROM (
+                     SELECT currency_id
+                       FROM ledger.posting
+                      WHERE group_id = $1 AND measure = 'VALUE'
+                      GROUP BY currency_id
+                     HAVING SUM(amount) <> 0
+                   ) s"#,
+            )
+            .bind(group)
+            .fetch_one(&w.pool)
+            .await
+            .unwrap();
+            assert_eq!(amt_bad, 0, "value conserved in {group}");
+        }
+        let rev_group = uuid::Uuid::parse_str(rev["reversal_group_id"].as_str().unwrap()).unwrap();
+        let qty_bad: i64 = query_scalar(
+            r#"SELECT count(*) FROM (
+                 SELECT item_id, uom_id
+                   FROM ledger.posting
+                  WHERE group_id = $1 AND measure = 'QUANTITY'
+                  GROUP BY item_id, uom_id
+                 HAVING SUM(quantity) <> 0
+               ) s"#,
+        )
+        .bind(rev_group)
+        .fetch_one(&w.pool)
+        .await
+        .unwrap();
+        assert_eq!(qty_bad, 0, "qty conserved in reversal {rev_group}");
+
+        let (st, again) = w
+            .post(
+                "/api/v1/inventory/reversals",
+                json!({
+                    "document_id": issue_doc.to_string(),
+                    "reason": "wrong WO pick again",
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::CONFLICT, "already reversed {again}");
+        assert_eq!(again["error"]["code"], "CONFLICT", "{again}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn mutating_routes_require_manifest_permission() {
     if common::skip_if_no_pg() {
         return;
@@ -1246,6 +1430,13 @@ async fn mutating_routes_require_manifest_permission() {
             (
                 "/api/v1/locations",
                 json!({"code":"NP-L","name":"n","kind":"warehouse"}),
+            ),
+            (
+                "/api/v1/inventory/reversals",
+                json!({
+                    "document_id": "00000000-0000-0000-0000-000000000001",
+                    "reason": "noperm",
+                }),
             ),
         ];
         for (uri, body) in routes {
