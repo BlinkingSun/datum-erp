@@ -1,17 +1,31 @@
 -- 0001_locations: site and location master (app schema `locations`).
+-- Schema class app (CONTRACT §8a): no DELETE, no ON DELETE CASCADE.
+-- Created by datum_migrate so CREATE TABLE can fire audit.attach_new_tables;
+-- tables are then owned by datum_owner. Reversible.
 
-CREATE SCHEMA IF NOT EXISTS locations AUTHORIZATION datum_owner;
+SELECT
+  pg_catalog.set_config('datum.actor_id',      '00000000-0000-4000-8000-000000000002', true),
+  pg_catalog.set_config('datum.actor_kind',    'migration', true),
+  pg_catalog.set_config('datum.actor_display', 'migration', true),
+  pg_catalog.set_config('datum.txid',          pg_catalog.pg_current_xact_id()::text, true),
+  pg_catalog.set_config('datum.action',        'locations.migrate', true),
+  pg_catalog.set_config('datum.source_kind',   'migration', true);
+
+CREATE SCHEMA IF NOT EXISTS locations AUTHORIZATION datum_migrate;
 
 REVOKE ALL ON SCHEMA locations FROM PUBLIC;
-GRANT USAGE ON SCHEMA locations TO datum_app, datum_migrate, datum_owner;
+GRANT USAGE ON SCHEMA locations TO datum_app;
+GRANT USAGE, CREATE ON SCHEMA locations TO datum_migrate, datum_owner;
 
 INSERT INTO datum.schema_class (nspname, class) VALUES ('locations', 'app')
 ON CONFLICT (nspname) DO UPDATE SET class = EXCLUDED.class;
 
+ALTER DEFAULT PRIVILEGES FOR ROLE datum_migrate IN SCHEMA locations
+  GRANT SELECT, INSERT, UPDATE ON TABLES TO datum_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE datum_migrate IN SCHEMA locations
+  GRANT TRIGGER ON TABLES TO datum_owner;
 ALTER DEFAULT PRIVILEGES FOR ROLE datum_owner IN SCHEMA locations
   GRANT SELECT, INSERT, UPDATE ON TABLES TO datum_app;
-ALTER DEFAULT PRIVILEGES FOR ROLE datum_owner IN SCHEMA locations
-  GRANT USAGE ON SEQUENCES TO datum_app;
 
 CREATE TABLE locations.site (
   id       uuid PRIMARY KEY,
@@ -55,3 +69,5 @@ SELECT audit.attach('locations.location'::regclass);
 
 GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA locations TO datum_app;
 REVOKE DELETE ON ALL TABLES IN SCHEMA locations FROM PUBLIC, datum_app;
+
+ALTER SCHEMA locations OWNER TO datum_owner;

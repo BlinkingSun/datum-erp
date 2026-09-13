@@ -21,9 +21,7 @@ use datum_mod_production_min::{
     CompleteRequest, CreateWorkOrder, DOC_TYPE, FinishedLotTemplate, IssueMaterialRequest,
     StartRequest, Status, WorkOrder, complete, create, load, release, start,
 };
-use datum_module::{
-    Kernel, KernelBuilder, Profile, attach_kernel_audit, migrate_prefix, migrate_suffix,
-};
+use datum_module::{Kernel, KernelBuilder, Profile};
 use datum_statemachine::DocRef;
 use rust_decimal::Decimal;
 use sqlx::{PgPool, query_scalar as sql_query_scalar};
@@ -94,36 +92,54 @@ pub fn edge_ctx(kernel: &Kernel, actor: Actor, id: Identifier, edge: &str) -> Wr
     ctx
 }
 
-pub async fn migrate_all(db: &datum_test::TestDb) {
-    migrate_prefix(db.migrate_pool())
+/// D-2b-13: one published order. `install_upto` is not on this tree yet
+/// (glue lane); fall back to kernel prefix/suffix then `wave_2s1_migrators`
+/// / `slice_migrators`, with `audit_attach` up before this crate's DDL.
+pub async fn install_through(db: &datum_test::TestDb, crate_name: &str) {
+    datum_module::migrate_prefix(db.migrate_pool())
         .await
         .expect("migrate prefix");
-    migrate_suffix(db.migrate_pool())
+    datum_module::migrate_suffix(db.migrate_pool())
         .await
         .unwrap_or_else(|e| panic!("migrate suffix: {e:#}"));
-    let crates: &[(&str, &sqlx::migrate::Migrator)] = &[
-        ("datum-mod-items", &datum_mod_items::MIGRATOR),
-        ("datum-mod-locations", &datum_mod_locations::MIGRATOR),
-        ("datum-mod-lots", &datum_mod_lots::MIGRATOR),
-        ("datum-mod-inventory", &datum_mod_inventory::MIGRATOR),
-        (
-            "datum-mod-production-min",
-            &datum_mod_production_min::MIGRATOR,
-        ),
-    ];
-    for (name, migrator) in crates {
-        datum_db::migrate::run(db.migrate_pool(), &[(*name, *migrator)])
-            .await
-            .unwrap_or_else(|e| panic!("migrate {name}: {e:#}"));
-    }
     let boot = db.bootstrap_pool().await.expect("bootstrap pool");
     datum_audit::install_privileged(&boot)
         .await
         .expect("install_privileged");
     boot.close().await;
-    attach_kernel_audit(db.migrate_pool())
+
+    let mut found = false;
+    for (name, migrator) in datum_module::wave_2s1_migrators().expect("wave_2s1") {
+        datum_db::migrate::run(db.migrate_pool(), &[(name, migrator)])
+            .await
+            .unwrap_or_else(|e| panic!("migrate {name}: {e:#}"));
+        if name == crate_name {
+            found = true;
+            break;
+        }
+    }
+    if !found {
+        for (name, migrator) in datum_module::slice_migrators() {
+            datum_db::migrate::run(db.migrate_pool(), &[(name, migrator)])
+                .await
+                .unwrap_or_else(|e| panic!("migrate {name}: {e:#}"));
+            if name == crate_name {
+                found = true;
+                break;
+            }
+        }
+    }
+    assert!(found, "{crate_name} not in published wave_2s1/slice order");
+    datum_module::attach_kernel_audit(db.migrate_pool())
         .await
         .expect("attach_kernel_audit");
+    datum_module::attach_slice_audit(db.migrate_pool())
+        .await
+        .expect("attach_slice_audit");
+}
+
+pub async fn migrate_all(db: &datum_test::TestDb) {
+    install_through(db, "datum-mod-production-min").await;
 }
 
 pub async fn boot_kernel(db: &datum_test::TestDb) -> Kernel {
