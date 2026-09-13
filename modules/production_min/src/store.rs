@@ -2,7 +2,6 @@
 //! Postings go through [`datum_ledger::GroupBuilder`] obtained from the kernel.
 
 use crate::domain::StartRequest;
-use crate::hooks::{clear_issue_plan, stash_issue_plan};
 use chrono::{DateTime, Utc};
 use datum_core::{
     AnyQuantity, AreaDim, Boundary, ConversionContext, CostElement, CountDim, CurrencyId,
@@ -13,7 +12,8 @@ use datum_core::{
 use datum_db::Tx;
 use datum_ledger::{CostMethod, GroupBuilder, Layer, load_open_layers, load_stock_item};
 use datum_mod_inventory::{
-    Document, IssueRequest, WipIssuePlan, finish_wip_issue, issue_to_wip, plan_wip_issue,
+    Document, IssueRequest, WipIssuePlan, clear_wip_issue_plan, finish_wip_issue, issue_to_wip,
+    plan_wip_issue,
 };
 use datum_mod_lots::{CreateLot, LotStatus, create_lot, create_serials};
 use datum_module::Kernel;
@@ -256,7 +256,6 @@ pub async fn start(
         .await?;
         replay_doc = plan.replay_document.clone();
         if plan.replay_document.is_none() {
-            stash_issue_plan(id, plan.clone());
             issue_plan = Some(plan);
         }
     }
@@ -267,9 +266,10 @@ pub async fn start(
         reason_code: None,
         reverses_group_id: None,
     };
-    let movement_group =
-        transition_issue_with_sink(tx, kernel, ctx, id, header, issue_plan.is_some()).await?;
-    clear_issue_plan(id);
+    let result =
+        transition_issue_with_sink(tx, kernel, ctx, id, header, issue_plan.is_some()).await;
+    clear_wip_issue_plan(id);
+    let movement_group = result?;
     if let Some(plan) = issue_plan {
         let group_id = movement_group
             .ok_or_else(|| Error::Manifest("issue transition posted no group".into()))?;

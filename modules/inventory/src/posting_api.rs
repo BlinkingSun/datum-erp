@@ -1,5 +1,13 @@
 //! Published posting API: plan a WIP issue asynchronously, contribute on a bound
 //! [`PostingSink`] synchronously (CONTRACT §6.2). Used by `production_min` start hooks.
+//!
+//! Plans stashed for the start hook are keyed by PostgreSQL transaction id
+//! (`pg_current_xact_id`) plus work order. The hook ABI has no `Tx`, so lookup
+//! uses the current tokio task id recorded at stash (one request = one task =
+//! one `Tx`). Two concurrent requests cannot see each other's plans.
+
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 
 use datum_core::{
     AnyQuantity, CostElement, Identifier, ItemId, LocationId, LotId, Money, PostingError,
@@ -10,6 +18,7 @@ use datum_ledger::load_open_layers;
 use datum_mod_lots::{LotStatus, load_lot};
 use datum_module::Kernel;
 use rust_decimal::Decimal;
+use tokio::task::Id;
 
 use crate::domain::{Document, DocumentKind, IssueRequest};
 use crate::error::{Error, Result};
@@ -102,14 +111,16 @@ pub async fn plan_wip_issue(
         &prepared,
     )
     .await?;
-    Ok(WipIssuePlan {
+    let plan = WipIssuePlan {
         document_id: doc_id,
         work_order: req.work_order,
         from_location: req.from_location,
         lines: planned,
         residuals,
         replay_document: None,
-    })
+    };
+    stash_wip_issue_plan(tx, plan.clone()).await?;
+    Ok(plan)
 }
 
 /// Contribute every planned line to the bound sink (same transaction as the WO transition).
@@ -242,7 +253,9 @@ pub async fn finish_wip_issue(
             )
             .await?;
     }
-    load_document(tx, plan.document_id).await
+    let doc = load_document(tx, plan.document_id).await?;
+    clear_wip_issue_plan(plan.work_order);
+    Ok(doc)
 }
 
 async fn plan_issue_line(
@@ -306,4 +319,130 @@ async fn plan_issue_line(
         value_money,
         consumptions,
     })
+}
+
+struct PlanStore {
+    /// Caller (tokio task, or thread when the runtime has not spawned one)
+    /// → PostgreSQL xid of that caller's open write transaction.
+    caller_txid: HashMap<Caller, String>,
+    /// `(txid, work_order)` so two concurrent requests never share a plan.
+    plans: HashMap<(String, Identifier), WipIssuePlan>,
+}
+
+/// Hook ABI has no `Tx`. Spawned requests have a tokio task id; `#[tokio::test]`
+/// block_on futures do not, so those fall back to the OS thread (stable on the
+/// current-thread runtime the module tests use).
+#[derive(Clone, Eq, PartialEq, Hash)]
+enum Caller {
+    Task(Id),
+    Thread(std::thread::ThreadId),
+}
+
+fn current_caller() -> Caller {
+    match tokio::task::try_id() {
+        Some(id) => Caller::Task(id),
+        None => Caller::Thread(std::thread::current().id()),
+    }
+}
+
+fn plan_store() -> &'static Mutex<PlanStore> {
+    static STORE: OnceLock<Mutex<PlanStore>> = OnceLock::new();
+    STORE.get_or_init(|| {
+        Mutex::new(PlanStore {
+            caller_txid: HashMap::new(),
+            plans: HashMap::new(),
+        })
+    })
+}
+
+fn lock_plans() -> std::sync::MutexGuard<'static, PlanStore> {
+    plan_store()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+fn stash_with_txid(txid: String, plan: WipIssuePlan) -> Result<()> {
+    let caller = current_caller();
+    let work_order = plan.work_order;
+    let mut store = lock_plans();
+    store.caller_txid.insert(caller, txid.clone());
+    store.plans.insert((txid, work_order), plan);
+    Ok(())
+}
+
+/// Bind `plan` to this `Tx` so the `production.issue` hook can take it by work order.
+pub async fn stash_wip_issue_plan(tx: &mut Tx<'_>, plan: WipIssuePlan) -> Result<()> {
+    let txid = tx.pg_txid().await?;
+    stash_with_txid(txid, plan)
+}
+
+/// Take the plan stashed for `work_order` on the current task's `Tx`.
+pub fn take_wip_issue_plan(work_order: Identifier) -> Option<WipIssuePlan> {
+    let caller = current_caller();
+    let mut store = lock_plans();
+    let txid = store.caller_txid.get(&caller)?.clone();
+    store.plans.remove(&(txid, work_order))
+}
+
+/// Drop any plan for `work_order` on the current task's `Tx` (error / after-transition).
+pub fn clear_wip_issue_plan(work_order: Identifier) {
+    let caller = current_caller();
+    let mut store = lock_plans();
+    let Some(txid) = store.caller_txid.get(&caller).cloned() else {
+        return;
+    };
+    store.plans.remove(&(txid.clone(), work_order));
+    if !store.plans.keys().any(|(t, _)| t == &txid) {
+        store.caller_txid.remove(&caller);
+    }
+}
+
+#[cfg(test)]
+mod isolation_tests {
+    use super::*;
+    use datum_core::Identifier;
+
+    fn dummy_plan(work_order: Identifier, document_id: Identifier) -> WipIssuePlan {
+        WipIssuePlan {
+            document_id,
+            work_order,
+            from_location: LocationId::from_uuid(uuid::Uuid::nil()),
+            lines: Vec::new(),
+            residuals: Vec::new(),
+            replay_document: None,
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn wip_issue_plans_are_isolated_per_tx_identity() {
+        let work_order = Identifier::generate();
+        let doc_a = Identifier::generate();
+        let doc_b = Identifier::generate();
+        let plan_a = dummy_plan(work_order, doc_a);
+        let plan_b = dummy_plan(work_order, doc_b);
+
+        let a = tokio::spawn(async move {
+            stash_with_txid("xid-a".into(), plan_a).expect("stash a");
+            tokio::task::yield_now().await;
+            take_wip_issue_plan(work_order)
+        });
+        let b = tokio::spawn(async move {
+            stash_with_txid("xid-b".into(), plan_b).expect("stash b");
+            tokio::task::yield_now().await;
+            take_wip_issue_plan(work_order)
+        });
+        let got_a = a.await.expect("join a");
+        let got_b = b.await.expect("join b");
+
+        assert_eq!(
+            got_a.expect("task A plan").document_id,
+            doc_a,
+            "task A must not observe task B's plan for the same work order"
+        );
+        assert_eq!(
+            got_b.expect("task B plan").document_id,
+            doc_b,
+            "task B must not observe task A's plan for the same work order"
+        );
+    }
 }

@@ -30,7 +30,10 @@ pub use domain::{
 pub use error::{Error, Result};
 pub use events::{ADJUSTED, ISSUED, LOT_RECEIVED, RECEIPT_POSTED, register_schemas};
 pub use hooks::register as register_hooks;
-pub use posting_api::{WipIssuePlan, contribute_wip_issue, finish_wip_issue, plan_wip_issue};
+pub use posting_api::{
+    WipIssuePlan, clear_wip_issue_plan, contribute_wip_issue, finish_wip_issue, plan_wip_issue,
+    stash_wip_issue_plan, take_wip_issue_plan,
+};
 pub use states::document_machine;
 pub use store::{
     adjust, allocated, available, customer_return, cycle_count, document_history, issue_to_wip,
