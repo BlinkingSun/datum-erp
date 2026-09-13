@@ -28,7 +28,7 @@ pub use credential::{
 };
 pub use principal::{
     MIGRATION_ID, Principal, PrincipalKind, PrincipalStatus, SYSTEM_ID, create_principal,
-    deactivate_principal, load_principal, rename_principal, seed_builtins,
+    deactivate_principal, load_principal, load_principal_on, rename_principal, seed_builtins,
 };
 pub use session::{PasswordProvider, Provider, Session, login, reauth_signing};
 

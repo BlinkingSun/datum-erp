@@ -1,6 +1,7 @@
 //! `Kernel::build`: wiring, seeds, freeze, spawn/transition glue, startup guard.
 
-use std::sync::Arc;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use datum_core::{
@@ -11,7 +12,7 @@ use datum_core::{
 };
 use datum_db::{Pool, Tx, WriteContext, WritePool};
 use datum_esign::{BoundGate, GateFactory, InstanceTriple, LiveDoc};
-use datum_identity::{PrincipalStatus, SYSTEM_ID, UserId, seed_builtins};
+use datum_identity::{PrincipalStatus, SYSTEM_ID, UserId, load_principal_on, seed_builtins};
 use datum_jobs::{HandlerOutcome, JobHandler, Progress};
 use datum_ledger::GroupBuilder;
 use datum_statemachine::{
@@ -90,6 +91,8 @@ pub struct Kernel {
     bound: BoundSyncGate,
     catalog: Vec<ModuleManifest>,
     pool: Pool,
+    /// In-process live business-record bodies (tests / module-pushed snapshots).
+    live_bodies: Arc<Mutex<BTreeMap<(String, Identifier), Value>>>,
 }
 
 /// Sync stand-in returned by [`Kernel::signature_gate`].
@@ -137,6 +140,7 @@ pub struct KernelBuilder {
     extra_routes: Vec<ModuleRoute>,
     extra_subs: Vec<ManifestSubscription>,
     extra_jobs: Vec<ModuleJob>,
+    extra_projections: BTreeMap<String, fn(&Value) -> Value>,
 }
 
 impl KernelBuilder {
@@ -150,6 +154,7 @@ impl KernelBuilder {
             extra_routes: Vec::new(),
             extra_subs: Vec::new(),
             extra_jobs: Vec::new(),
+            extra_projections: BTreeMap::new(),
         }
     }
 
@@ -184,6 +189,21 @@ impl KernelBuilder {
             budget_ms: 50,
             handler: Arc::new(handler),
         });
+        self
+    }
+
+    /// Register the esign projection for `doc_type` (D-2b-3).
+    ///
+    /// Required for every extra bound machine (tests / `KernelBuilder::register_machine`
+    /// types that are not first-party). A bound machine with neither this
+    /// registration nor a first-party identity default fails [`Kernel::build`]
+    /// with [`Error::MissingProjection`].
+    pub fn register_projection(
+        &mut self,
+        doc_type: impl Into<String>,
+        project: fn(&Value) -> Value,
+    ) -> &mut Self {
+        self.extra_projections.insert(doc_type.into(), project);
         self
     }
 
@@ -237,6 +257,7 @@ impl Kernel {
             extra_routes,
             extra_subs,
             extra_jobs,
+            extra_projections,
         } = parts;
         let write = WritePool::new(pool.clone());
         let catalog = compiled_in()?;
@@ -269,6 +290,7 @@ impl Kernel {
             )?;
         }
         engine.freeze()?;
+        register_bound_projections(&engine, &extra_projections)?;
 
         let gate = bind_signature_gate(profile.signature_gate_binding);
         let bound = BoundSyncGate::from_binding(profile.signature_gate_binding);
@@ -296,6 +318,7 @@ impl Kernel {
             bound,
             catalog,
             pool,
+            live_bodies: Arc::new(Mutex::new(BTreeMap::new())),
         };
         kernel.refresh_signature_edges();
         kernel.startup_guard()?;
@@ -342,6 +365,39 @@ impl Kernel {
     /// Bound signature-gate factory, selected by the profile TOML `gate` field.
     pub fn signature_gate_factory(&self) -> GateFactory {
         self.gate
+    }
+
+    /// Push a live business-record body for `doc_type`/`doc_id` (tests; module snapshots).
+    ///
+    /// [`Self::live_record`] prefers this over the default document/lot loaders.
+    pub fn set_live_record(&self, doc_type: impl Into<String>, doc_id: Identifier, body: Value) {
+        let mut guard = match self.live_bodies.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        guard.insert((doc_type.into(), doc_id), body);
+    }
+
+    /// Live business-record JSON hashed with the `sm.instance` triple (D-2b-3).
+    ///
+    /// Mint and consume both call this so a body-only edit between them is
+    /// [`datum_core::SignatureError::HashMismatch`].
+    pub async fn live_record(
+        &self,
+        tx: &mut Tx<'_>,
+        doc_type: &str,
+        doc_id: Identifier,
+    ) -> Result<Value> {
+        {
+            let guard = match self.live_bodies.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+            if let Some(body) = guard.get(&(doc_type.to_owned(), doc_id)) {
+                return Ok(body.clone());
+            }
+        }
+        default_live_record(tx, doc_type, doc_id).await
     }
 
     /// Live `sm.instance` triple for minting (composition-root read; esign does not `SELECT sm.*`).
@@ -524,7 +580,11 @@ impl Kernel {
                 if let datum_statemachine::Error::Signature(sig) = &e
                     && audited_refusal(sig)
                 {
-                    self.log_gate_refusal(ctx, doc, edge, sig).await;
+                    // D-2b-5: refusal audit after rollback, never while this Tx
+                    // still holds `identity.principal` / `esign.signature` FOR UPDATE.
+                    if abort_claim_tx(tx).await.is_ok() {
+                        self.log_gate_refusal(ctx, doc, edge, sig).await;
+                    }
                 }
                 Err(e.into())
             }
@@ -568,15 +628,12 @@ impl Kernel {
                 .bind(doc.doc_id.as_uuid()),
             )
             .await?;
-        let signer_status = match datum_identity::load_principal(
-            self.pool(),
-            UserId::from_identifier(token.signer.id),
-        )
-        .await
-        {
-            Ok(p) => p.status,
-            Err(_) => PrincipalStatus::Inactive,
-        };
+        let signer_status =
+            match load_principal_on(tx, UserId::from_identifier(token.signer.id)).await {
+                Ok(p) => p.status,
+                Err(_) => PrincipalStatus::Inactive,
+            };
+        let projection = self.live_record(tx, &doc.doc_type, doc.doc_id).await?;
         Ok(LiveDoc {
             record: RecordRef {
                 table: "sm.instance".into(),
@@ -584,7 +641,7 @@ impl Kernel {
                 version: row.1,
             },
             doc_type: doc.doc_type.clone(),
-            projection: serde_json::json!({}),
+            projection,
             instance: InstanceTriple {
                 doc_type: doc.doc_type.clone(),
                 doc_id: doc.doc_id,
@@ -866,6 +923,94 @@ async fn seed_profile(
     }
     persist_kernel_defaults(tx, profile).await?;
     Ok(())
+}
+
+/// Abort the claim Tx without consuming the caller's `Tx` handle (D-2b-5).
+///
+/// `Tx::rollback` takes `self`. Gate refusal must release `FOR UPDATE` on
+/// `identity.principal` before `audit.log_event` on a second pool connection
+/// (`max_connections=2`).
+async fn abort_claim_tx(tx: &mut Tx<'_>) -> Result<()> {
+    tx.execute(sqlx::query("ROLLBACK")).await?;
+    Ok(())
+}
+
+/// First-party machines may use the identity projection; extra bound machines
+/// must call [`KernelBuilder::register_projection`] or [`Kernel::build`] fails.
+fn first_party_projection_types() -> Result<BTreeSet<String>> {
+    let mut types = BTreeSet::new();
+    types.insert(datum_documents::DOC_TYPE.to_owned());
+    for m in compiled_in()? {
+        for machine in m.machines {
+            types.insert(machine.doc_type);
+        }
+    }
+    for raw in [
+        crate::install_graph::ITEMS_MANIFEST,
+        crate::install_graph::LOTS_MANIFEST,
+        include_str!("../../../modules/inventory/module.toml"),
+        include_str!("../../../modules/production_min/module.toml"),
+    ] {
+        let m = ModuleManifest::parse(raw)?;
+        for machine in m.machines {
+            types.insert(machine.doc_type);
+        }
+    }
+    Ok(types)
+}
+
+/// Register a projection per bound machine (D-2b-3).
+///
+/// Explicit builder registrations win. First-party machines default to
+/// [`datum_esign::identity_projection`]. Any other bound machine without a
+/// registration is [`Error::MissingProjection`].
+fn register_bound_projections(
+    engine: &Engine,
+    extra: &BTreeMap<String, fn(&Value) -> Value>,
+) -> Result<()> {
+    let known = first_party_projection_types()?;
+    let mut types: BTreeSet<String> = engine
+        .edges_for_manifest()
+        .into_iter()
+        .map(|e| e.doc_type)
+        .collect();
+    types.extend(extra.keys().cloned());
+    for doc_type in types {
+        let project = extra.get(&doc_type).copied().or_else(|| {
+            known
+                .contains(&doc_type)
+                .then_some(datum_esign::identity_projection)
+        });
+        let Some(project) = project else {
+            return Err(Error::MissingProjection(doc_type));
+        };
+        datum_esign::register_projection(&doc_type, project);
+    }
+    Ok(())
+}
+
+async fn default_live_record(tx: &mut Tx<'_>, doc_type: &str, doc_id: Identifier) -> Result<Value> {
+    if doc_type == datum_documents::DOC_TYPE {
+        match datum_documents::history(tx, datum_documents::DocumentId(doc_id)).await {
+            Ok(revs) => {
+                return Ok(revs
+                    .last()
+                    .map(|r| r.manifest.content.clone())
+                    .unwrap_or_else(|| serde_json::json!({})));
+            }
+            Err(_) => return Ok(serde_json::json!({})),
+        }
+    }
+    if doc_type == "lot" {
+        let row: Option<(Value,)> = tx
+            .fetch_optional(
+                sqlx::query_as("SELECT to_jsonb(l) FROM lots.lot l WHERE id = $1")
+                    .bind(doc_id.as_uuid()),
+            )
+            .await?;
+        return Ok(row.map(|r| r.0).unwrap_or_else(|| serde_json::json!({})));
+    }
+    Ok(serde_json::json!({}))
 }
 
 /// Bind the `GateFactory` named by the profile TOML `gate` field.

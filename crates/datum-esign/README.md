@@ -93,8 +93,12 @@ is accepted only when `continuous_session = "on"` and a live
 ## API
 
 - `mint(tx, MintRequest) -> Signature`
-- `prepare(tx, token, doc) -> PreparedGate` (`LiveDoc.signer_status` from `load_principal`)
+- `prepare(tx, token, doc) -> PreparedGate` (`LiveDoc.signer_status` ignored; signer `Active` is `load_principal_on` on the claim `Tx`)
 - `PreparedGate: SignatureGate`, `GateFactory`, `BoundGate`
+- `manifestation(&ReadPool, id)`, `archival_bundle(&ReadPool, id)`, `verify_bundle` (pure; `chain_ok` requires a non-empty seal chain)
+- `manifestation_for_record(tx, record)` / `manifestation_for_record_on(pool, record)` — D-2b-2 list by record version including supersession. **Consumer: `datum-print`** (R-2s-3)
+- `supersede(tx, old, new)` (INSERT into `esign.supersession`), `close_session(tx, reason)` (actor from the bound `WriteContext`), `log_refusal`
+- `register_projection(doc_type, fn)`, default `identity_projection` for first-party machines; extra bound machines fail `Kernel::build` without a registration
 - `manifestation(&ReadPool, id)`, `manifestation_in_tx(tx, id)`, `archival_bundle(&ReadPool, id)`, `verify_bundle` (pure; `chain_ok` requires a non-empty seal chain)
 - `signature_consumed_at(tx, id)` / `signature_consumed_at_on(pool, id)` — `consumed_at`, or `None` if missing/unconsumed. **Consumer: `datum-server`** (R-2s-3)
 - `manifestation_for_record(tx, record)` / `manifestation_for_record_on(pool, record)` — D-2b-2 list by record version including live-version supersession. **Consumer: `datum-print`** (R-2s-3)

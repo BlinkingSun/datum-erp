@@ -2237,6 +2237,10 @@ async fn esign_mint_inner(
     {
         components.push("secret".into());
     }
+    let projection = state
+        .kernel()
+        .live_record(&mut tx, &doc_type, doc_id)
+        .await?;
     let sig = datum_esign::mint(
         &mut tx,
         &datum_esign::MintRequest {
@@ -2247,7 +2251,7 @@ async fn esign_mint_inner(
             reason: body.reason,
             record: rec,
             doc_type,
-            projection: serde_json::json!({}),
+            projection,
             instance: inst,
             permission: permission_for_meaning(&meaning),
             signed_at_zone: state
