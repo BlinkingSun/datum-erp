@@ -175,7 +175,9 @@ test-lib:
     cargo test --manifest-path "{{root}}/Cargo.toml" --workspace --lib --all-features
 
 # Database tests; missing Postgres is a failure.
+# Resolves DATUM_TEST_TEMPLATE / DATUM_TEST_DB (defaults match public CI).
 test-db:
+    . "{{root}}/scripts/datum-db-env.sh"; \
     DATUM_REQUIRE_PG=1 cargo test --manifest-path "{{root}}/Cargo.toml" --workspace --all-features
 
 # Bring Postgres up. Docker when present; otherwise pg_isready, fail closed.
@@ -201,8 +203,11 @@ db-down:
     fi
 
 # Apply dev/sql/*.sql in lexical order against DATUM_BOOTSTRAP_URL.
+# Names: DATUM_TEST_TEMPLATE (default datum_test_template) and DATUM_TEST_DB
+# (default: database in DATUM_DATABASE_URL, else datum_test). Roles unchanged.
 db-reset:
     url="${DATUM_BOOTSTRAP_URL:?DATUM_BOOTSTRAP_URL is required}"; \
+    . "{{root}}/scripts/datum-db-env.sh"; \
     if command -v brew >/dev/null 2>&1 && [ -x "$(brew --prefix postgresql@17)/bin/psql" ]; then \
       psql="$(brew --prefix postgresql@17)/bin/psql"; \
     else \
@@ -218,19 +223,21 @@ db-reset:
       case "$(basename "$f")" in \
         *-gc.sql) continue ;; \
       esac; \
-      "$psql" "$url" -v ON_ERROR_STOP=1 -f "$f"; \
+      "$psql" "$url" -v ON_ERROR_STOP=1 -v template="${DATUM_TEST_TEMPLATE}" -v dbname="${DATUM_TEST_DB}" -f "$f"; \
     done
 
 # Drop stale ephemeral test databases (datum_t_*) older than DATUM_DB_GC_MIN minutes (default 60).
+# Excludes the standing pair from DATUM_TEST_TEMPLATE / DATUM_TEST_DB.
 db-gc:
     url="${DATUM_BOOTSTRAP_URL:?DATUM_BOOTSTRAP_URL is required}"; \
     gc_min="${DATUM_DB_GC_MIN:-60}"; \
+    . "{{root}}/scripts/datum-db-env.sh"; \
     if command -v brew >/dev/null 2>&1 && [ -x "$(brew --prefix postgresql@17)/bin/psql" ]; then \
       psql="$(brew --prefix postgresql@17)/bin/psql"; \
     else \
       psql="$(command -v psql)"; \
     fi; \
-    "$psql" "$url" -v ON_ERROR_STOP=1 -v gc_minutes="${gc_min}" -f "{{root}}/dev/sql/90-gc.sql"
+    "$psql" "$url" -v ON_ERROR_STOP=1 -v gc_minutes="${gc_min}" -v template="${DATUM_TEST_TEMPLATE}" -v dbname="${DATUM_TEST_DB}" -f "{{root}}/dev/sql/90-gc.sql"
 
 # Run sqlx migrate for one crate. Usage: just migrate datum-db
 migrate crate:

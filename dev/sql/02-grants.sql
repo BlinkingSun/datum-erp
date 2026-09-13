@@ -1,10 +1,19 @@
 -- 02-grants.sql — grant pattern per audit-persistence §1.3, PLAN §6b inv 16 (amended),
 -- and DECISION D-W1-2. Applied as bootstrap superuser; idempotent.
--- Run inside each of datum_test_template and datum_test.
+-- Run inside each of :"template" and :"dbname" (defaults: datum_test_template, datum_test).
 
 \set ON_ERROR_STOP on
 
-\connect datum_test_template
+\if :{?template}
+\else
+\set template datum_test_template
+\endif
+\if :{?dbname}
+\else
+\set dbname datum_test
+\endif
+
+\connect :"template"
 
 -- 02-grants.sql — grant pattern per audit-persistence §1.3, PLAN §6b inv 16 (amended),
 -- and DECISION D-W1-2. Applied as bootstrap superuser; idempotent.
@@ -78,7 +87,7 @@ BEGIN
   END IF;
 END $$;
 
-\connect datum_test
+\connect :"dbname"
 
 -- 02-grants.sql — grant pattern per audit-persistence §1.3, PLAN §6b inv 16 (amended),
 -- and DECISION D-W1-2. Applied as bootstrap superuser; idempotent.

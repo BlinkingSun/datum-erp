@@ -1,11 +1,20 @@
 -- 90-gc.sql — drop orphaned datum_t_* case databases (not run by db-reset; use just db-gc).
 -- Requires psql variable gc_minutes (just db-gc sets it from DATUM_DB_GC_MIN, default 60).
+-- -v template=… -v dbname=… exclude the standing pair (defaults: datum_test_template, datum_test).
 
 \set ON_ERROR_STOP on
 
 \if :{?gc_minutes}
 \else
 \set gc_minutes 60
+\endif
+\if :{?template}
+\else
+\set template datum_test_template
+\endif
+\if :{?dbname}
+\else
+\set dbname datum_test
 \endif
 
 CREATE TEMP TABLE datum_gc_params (thresh_minutes integer NOT NULL);
@@ -29,7 +38,7 @@ candidates AS (
    AND d.classoid = 'pg_catalog.pg_database'::pg_catalog.regclass
   CROSS JOIN params p
   WHERE db.datname LIKE 'datum\_t\_%' ESCAPE '\'
-    AND db.datname NOT IN ('datum_test', 'datum_test_template')
+    AND db.datname NOT IN (:'dbname', :'template')
 ),
 parsed AS (
   SELECT
