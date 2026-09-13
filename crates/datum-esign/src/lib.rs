@@ -21,7 +21,8 @@ pub use mint::{MintRequest, Signature, log_refusal, mint};
 pub use projection::{identity_projection, project, register_projection};
 pub use read::{
     AnchorRef, ArchivalBundle, BundleVerification, ManifestRecord, Manifestation, SealRef,
-    SignatureManifest, archival_bundle, manifestation, verify_bundle,
+    SignatureManifest, archival_bundle, manifestation, manifestation_for_record,
+    manifestation_for_record_on, verify_bundle,
 };
 pub use session::{Challenge, SessionPolicy, SigningSession, challenge, close_session};
 

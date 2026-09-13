@@ -97,12 +97,26 @@ is accepted only when `continuous_session = "on"` and a live
 - `prepare(tx, token, doc) -> PreparedGate` (`LiveDoc.signer_status` from `load_principal`)
 - `PreparedGate: SignatureGate`, `GateFactory`, `BoundGate`
 - `manifestation(&ReadPool, id)`, `archival_bundle(&ReadPool, id)`, `verify_bundle` (pure; `chain_ok` requires a non-empty seal chain)
+- `manifestation_for_record(tx, record)` / `manifestation_for_record_on(pool, record)` — D-2b-2 list by record version including supersession. **Consumer: `datum-print`** (R-2s-3)
 - `supersede(tx, old, new)` (INSERT into `esign.supersession`), `close_session(tx, reason)` (actor from the bound `WriteContext`), `log_refusal`
 - `register_projection(doc_type, fn)`, default `identity_projection`
 
 Reads go through `datum_db::ReadPool` (`fetch_one` / `fetch_optional` /
-`fetch_all`). `archival_bundle` still calls `datum_audit::bundle`, which takes
-`&Pool`; that one call uses `ReadPool::as_pool`.
+`fetch_all`) and, for the print seam, the sealed `Tx`. `archival_bundle` still
+calls `datum_audit::bundle`, which takes `&Pool`; that one call uses
+`ReadPool::as_pool`.
+
+### Render read seam (`datum-print` is the consumer)
+
+Kernel crates must not SELECT `esign.*` (R-2s-3). `datum-print` is the named
+consumer of the record-keyed manifestation list. Direct SELECT of this crate's
+tables (invoker-rights; no `SECURITY DEFINER`).
+
+| Function | Signature | Source of truth |
+|---|---|---|
+| `manifestation` | `async fn manifestation(pool: &ReadPool, id: SignatureId) -> Result<Manifestation>` | `esign.signature` + `esign.supersession` overlay |
+| `manifestation_for_record` | `async fn manifestation_for_record(tx: &mut Tx<'_>, record: &RecordRef) -> Result<Vec<Manifestation>>` | same, filtered by `(record_table, record_id, record_version)`, oldest first |
+| `manifestation_for_record_on` | `async fn manifestation_for_record_on(pool: &ReadPool, record: &RecordRef) -> Result<Vec<Manifestation>>` | same, through `ReadPool` (no actor) |
 
 `record_content_hash` is SHA-256 over the canonical JSON of
 `{ projection, instance: { doc_type, doc_id, state, version } }`. The caller
