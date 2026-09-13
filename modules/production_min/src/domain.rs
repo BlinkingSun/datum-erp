@@ -138,6 +138,15 @@ pub struct CreateWorkOrder {
     pub revision: String,
 }
 
+/// Start a released work order, optionally issuing material in the same transaction.
+#[derive(Debug, Clone)]
+pub struct StartRequest {
+    /// Work order.
+    pub work_order: Identifier,
+    /// When set, inventory postings are contributed on the `production.issue` sink.
+    pub issue: Option<IssueMaterialRequest>,
+}
+
 /// Issue material to the work order's WIP location.
 #[derive(Debug, Clone)]
 pub struct IssueMaterialRequest {

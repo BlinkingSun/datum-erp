@@ -21,7 +21,7 @@ pub use api::{
 pub use domain::{
     CompleteRequest, Completion, CreateWorkOrder, DEFAULT_FINISHED_LOT_TEMPLATE, DOC_TYPE,
     FinishedLotTemplate, IssueLine, IssueMaterialRequest, ListFilter, NOT_REQUIRED_REASON, Page,
-    Status, WorkOrder,
+    StartRequest, Status, WorkOrder,
 };
 pub use error::{Error, Result};
 pub use events::{COMPLETED, WORK_ORDER_RELEASED, register_schemas};

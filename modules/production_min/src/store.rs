@@ -1,6 +1,8 @@
 //! Persistence and posting. Every mutation runs inside [`datum_db::Tx`].
 //! Postings go through [`datum_ledger::GroupBuilder`] obtained from the kernel.
 
+use crate::domain::StartRequest;
+use crate::hooks::{clear_issue_plan, stash_issue_plan};
 use chrono::{DateTime, Utc};
 use datum_core::{
     AnyQuantity, AreaDim, Boundary, ConversionContext, CostElement, CountDim, CurrencyId,
@@ -9,8 +11,10 @@ use datum_core::{
     ValuePosting, VolumeDim,
 };
 use datum_db::Tx;
-use datum_ledger::{CostMethod, Layer, load_open_layers, load_stock_item};
-use datum_mod_inventory::{IssueRequest, issue_to_wip};
+use datum_ledger::{CostMethod, GroupBuilder, Layer, load_open_layers, load_stock_item};
+use datum_mod_inventory::{
+    Document, IssueRequest, WipIssuePlan, finish_wip_issue, issue_to_wip, plan_wip_issue,
+};
 use datum_mod_lots::{CreateLot, LotStatus, create_lot, create_serials};
 use datum_module::Kernel;
 use datum_numbering::{ResetPolicy, SequenceId};
@@ -214,12 +218,16 @@ pub async fn issue_material(
 }
 
 /// `released → in_process`. Bound action must be `production.issue`.
+///
+/// When [`StartRequest::issue`] is set, inventory postings are contributed on this
+/// transition's sink via the registered hook (R-2s-7).
 pub async fn start(
     tx: &mut Tx<'_>,
     kernel: &Kernel,
     ctx: &datum_db::WriteContext,
-    id: Identifier,
+    req: StartRequest,
 ) -> Result<WorkOrder> {
+    let id = req.work_order;
     let wo = load(tx, id).await?;
     if wo.status != Status::Released {
         return Err(Error::InvalidTransition {
@@ -227,9 +235,51 @@ pub async fn start(
             status: wo.status.as_str().into(),
         });
     }
-    kernel
-        .transition(tx, &doc_ref(id), "issue", None, ctx)
+    let issue_req = req.issue.clone();
+    let mut issue_plan: Option<WipIssuePlan> = None;
+    let mut replay_doc = None;
+    if let Some(issue) = &issue_req {
+        if issue.work_order != id {
+            return Err(Error::Manifest("issue work_order mismatch".into()));
+        }
+        let plan = plan_wip_issue(
+            tx,
+            kernel,
+            &IssueRequest {
+                work_order: id,
+                from_location: issue.from_location,
+                reference: wo.number.clone(),
+                lines: issue.lines.clone(),
+                idempotency_key: issue.idempotency_key,
+            },
+        )
         .await?;
+        replay_doc = plan.replay_document.clone();
+        if plan.replay_document.is_none() {
+            stash_issue_plan(id, plan.clone());
+            issue_plan = Some(plan);
+        }
+    }
+    let header = PostingGroupHeader {
+        source_kind: format!("{DOC_TYPE}.issue"),
+        source_id: Some(id),
+        work_order_id: Some(id),
+        reason_code: None,
+        reverses_group_id: None,
+    };
+    let movement_group =
+        transition_issue_with_sink(tx, kernel, ctx, id, header, issue_plan.is_some()).await?;
+    clear_issue_plan(id);
+    if let Some(plan) = issue_plan {
+        let group_id = movement_group
+            .ok_or_else(|| Error::Manifest("issue transition posted no group".into()))?;
+        let doc = finish_wip_issue(tx, kernel, ctx, &plan, group_id).await?;
+        if let Some(issue) = &issue_req {
+            record_issue_lines(tx, id, &issue.lines, &doc).await?;
+        }
+    } else if let (Some(doc), Some(issue)) = (replay_doc, &issue_req) {
+        record_issue_lines(tx, id, &issue.lines, &doc).await?;
+    }
     tx.execute(
         sqlx::query(
             "UPDATE production_min.work_order
@@ -240,6 +290,100 @@ pub async fn start(
     )
     .await?;
     load(tx, id).await
+}
+
+/// Run `production.issue` with one posting sink; return the movement group id when posted.
+async fn transition_issue_with_sink(
+    tx: &mut Tx<'_>,
+    kernel: &Kernel,
+    ctx: &datum_db::WriteContext,
+    id: Identifier,
+    header: PostingGroupHeader,
+    expects_postings: bool,
+) -> Result<Option<Identifier>> {
+    let mut builder = GroupBuilder::new(GroupKind::Movement, header);
+    kernel.bind_sink(tx, &mut builder).await?;
+    let watch = builder.clone();
+    let doc = doc_ref(id);
+    kernel
+        .engine
+        .transition(
+            tx,
+            Box::new(DeferredFinalize(builder)),
+            &doc,
+            "issue",
+            None,
+            kernel.signature_gate(),
+            ctx,
+        )
+        .await?;
+    if !watch.unfinalized() {
+        if expects_postings {
+            return Err(Error::Manifest("issue transition posted no group".into()));
+        }
+        return Ok(None);
+    }
+    Ok(Some(datum_ledger::post(tx, watch).await?))
+}
+
+struct DeferredFinalize(GroupBuilder);
+
+impl PostingSink for DeferredFinalize {
+    fn kind(&self) -> GroupKind {
+        PostingSink::kind(&self.0)
+    }
+
+    fn header(&self) -> &PostingGroupHeader {
+        PostingSink::header(&self.0)
+    }
+
+    fn contribute(
+        &mut self,
+        intent: PostingIntent,
+    ) -> core::result::Result<datum_core::PostingHandle, datum_core::PostingError> {
+        self.0.contribute(intent)
+    }
+
+    fn finalize(self: Box<Self>) -> core::result::Result<(), datum_core::PostingError> {
+        Ok(())
+    }
+}
+
+async fn record_issue_lines(
+    tx: &mut Tx<'_>,
+    work_order: Identifier,
+    req_lines: &[datum_mod_inventory::LineInput],
+    doc: &Document,
+) -> Result<()> {
+    let (app, cfg) = stamps(tx).await?;
+    for (req_line, doc_line) in req_lines.iter().zip(doc.lines.iter()) {
+        tx.execute(
+            sqlx::query(
+                "INSERT INTO production_min.issue_line (
+                     id, work_order_id, inventory_document_id, item_id, lot_id, serial_id,
+                     quantity_amount, quantity_uom_id, quantity_dimension,
+                     amount, currency_id, application_version, configuration_version
+                 ) VALUES (
+                     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+                 )",
+            )
+            .bind(Identifier::generate().as_uuid())
+            .bind(work_order.as_uuid())
+            .bind(doc.id.as_uuid())
+            .bind(doc_line.item.as_uuid())
+            .bind(doc_line.lot.map(|l| l.as_uuid()))
+            .bind(doc_line.serial.map(|s| s.as_uuid()))
+            .bind(doc_line.canonical.amount)
+            .bind(doc_line.canonical.unit.0)
+            .bind(format!("{:?}", doc_line.canonical.dimension))
+            .bind(req_line.amount.map(|m| m.amount()))
+            .bind(req_line.amount.map(|m| m.currency().0))
+            .bind(&app)
+            .bind(&cfg),
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 /// Priced TRANSFORMATION (D2 case d) plus optional scrap ADJUSTMENT (case e).

@@ -1037,7 +1037,6 @@ async fn if_match_on_transitions() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "blocked: Tx binds one action; fixed by 2s4-onetx (production_min start hook)"]
 async fn issue_wo_is_one_transaction() {
     if common::skip_if_no_pg() {
         return;

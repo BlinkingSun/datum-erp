@@ -223,6 +223,9 @@ pub async fn migrate_slice_modules(pool: &PgPool) -> Result<()> {
 /// `sqlx migrate run` records in `_sqlx_migrations`, not `datum.schema_history`.
 /// If `datum.schema_history` already exists, re-applying datum-db 0001 fails
 /// with `relation "schema_history" already exists`. Record those versions first.
+///
+/// IQ on a standing DB (schema_history present, no second datum-db migration run)
+/// depends on this adopt plus idempotent `Kernel::build` / `Engine::persist`.
 async fn adopt_datum_db_history(pool: &PgPool) -> Result<()> {
     let exists: bool = sqlx::query_scalar("SELECT to_regclass('datum.schema_history') IS NOT NULL")
         .fetch_one(pool)

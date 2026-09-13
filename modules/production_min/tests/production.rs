@@ -8,16 +8,17 @@ use datum_core::PostingError;
 use datum_db::Tx;
 use datum_ledger::{TraceStart, trace_forward};
 use datum_mod_production_min::{
-    CompleteRequest, CreateWorkOrder, FinishedLotTemplate, Status, complete, create, load,
-    load_completion,
+    CompleteRequest, CreateWorkOrder, FinishedLotTemplate, IssueMaterialRequest, StartRequest,
+    Status, complete, create, load, load_completion, start,
 };
 use datum_test::db_case;
 use sqlx::query as sql_query;
 use sqlx::query_scalar as sql_query_scalar;
 
 use common::{
-    action_ctx, boot_kernel, complete_wo, create_wo, edge_ctx, has_zz_audit, issue_bar, pg_code,
-    qty_ea, receive_bars, release_lot, release_wo, seed_world, start_wo, table_owner, write_pool,
+    action_ctx, boot_kernel, complete_wo, create_wo, edge_ctx, has_zz_audit, issue_and_start, line,
+    pg_code, qty_ea, qty_ft, receive_bars, release_lot, release_wo, seed_world, start_wo,
+    table_owner, write_pool,
 };
 
 #[tokio::test]
@@ -86,8 +87,7 @@ async fn complete_posts_priced_transformation_case_d() {
     release_lot(&w, &pool).await;
     let wo = create_wo(&w, &pool).await;
     let wo = release_wo(&w, &pool, wo.id).await;
-    issue_bar(&w, &pool, wo.id).await;
-    start_wo(&w, &pool, wo.id).await;
+    issue_and_start(&w, &pool, wo.id).await;
     let c = complete_wo(&w, &pool, wo.id).await;
     let kind: String =
         sql_query_scalar("SELECT kind::text FROM ledger.posting_group WHERE group_id = $1")
@@ -142,8 +142,7 @@ async fn complete_contributes_produced_lineage_edges() {
     release_lot(&w, &pool).await;
     let wo = create_wo(&w, &pool).await;
     let wo = release_wo(&w, &pool, wo.id).await;
-    issue_bar(&w, &pool, wo.id).await;
-    start_wo(&w, &pool, wo.id).await;
+    issue_and_start(&w, &pool, wo.id).await;
     let c = complete_wo(&w, &pool, wo.id).await;
     let ctx = action_ctx(w.actor, "production.view");
     let mut tx = Tx::begin(&pool, &ctx).await.expect("begin");
@@ -155,6 +154,57 @@ async fn complete_contributes_produced_lineage_edges() {
         tree_has_lot(&fwd, c.finished_lot),
         "forward trace from the bar lot must reach the finished lot"
     );
+    db.finish().await.expect("finish");
+}
+
+#[tokio::test]
+async fn start_with_issue_rolls_back_when_issue_fails() {
+    let db = db_case!("prod_start_rb");
+    let kernel = boot_kernel(&db).await;
+    let w = seed_world(&db, kernel).await;
+    let pool = write_pool(&db);
+    receive_bars(&w, &pool).await;
+    release_lot(&w, &pool).await;
+    let wo = create_wo(&w, &pool).await;
+    let wo = release_wo(&w, &pool, wo.id).await;
+    let lines_before: i64 =
+        sql_query_scalar("SELECT count(*) FROM production_min.issue_line WHERE work_order_id = $1")
+            .bind(wo.id.as_uuid())
+            .fetch_one(db.app_pool())
+            .await
+            .expect("lines before");
+    let ctx = edge_ctx(&w.kernel, w.actor, wo.id, "issue");
+    let mut tx = Tx::begin(&pool, &ctx).await.expect("begin");
+    let err = start(
+        &mut tx,
+        &w.kernel,
+        &ctx,
+        StartRequest {
+            work_order: wo.id,
+            issue: Some(IssueMaterialRequest {
+                work_order: wo.id,
+                from_location: w.available,
+                lines: vec![line(w.bar, qty_ft("99999.0000"), Some(w.lot_bar), None)],
+                idempotency_key: Some(uuid::Uuid::now_v7()),
+            }),
+        },
+    )
+    .await
+    .expect_err("insufficient stock");
+    let _ = err;
+    tx.rollback().await.expect("rollback");
+    let lines_after: i64 =
+        sql_query_scalar("SELECT count(*) FROM production_min.issue_line WHERE work_order_id = $1")
+            .bind(wo.id.as_uuid())
+            .fetch_one(db.app_pool())
+            .await
+            .expect("lines after");
+    let ctx = action_ctx(w.actor, "production.view");
+    let mut tx = Tx::begin(&pool, &ctx).await.expect("begin load");
+    let live = load(&mut tx, wo.id).await.expect("load");
+    tx.commit().await.ok();
+    assert_eq!(lines_after, lines_before, "no issue_line rows");
+    assert_eq!(live.status, Status::Released, "work order stays unstarted");
     db.finish().await.expect("finish");
 }
 
@@ -210,8 +260,7 @@ async fn complete_creates_finished_lot_with_kernel_identifier() {
     release_lot(&w, &pool).await;
     let wo = create_wo(&w, &pool).await;
     let wo = release_wo(&w, &pool, wo.id).await;
-    issue_bar(&w, &pool, wo.id).await;
-    start_wo(&w, &pool, wo.id).await;
+    issue_and_start(&w, &pool, wo.id).await;
     let c = complete_wo(&w, &pool, wo.id).await;
     let ctx = action_ctx(w.actor, "lots.view");
     let mut tx = Tx::begin(&pool, &ctx).await.expect("begin");

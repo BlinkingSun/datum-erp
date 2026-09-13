@@ -42,16 +42,10 @@ npx openapi-typescript http://127.0.0.1:8080/api/v1/openapi.json -o src/api.d.ts
 
 The first-party UI uses that client exclusively (ADR 0009).
 
-## Known gap — `POST .../issue` (R-2s-7)
+## `POST .../issue` (R-2s-7)
 
-`issue_wo` (issue material + start the work order) is one HTTP mutation and
-must be one `Tx::begin` / one `WriteContext` (SPEC ADDENDUM 1 item 3, docs/10
-§4). A `Tx` binds one action and cannot rebind: `issue_material` requires
-`inventory.issue` and `start` requires `production.issue`.
-
-Until follow-up **`2s4-onetx`** (production_min start hook so the server calls a
-single WO `start` transition), this crate keeps the live path as **two audited
-transactions**. That is a ruled gap (R-2s-7), not a fake one-Tx. The named
-test `issue_wo_is_one_transaction` asserts the SPEC intent (exactly one
-`Tx::begin`, one `audit.tx_seal` row, atomic rollback of the issue if start
-fails) and is `#[ignore]` with that reason — never weakened to `begins >= 1`.
+`issue_wo` is one `Tx::begin` / one `production.issue` action: the handler
+calls `production_min::start` with embedded issue lines; inventory postings are
+contributed on the transition's bound `PostingSink` via the module hook. The
+named test `issue_wo_is_one_transaction` asserts one begin, one `audit.tx_seal`
+row, and atomic rollback when start fails.

@@ -13,6 +13,7 @@ mod domain;
 mod error;
 mod events;
 mod hooks;
+mod posting_api;
 mod posting_path;
 mod states;
 mod store;
@@ -29,6 +30,7 @@ pub use domain::{
 pub use error::{Error, Result};
 pub use events::{ADJUSTED, ISSUED, LOT_RECEIVED, RECEIPT_POSTED, register_schemas};
 pub use hooks::register as register_hooks;
+pub use posting_api::{WipIssuePlan, contribute_wip_issue, finish_wip_issue, plan_wip_issue};
 pub use states::document_machine;
 pub use store::{
     adjust, allocated, available, customer_return, cycle_count, document_history, issue_to_wip,

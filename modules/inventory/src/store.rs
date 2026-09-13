@@ -196,71 +196,28 @@ pub async fn issue_to_wip(
     ctx: &datum_db::WriteContext,
     req: IssueRequest,
 ) -> Result<Document> {
-    let body_hash = hash_issue(&req);
-    let doc_id = Identifier::generate();
-    if let Some(existing) = begin_idempotent(tx, req.idempotency_key, &body_hash, doc_id).await? {
-        return load_document(tx, existing).await;
+    let plan = crate::posting_api::plan_wip_issue(tx, kernel, &req).await?;
+    if let Some(doc) = plan.replay_document {
+        return Ok(doc);
     }
-    let wip = datum_mod_locations::ensure_wip(tx, req.work_order).await?;
-    let mut prepared = Vec::new();
-    let mut residuals = Vec::new();
-    for mut line in req.lines {
-        if let Some(lot) = line.lot {
-            let rec = load_lot(tx, lot).await?;
-            if rec.status != LotStatus::Available {
-                return Err(Error::LotNotIssuable);
-            }
-        }
-        line.from_location = Some(req.from_location);
-        line.to_location = Some(wip);
-        let (p, res) = prepare_line_with_residual(tx, kernel, line).await?;
-        if !res.amount.is_zero() {
-            residuals.push((p.item, p.lot, res));
-        }
-        prepared.push(p);
-    }
-    insert_document(
-        tx,
+    let mut builder = movement_builder(
+        "inventory.issue",
+        Some(plan.document_id),
+        Some(plan.work_order),
+        None,
+    );
+    crate::posting_api::contribute_wip_issue(&mut builder, &plan)?;
+    let movement_group = post_via_transition(
         kernel,
-        doc_id,
-        DocumentKind::Issue,
-        req.reference.clone(),
-        &prepared,
-    )
-    .await?;
-    let mut builder = movement_builder("inventory.issue", Some(doc_id), Some(req.work_order), None);
-    for p in &prepared {
-        contribute_issue(&mut builder, tx, p, req.work_order).await?;
-    }
-    let movement_group = post_via_transition(kernel, tx, ctx, doc_id, DocumentKind::Issue, builder)
-        .await?
-        .expect("issue posts");
-    stamp_posted(tx, doc_id, Some(movement_group)).await?;
-    post_uom_residuals(
         tx,
-        kernel,
         ctx,
-        doc_id,
-        req.from_location,
-        movement_group,
-        &residuals,
+        plan.document_id,
+        DocumentKind::Issue,
+        builder,
     )
-    .await?;
-    for p in &prepared {
-        kernel
-            .publish_event(
-                tx,
-                events::issued(
-                    p.item,
-                    p.canonical.amount,
-                    p.lot,
-                    Some(req.work_order),
-                    doc_id,
-                )?,
-            )
-            .await?;
-    }
-    load_document(tx, doc_id).await
+    .await?
+    .expect("issue posts");
+    crate::posting_api::finish_wip_issue(tx, kernel, ctx, &plan, movement_group).await
 }
 
 /// Move stock between real locations.
@@ -868,21 +825,21 @@ fn parse_dim(s: &str) -> Result<DimensionKind> {
 }
 
 #[derive(Debug, Clone)]
-struct PreparedLine {
-    item: ItemId,
-    lot: Option<LotId>,
-    serial: Option<datum_core::SerialId>,
-    from_location: Option<LocationId>,
-    to_location: Option<LocationId>,
-    entered: AnyQuantity,
-    canonical: AnyQuantity,
-    conversion_factor: Decimal,
-    amount: Option<Money>,
-    reason_code: Option<String>,
-    package: Option<PackageId>,
+pub(crate) struct PreparedLine {
+    pub(crate) item: ItemId,
+    pub(crate) lot: Option<LotId>,
+    pub(crate) serial: Option<datum_core::SerialId>,
+    pub(crate) from_location: Option<LocationId>,
+    pub(crate) to_location: Option<LocationId>,
+    pub(crate) entered: AnyQuantity,
+    pub(crate) canonical: AnyQuantity,
+    pub(crate) conversion_factor: Decimal,
+    pub(crate) amount: Option<Money>,
+    pub(crate) reason_code: Option<String>,
+    pub(crate) package: Option<PackageId>,
 }
 
-async fn prepare_line_with_residual(
+pub(crate) async fn prepare_line_with_residual(
     tx: &mut Tx<'_>,
     kernel: &Kernel,
     mut line: LineInput,
@@ -1167,6 +1124,7 @@ async fn contribute_move(
     Ok(())
 }
 
+#[allow(dead_code)]
 async fn contribute_issue(
     builder: &mut GroupBuilder,
     tx: &mut Tx<'_>,
@@ -1478,7 +1436,7 @@ async fn counterpart_for_reason(tx: &mut Tx<'_>, reason: &str) -> Result<(Locati
     }
 }
 
-async fn insert_document(
+pub(crate) async fn insert_document(
     tx: &mut Tx<'_>,
     kernel: &Kernel,
     id: Identifier,
@@ -1607,7 +1565,11 @@ pub async fn reverse_posted_issue(
     Ok(datum_ledger::reverse(tx, group, "ISSUE_REVERSAL").await?)
 }
 
-async fn stamp_posted(tx: &mut Tx<'_>, id: Identifier, group_id: Option<Identifier>) -> Result<()> {
+pub(crate) async fn stamp_posted(
+    tx: &mut Tx<'_>,
+    id: Identifier,
+    group_id: Option<Identifier>,
+) -> Result<()> {
     tx.execute(
         sqlx::query(
             "UPDATE inventory.document
@@ -1621,7 +1583,7 @@ async fn stamp_posted(tx: &mut Tx<'_>, id: Identifier, group_id: Option<Identifi
     Ok(())
 }
 
-async fn begin_idempotent(
+pub(crate) async fn begin_idempotent(
     tx: &mut Tx<'_>,
     key: Option<Uuid>,
     body_hash: &str,
@@ -1657,7 +1619,7 @@ async fn begin_idempotent(
     Ok(None)
 }
 
-async fn post_uom_residuals(
+pub(crate) async fn post_uom_residuals(
     tx: &mut Tx<'_>,
     kernel: &Kernel,
     _ctx: &datum_db::WriteContext,
@@ -1765,7 +1727,7 @@ fn hash_release(req: &ReleaseRequest) -> String {
     )
 }
 
-fn hash_issue(req: &IssueRequest) -> String {
+pub(crate) fn hash_issue(req: &IssueRequest) -> String {
     sha256_hex(
         serde_json::to_string(&(
             "issue",

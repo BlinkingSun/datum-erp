@@ -18,8 +18,8 @@ use datum_mod_items::{Kind, NewItem};
 use datum_mod_locations::{CreateLocation, LocationKind, seed_install};
 use datum_mod_lots::{CreateLot, LotStatus};
 use datum_mod_production_min::{
-    CompleteRequest, CreateWorkOrder, DOC_TYPE, FinishedLotTemplate, IssueMaterialRequest, Status,
-    WorkOrder, complete, create, issue_material, load, release, start,
+    CompleteRequest, CreateWorkOrder, DOC_TYPE, FinishedLotTemplate, IssueMaterialRequest,
+    StartRequest, Status, WorkOrder, complete, create, load, release, start,
 };
 use datum_module::{
     Kernel, KernelBuilder, Profile, attach_kernel_audit, migrate_prefix, migrate_suffix,
@@ -466,34 +466,49 @@ pub async fn release_wo(w: &World, pool: &WritePool, id: Identifier) -> WorkOrde
     wo
 }
 
-pub async fn issue_bar(w: &World, pool: &WritePool, wo: Identifier) {
-    let ctx = action_ctx(w.actor, "inventory.issue");
-    let mut tx = Tx::begin(pool, &ctx).await.expect("begin issue");
-    issue_material(
+/// Issue bar stock and start the work order in one `production.issue` transaction.
+pub async fn issue_and_start(w: &World, pool: &WritePool, wo_id: Identifier) -> WorkOrder {
+    let ctx = edge_ctx(&w.kernel, w.actor, wo_id, "issue");
+    let mut tx = Tx::begin(pool, &ctx).await.expect("begin issue+start");
+    let wo = start(
         &mut tx,
         &w.kernel,
         &ctx,
-        IssueMaterialRequest {
-            work_order: wo,
-            from_location: w.available,
-            lines: vec![line(
-                w.bar,
-                qty_ft("20.0000"),
-                Some(w.lot_bar),
-                Some(usd("47.20")),
-            )],
-            idempotency_key: Some(uuid::Uuid::now_v7()),
+        StartRequest {
+            work_order: wo_id,
+            issue: Some(IssueMaterialRequest {
+                work_order: wo_id,
+                from_location: w.available,
+                lines: vec![line(
+                    w.bar,
+                    qty_ft("20.0000"),
+                    Some(w.lot_bar),
+                    Some(usd("47.20")),
+                )],
+                idempotency_key: Some(uuid::Uuid::now_v7()),
+            }),
         },
     )
     .await
-    .expect("issue");
-    tx.commit().await.expect("commit issue");
+    .expect("issue+start");
+    tx.commit().await.expect("commit issue+start");
+    wo
 }
 
 pub async fn start_wo(w: &World, pool: &WritePool, id: Identifier) -> WorkOrder {
     let ctx = edge_ctx(&w.kernel, w.actor, id, "issue");
     let mut tx = Tx::begin(pool, &ctx).await.expect("begin start");
-    let wo = start(&mut tx, &w.kernel, &ctx, id).await.expect("start");
+    let wo = start(
+        &mut tx,
+        &w.kernel,
+        &ctx,
+        StartRequest {
+            work_order: id,
+            issue: None,
+        },
+    )
+    .await
+    .expect("start");
     tx.commit().await.expect("commit start");
     wo
 }

@@ -15,7 +15,7 @@ use datum_mod_items::{Kind, NewItem};
 use datum_mod_locations::{CreateLocation, LocationKind};
 use datum_mod_lots::{CreateLotBody, LotStatus, PackageLevel, SetStatusBody};
 use datum_mod_production_min::{
-    CompleteRequest, CreateWorkOrder, FinishedLotTemplate, IssueMaterialRequest,
+    CompleteRequest, CreateWorkOrder, FinishedLotTemplate, IssueMaterialRequest, StartRequest,
 };
 use rust_decimal::Decimal;
 use serde::Deserialize;
@@ -1504,16 +1504,14 @@ async fn issue_wo_inner(
         "from_location_id",
         LocationId::from_uuid,
     )?;
-    // R-2s-7 / 2s4-onetx: a Tx binds one action. Live path stays two audited
-    // transactions until production_min start-hook lands. See README.
-    let inv_doc = datum_statemachine::DocRef {
-        doc_type: datum_mod_inventory::DOC_TYPE.into(),
-        doc_id: Identifier::generate(),
+    let wo_doc = datum_statemachine::DocRef {
+        doc_type: datum_mod_production_min::DOC_TYPE.into(),
+        doc_id: wo_id,
     };
     let mut ctx =
         state
             .kernel()
-            .transition_context(session.principal.0.into_actor(), &inv_doc, "issue");
+            .transition_context(session.principal.0.into_actor(), &wo_doc, "issue");
     ctx.session_id = Some(session.id.to_string());
     ctx.request_id = Some(request_id.to_string());
     ctx.source_kind = "api".into();
@@ -1527,40 +1525,24 @@ async fn issue_wo_inner(
     }
     let current = datum_mod_production_min::load(&mut tx, wo_id).await?;
     check_version(current.version, expected)?;
-    datum_mod_production_min::issue_material(
+    let wo = datum_mod_production_min::start(
         &mut tx,
         state.kernel(),
         &ctx,
-        IssueMaterialRequest {
+        StartRequest {
             work_order: wo_id,
-            from_location,
-            lines,
-            idempotency_key: Some(key),
+            issue: Some(IssueMaterialRequest {
+                work_order: wo_id,
+                from_location,
+                lines,
+                idempotency_key: Some(key),
+            }),
         },
     )
     .await?;
-    tx.commit().await?;
-    // Ruled gap (R-2s-7): second begin until 2s4-onetx. Named test asserts
-    // one begin and is ignored; do not weaken the test.
-    let wo_doc = datum_statemachine::DocRef {
-        doc_type: datum_mod_production_min::DOC_TYPE.into(),
-        doc_id: wo_id,
-    };
-    let mut ctx2 =
-        state
-            .kernel()
-            .transition_context(session.principal.0.into_actor(), &wo_doc, "issue");
-    ctx2.session_id = Some(session.id.to_string());
-    ctx2.request_id = Some(request_id.to_string());
-    ctx2.source_kind = "api".into();
-    ctx2.reason = Some("api".into());
-    ctx2.actor_display = Some(session.display_name.clone());
-    let write2 = fresh_write(state).await?;
-    let mut tx2 = Tx::begin(&write2, &ctx2).await?;
-    let wo = datum_mod_production_min::start(&mut tx2, state.kernel(), &ctx2, wo_id).await?;
     let body = wo_json(&wo)?;
-    idempotency::remember(&mut tx2, key, &hash, 200, &body).await?;
-    tx2.commit().await?;
+    idempotency::remember(&mut tx, key, &hash, 200, &body).await?;
+    tx.commit().await?;
     Ok((200, body))
 }
 
