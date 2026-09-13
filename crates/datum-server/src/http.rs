@@ -86,6 +86,18 @@ pub fn router(state: AppState) -> Router {
             get(handlers::esign_bundle),
         )
         // w3b:customfields
+        .route(
+            "/api/v1/customfields/definitions",
+            post(handlers::customfields::define).get(handlers::customfields::definitions_for),
+        )
+        .route(
+            "/api/v1/customfields/definitions/{id}/retire",
+            post(handlers::customfields::retire),
+        )
+        .route(
+            "/api/v1/items/{id}/custom-fields",
+            put(handlers::customfields::set).get(handlers::customfields::get_item_fields),
+        )
         // w3b:documents
         // w3b:print
         .layer(DefaultBodyLimit::max(1024 * 1024))
