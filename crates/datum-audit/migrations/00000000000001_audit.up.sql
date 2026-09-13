@@ -472,10 +472,19 @@ BEGIN
     SELECT * FROM pg_event_trigger_ddl_commands()
      WHERE object_type = 'table'
   LOOP
-    CONTINUE WHEN cmd.schema_name IN ('audit', 'transient', 'datum');
     CONTINUE WHEN cmd.schema_name IS NULL;
     CONTINUE WHEN cmd.schema_name LIKE 'pg_%';
     CONTINUE WHEN cmd.schema_name = 'information_schema';
+    -- D-2b-12: skip set from datum.schema_class, not a literal name list.
+    -- class transient|audit covers every <module>_transient; nspname datum
+    -- is class app but attached explicitly (attach_kernel_audit).
+    CONTINUE WHEN cmd.schema_name = 'datum'
+                 OR EXISTS (
+                      SELECT 1
+                        FROM datum.schema_class sc
+                       WHERE sc.nspname = cmd.schema_name::name
+                         AND sc.class IN ('transient', 'audit')
+                    );
     CONTINUE WHEN cmd.objid IS NULL;
     SELECT * INTO cls FROM pg_class WHERE oid = cmd.objid;
     CONTINUE WHEN NOT FOUND;
