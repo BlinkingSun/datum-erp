@@ -50,6 +50,7 @@ pub struct InstanceTriple {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use datum_module as _;
     use datum_statemachine as _;
     use proptest::prelude::*;
     use tokio as _;
