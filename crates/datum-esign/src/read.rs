@@ -161,6 +161,8 @@ const MANIFESTATION_BY_RECORD_SQL: &str = r#"SELECT
          WHERE record_table = $1 AND record_id = $2 AND record_version = $3
          ORDER BY signed_at ASC, signature_id ASC"#;
 
+const CONSUMED_AT_SQL: &str = "SELECT consumed_at FROM esign.signature WHERE signature_id = $1";
+
 fn row_to_manifestation(row: ManifestRow) -> Manifestation {
     let mut hash = [0u8; 32];
     if row.12.len() == 32 {
@@ -201,6 +203,45 @@ pub async fn manifestation(pool: &ReadPool, id: SignatureId) -> Result<Manifesta
         return Err(Error::NotFound);
     };
     Ok(row_to_manifestation(row))
+}
+
+/// [`manifestation`] on the sealed [`Tx`] (same D-2b-2 wire).
+///
+/// `datum-server` mint reads here so the HTTP body is this crate's wire
+/// before commit (R-2s-3).
+pub async fn manifestation_in_tx(tx: &mut Tx<'_>, id: SignatureId) -> Result<Manifestation> {
+    let row: Option<ManifestRow> = tx
+        .fetch_optional(sql_query_as(MANIFESTATION_BY_ID_SQL).bind(id.as_uuid()))
+        .await?;
+    let Some(row) = row else {
+        return Err(Error::NotFound);
+    };
+    Ok(row_to_manifestation(row))
+}
+
+/// `consumed_at` for `id`, or `None` when the row is missing or unconsumed.
+///
+/// `datum-server` uses this on the Required-edge Tx so a replay is 409
+/// before the state-machine edge runs (R-2s-3).
+pub async fn signature_consumed_at(
+    tx: &mut Tx<'_>,
+    id: SignatureId,
+) -> Result<Option<DateTime<Utc>>> {
+    let row: Option<(Option<DateTime<Utc>>,)> = tx
+        .fetch_optional(sql_query_as(CONSUMED_AT_SQL).bind(id.as_uuid()))
+        .await?;
+    Ok(row.and_then(|(at,)| at))
+}
+
+/// [`signature_consumed_at`] through a [`ReadPool`] (no actor bound).
+pub async fn signature_consumed_at_on(
+    pool: &ReadPool,
+    id: SignatureId,
+) -> Result<Option<DateTime<Utc>>> {
+    let row: Option<(Option<DateTime<Utc>>,)> = pool
+        .fetch_optional(sql_query_as(CONSUMED_AT_SQL).bind(id.as_uuid()))
+        .await?;
+    Ok(row.and_then(|(at,)| at))
 }
 
 /// D-2b-2 manifestations for a record version, oldest first (D-2b-7 overlay).

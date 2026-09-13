@@ -22,7 +22,8 @@ pub use projection::{identity_projection, project, register_projection};
 pub use read::{
     AnchorRef, ArchivalBundle, BundleVerification, ManifestRecord, Manifestation, SealRef,
     SignatureManifest, archival_bundle, manifestation, manifestation_for_record,
-    manifestation_for_record_on, verify_bundle,
+    manifestation_for_record_on, manifestation_in_tx, signature_consumed_at,
+    signature_consumed_at_on, verify_bundle,
 };
 pub use session::{Challenge, SessionPolicy, SigningSession, challenge, close_session};
 
