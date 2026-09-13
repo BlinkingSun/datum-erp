@@ -8,7 +8,6 @@
 use anyhow as _;
 use datum_customfields as _;
 use datum_documents as _;
-use datum_esign as _;
 use datum_events as _;
 use datum_jobs as _;
 use datum_numbering as _;

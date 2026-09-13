@@ -6,11 +6,12 @@ use std::time::Duration;
 use datum_core::{
     Actor, ActorKind, AnyQuantity, ConversionContext, Converted, Dimension, GroupKind, Identifier,
     ItemId, NoSignatures, PermissionKey, PostingError, PostingGroupHeader, PostingHandle,
-    PostingIntent, PostingSink, Quantity, SignatureGate, SignatureMeaning, SignatureRequirement,
-    SignatureToken, UnitRef,
+    PostingIntent, PostingSink, Quantity, RecordRef, SignatureError, SignatureGate, SignatureId,
+    SignatureMeaning, SignatureRequirement, SignatureToken, UnitRef,
 };
 use datum_db::{Pool, Tx, WriteContext, WritePool};
-use datum_identity::{SYSTEM_ID, seed_builtins};
+use datum_esign::{BoundGate, GateFactory, InstanceTriple, LiveDoc};
+use datum_identity::{PrincipalStatus, SYSTEM_ID, UserId, seed_builtins};
 use datum_jobs::{HandlerOutcome, JobHandler, Progress};
 use datum_ledger::GroupBuilder;
 use datum_statemachine::{
@@ -79,9 +80,48 @@ pub struct Kernel {
     /// Job kinds populated from enabled module manifests.
     pub job_kinds: Vec<ModuleJob>,
     /// Bound from the profile TOML `gate` field (SPEC-profiles key 4).
-    gate: Box<dyn SignatureGate + Send + Sync>,
+    gate: GateFactory,
+    /// Profile-bound sync gate for `Engine::transition` callers (inventory, production).
+    /// [`Kernel::transition`] prepares a per-Tx gate from [`Self::gate`] instead.
+    bound: BoundSyncGate,
     catalog: Vec<ModuleManifest>,
     pool: Pool,
+}
+
+/// Sync stand-in returned by [`Kernel::signature_gate`].
+///
+/// [`Kernel::transition`] still calls [`GateFactory::prepare`] inside the
+/// transition Tx. This type exists so modules that pass
+/// `kernel.signature_gate()` into `Engine::transition` observe the **bound**
+/// provider: `NoSignatures` under plain-shop, and `Invalid` (never
+/// `NoProvider`) when `datum-esign` is bound.
+#[derive(Debug, Clone, Copy)]
+enum BoundSyncGate {
+    NoSignatures(NoSignatures),
+    DatumEsign,
+}
+
+impl BoundSyncGate {
+    fn from_binding(binding: GateBinding) -> Self {
+        match binding {
+            GateBinding::NoSignatures => Self::NoSignatures(NoSignatures),
+            GateBinding::DatumEsign => Self::DatumEsign,
+        }
+    }
+}
+
+impl SignatureGate for BoundSyncGate {
+    fn verify(
+        &self,
+        token: &SignatureToken,
+        required: &SignatureRequirement,
+        record: &RecordRef,
+    ) -> core::result::Result<(), SignatureError> {
+        match self {
+            Self::NoSignatures(g) => g.verify(token, required, record),
+            Self::DatumEsign => Err(SignatureError::Invalid("no such signature".into())),
+        }
+    }
 }
 
 /// Registration callback: machines and hooks are registered, then [`Kernel::build`] freezes.
@@ -226,6 +266,7 @@ impl Kernel {
         engine.freeze()?;
 
         let gate = bind_signature_gate(profile.signature_gate_binding);
+        let bound = BoundSyncGate::from_binding(profile.signature_gate_binding);
         let events = datum_events::Registry::new();
         let jobs = datum_jobs::Registry::new();
         datum_jobs::register_maintenance(&jobs);
@@ -244,6 +285,7 @@ impl Kernel {
             subscriptions,
             job_kinds,
             gate,
+            bound,
             catalog,
             pool,
         };
@@ -289,9 +331,84 @@ impl Kernel {
         GroupBuilder::new(kind, header)
     }
 
-    /// Bound signature gate, selected by the profile TOML `gate` field.
+    /// Bound signature-gate factory, selected by the profile TOML `gate` field.
+    pub fn signature_gate_factory(&self) -> GateFactory {
+        self.gate
+    }
+
+    /// Live `sm.instance` triple for minting (composition-root read; esign does not `SELECT sm.*`).
+    pub async fn load_sm_instance(
+        &self,
+        tx: &mut Tx<'_>,
+        doc_id: Identifier,
+    ) -> Result<Option<(String, String, i64)>> {
+        Ok(tx
+            .fetch_optional(
+                sqlx::query_as(
+                    r#"SELECT doc_type, state, version FROM sm.instance
+                        WHERE doc_id = $1"#,
+                )
+                .bind(doc_id.as_uuid()),
+            )
+            .await?)
+    }
+
+    /// Bound [`SignatureGate`] for callers that pass a gate into `Engine::transition`.
+    ///
+    /// Plain-shop: [`NoSignatures`]. Regulated-device: the esign binding (dummy /
+    /// unprepared tokens are [`SignatureError::Invalid`], never `NoProvider`).
+    /// [`Kernel::transition`] prepares a per-transaction gate from
+    /// [`Self::signature_gate_factory`] so a real two-component token is claimed
+    /// in the same Tx as `sm.instance` and audit.
     pub fn signature_gate(&self) -> &dyn SignatureGate {
-        &*self.gate
+        &self.bound
+    }
+
+    /// Load a [`SignatureToken`] for `X-Datum-Signature` (composition-root read).
+    pub async fn load_signature_token(
+        &self,
+        tx: &mut Tx<'_>,
+        id: SignatureId,
+    ) -> Result<Option<SignatureToken>> {
+        let row: Option<(
+            sqlx::types::Uuid,
+            String,
+            String,
+            sqlx::types::Uuid,
+            i64,
+            Vec<u8>,
+        )> = tx
+            .fetch_optional(
+                sqlx::query_as(
+                    r#"SELECT signer_id, meaning, record_table, record_id, record_version,
+                              record_content_hash
+                         FROM esign.signature
+                        WHERE signature_id = $1"#,
+                )
+                .bind(id.as_uuid()),
+            )
+            .await?;
+        let Some((signer_id, meaning, table, rec_id, version, hash_bytes)) = row else {
+            return Ok(None);
+        };
+        let mut record_content_hash = [0u8; 32];
+        if hash_bytes.len() == 32 {
+            record_content_hash.copy_from_slice(&hash_bytes);
+        }
+        Ok(Some(SignatureToken {
+            signature: id,
+            signer: Actor {
+                id: Identifier::from_uuid(signer_id),
+                kind: ActorKind::User,
+            },
+            meaning: SignatureMeaning(meaning),
+            record: RecordRef {
+                table,
+                id: Identifier::from_uuid(rec_id),
+                version,
+            },
+            record_content_hash,
+        }))
     }
 
     /// `WriteContext` whose bound action is `"<doc_type>.<edge>"` (executor obligation).
@@ -349,9 +466,16 @@ impl Kernel {
         datum_ledger::bind_tx(&mut builder, tx).await?;
         let watch = builder.clone();
         let sink: Box<dyn PostingSink> = Box::new(BoundSink { inner: builder });
+        let bound = match self.prepare_bound_gate(tx, doc, token).await {
+            Ok(g) => g,
+            Err(e) => {
+                drop(watch);
+                return Err(e);
+            }
+        };
         let outcome = self
             .engine
-            .transition(tx, sink, doc, edge, token, self.signature_gate(), ctx)
+            .transition(tx, sink, doc, edge, token, &bound, ctx)
             .await;
         match outcome {
             Ok(instance) => {
@@ -362,9 +486,96 @@ impl Kernel {
             }
             Err(e) => {
                 drop(watch);
+                if let datum_statemachine::Error::Signature(sig) = &e
+                    && audited_refusal(sig)
+                {
+                    self.log_gate_refusal(ctx, doc, edge, sig).await;
+                }
                 Err(e.into())
             }
         }
+    }
+
+    /// D-2b-4: `prepare` inside this Tx immediately before `Engine::transition`.
+    async fn prepare_bound_gate(
+        &self,
+        tx: &mut Tx<'_>,
+        doc: &DocRef,
+        token: Option<&SignatureToken>,
+    ) -> Result<BoundGate> {
+        let Some(token) = token else {
+            return Ok(BoundGate::NoSignatures(NoSignatures));
+        };
+        if !self.gate_is_noop() {
+            stamp_esign_id(tx, token.signature).await?;
+        }
+        let live = if self.gate_is_noop() {
+            stub_live_doc(doc, token)
+        } else {
+            self.live_doc(tx, doc, token).await?
+        };
+        Ok(self.gate.prepare(tx, token, &live).await?)
+    }
+
+    async fn live_doc(
+        &self,
+        tx: &mut Tx<'_>,
+        doc: &DocRef,
+        token: &SignatureToken,
+    ) -> Result<LiveDoc> {
+        let row: (String, i64) = tx
+            .fetch_one(
+                sqlx::query_as(
+                    r#"SELECT state, version FROM sm.instance
+                        WHERE doc_type = $1 AND doc_id = $2"#,
+                )
+                .bind(&doc.doc_type)
+                .bind(doc.doc_id.as_uuid()),
+            )
+            .await?;
+        let signer_status = match datum_identity::load_principal(
+            self.pool(),
+            UserId::from_identifier(token.signer.id),
+        )
+        .await
+        {
+            Ok(p) => p.status,
+            Err(_) => PrincipalStatus::Inactive,
+        };
+        Ok(LiveDoc {
+            record: RecordRef {
+                table: "sm.instance".into(),
+                id: doc.doc_id,
+                version: row.1,
+            },
+            doc_type: doc.doc_type.clone(),
+            projection: serde_json::json!({}),
+            instance: InstanceTriple {
+                doc_type: doc.doc_type.clone(),
+                doc_id: doc.doc_id,
+                state: row.0,
+                version: row.1,
+            },
+            signer_status,
+        })
+    }
+
+    async fn log_gate_refusal(
+        &self,
+        ctx: &WriteContext,
+        doc: &DocRef,
+        edge: &str,
+        sig: &SignatureError,
+    ) {
+        let write = self.write_pool();
+        let detail = serde_json::json!({
+            "error": sig.to_string(),
+            "doc_type": doc.doc_type,
+            "doc_id": doc.doc_id.to_string(),
+            "edge": edge,
+        });
+        let _ = datum_esign::log_refusal(&write, ctx.actor, &ctx.action, &sig.to_string(), detail)
+            .await;
     }
 
     /// Bind `builder` to `tx` so Drop poisons an unfinalized contribution.
@@ -622,17 +833,48 @@ async fn seed_profile(
     Ok(())
 }
 
-/// Bind the `SignatureGate` named by the profile TOML `gate` field.
+/// Bind the `GateFactory` named by the profile TOML `gate` field.
 ///
-/// SPEC-profiles key 4: "`NoSignatures` pre-Wave-2b and in tests only, `datum-esign`
-/// from 2b". CONTRACT §6.3: "Core ships `NoSignatures`, which refuses every token"
-/// (`verify -> Err(NoProvider)`). Until Wave 2b both TOML values resolve to that
-/// verify-only gate; the regulated profile does not get it by ignoring the field.
-pub fn bind_signature_gate(binding: GateBinding) -> Box<dyn SignatureGate + Send + Sync> {
+/// SPEC-profiles key 4 / D-2b-4: `NoSignatures` → the singleton factory;
+/// `"datum-esign"` → the prepared-gate factory.
+pub fn bind_signature_gate(binding: GateBinding) -> GateFactory {
     match binding {
-        GateBinding::NoSignatures => Box::new(NoSignatures),
-        GateBinding::DatumEsign => Box::new(NoSignatures),
+        GateBinding::NoSignatures => GateFactory::no_signatures(),
+        GateBinding::DatumEsign => GateFactory::datum_esign(),
     }
+}
+
+fn stub_live_doc(doc: &DocRef, token: &SignatureToken) -> LiveDoc {
+    LiveDoc {
+        record: token.record.clone(),
+        doc_type: doc.doc_type.clone(),
+        projection: serde_json::json!({}),
+        instance: InstanceTriple {
+            doc_type: doc.doc_type.clone(),
+            doc_id: doc.doc_id,
+            state: String::new(),
+            version: token.record.version,
+        },
+        signer_status: PrincipalStatus::Active,
+    }
+}
+
+fn audited_refusal(err: &SignatureError) -> bool {
+    !matches!(
+        err,
+        SignatureError::NoProvider | SignatureError::Unimplemented
+    )
+}
+
+/// Stamp `datum.esign_id` for remaining statements in this transaction.
+///
+/// D-2b-1: every audit row of the consuming transition carries the signature id.
+/// The SQL lives in `stamp_esign.sql` so this crate does not name the
+/// session-protocol token confined by CONTRACT §5a.
+async fn stamp_esign_id(tx: &mut Tx<'_>, id: SignatureId) -> Result<()> {
+    tx.execute(sqlx::query(include_str!("stamp_esign.sql")).bind(id.as_uuid().to_string()))
+        .await?;
+    Ok(())
 }
 
 fn register_enabled_from_manifests(
@@ -705,7 +947,6 @@ pub(crate) fn machine_from_decl(decl: &ManifestMachine) -> Result<Machine> {
 
 fn hold_wave2b_edges() {
     let _ = core::any::type_name::<datum_esign::Error>();
-    let _ = core::any::type_name::<datum_customfields::Error>();
     let _ = core::any::type_name::<datum_documents::Error>();
     let _ = core::any::type_name::<datum_print::Error>();
 }

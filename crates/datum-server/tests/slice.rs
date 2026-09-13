@@ -260,8 +260,8 @@ async fn run_script(w: &World) {
             );
         }
         datum_module::ProfileId::RegulatedDevice => {
-            assert_eq!(st, StatusCode::CONFLICT, "regulated release {rel}");
-            assert_eq!(rel["error"]["code"], "SIGNATURE_NO_PROVIDER", "{rel}");
+            assert_eq!(st, StatusCode::FORBIDDEN, "regulated release {rel}");
+            assert_eq!(rel["error"]["code"], "SIGNATURE_REQUIRED", "{rel}");
             let after = w.get(&format!("/api/v1/lots/{bar_lot}")).await.1;
             assert_eq!(after["status"], "quarantine", "nothing posted {after}");
             let (_st, oh2) = w
@@ -330,12 +330,12 @@ async fn run_script(w: &World) {
                         1,
                     )
                     .await;
-                assert_eq!(st, StatusCode::CONFLICT, "item 7 {body}");
-                assert_eq!(body["error"]["code"], "SIGNATURE_NO_PROVIDER", "{body}");
+                assert_eq!(st, StatusCode::FORBIDDEN, "item 7 {body}");
+                assert_eq!(body["error"]["code"], "SIGNATURE_REQUIRED", "{body}");
             }
             pass(
                 7,
-                "regulated Required edge refuses under NoSignatures (SIGNATURE_NO_PROVIDER)",
+                "regulated Required edge refuses without a valid signature (SIGNATURE_REQUIRED)",
             );
             pass(11, "regulated profile declares the signature-bearing edge");
         }
@@ -904,8 +904,8 @@ async fn item_create_pins_item_stock_for_inventory_http() {
                 (aloc.clone(), "100")
             }
             datum_module::ProfileId::RegulatedDevice => {
-                assert_eq!(st, StatusCode::CONFLICT, "regulated release {rel}");
-                assert_eq!(rel["error"]["code"], "SIGNATURE_NO_PROVIDER", "{rel}");
+                assert_eq!(st, StatusCode::FORBIDDEN, "regulated release {rel}");
+                assert_eq!(rel["error"]["code"], "SIGNATURE_REQUIRED", "{rel}");
                 assert!(
                     !rel["error"]["message"]
                         .as_str()
@@ -1526,8 +1526,8 @@ async fn regulated_release_refused_under_no_signatures() {
             .await;
         match profile.id {
             datum_module::ProfileId::RegulatedDevice => {
-                assert_eq!(st, StatusCode::CONFLICT, "{body}");
-                assert_eq!(body["error"]["code"], "SIGNATURE_NO_PROVIDER", "{body}");
+                assert_eq!(st, StatusCode::FORBIDDEN, "{body}");
+                assert_eq!(body["error"]["code"], "SIGNATURE_REQUIRED", "{body}");
                 let after = w.get(&format!("/api/v1/lots/{lot}")).await.1;
                 assert_eq!(after["status"], "quarantine", "nothing posted {after}");
             }
@@ -1594,6 +1594,10 @@ async fn get_handlers_are_read_only() {
         "genealogy_trace",
         "trace_inner",
         "health",
+        "esign_manifestation",
+        "esign_manifestation_inner",
+        "esign_bundle",
+        "esign_bundle_inner",
     ];
     let src = include_str!("../src/handlers.rs");
     for name in GET_FNS {

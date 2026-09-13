@@ -37,6 +37,7 @@ pub const KNOWN_PERMISSIONS: &[&str] = &[
     "audit.export",
     "calibration.approve",
     "wo.release",
+    "esign.bundle.read",
 ];
 
 /// Authenticated HTTP session copied from `datum-identity::login` into

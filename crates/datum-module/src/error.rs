@@ -37,6 +37,12 @@ pub enum Error {
     /// State-machine error.
     #[error(transparent)]
     Statemachine(#[from] datum_statemachine::Error),
+    /// Electronic signature error.
+    #[error(transparent)]
+    Esign(#[from] datum_esign::Error),
+    /// Custom-fields error.
+    #[error(transparent)]
+    Customfields(#[from] datum_customfields::Error),
     /// JSON error.
     #[error(transparent)]
     Json(#[from] serde_json::Error),
