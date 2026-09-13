@@ -4,7 +4,8 @@ use std::fs;
 use std::path::Path;
 
 use chrono::{DateTime, Utc};
-use datum_core::SignatureId;
+use datum_core::{RecordRef, SignatureId};
+use datum_db::{ReadPool, Tx};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::query_as as sql_query_as;
@@ -83,13 +84,9 @@ type ManifestRow = (
     bool,
 );
 
-/// Read the D-2b-2 manifestation through the published [`datum_db::ReadPool`]
-/// fetch surface (CONTRACT §5a).
-pub async fn manifestation(pool: &datum_db::ReadPool, id: SignatureId) -> Result<Manifestation> {
-    let row: Option<ManifestRow> = pool
-        .fetch_optional(
-            sql_query_as(
-                r#"SELECT
+/// D-2b-2 SELECT list + `esign.supersession` overlay. Duplicated in the
+/// record-keyed query because sqlx 0.9 `query_as` requires `'static` SQL.
+const MANIFESTATION_BY_ID_SQL: &str = r#"SELECT
                signature_id, signer_id, signer_printed_name, meaning, reason,
                signed_at, signed_at_zone,
                (
@@ -122,19 +119,50 @@ pub async fn manifestation(pool: &datum_db::ReadPool, id: SignatureId) -> Result
                   WHERE x.old_signature_id = esign.signature.signature_id
                ) AS superseded
           FROM esign.signature
-         WHERE signature_id = $1"#,
-            )
-            .bind(id.as_uuid()),
-        )
-        .await?;
-    let Some(row) = row else {
-        return Err(Error::NotFound);
-    };
+         WHERE signature_id = $1"#;
+
+const MANIFESTATION_BY_RECORD_SQL: &str = r#"SELECT
+               signature_id, signer_id, signer_printed_name, meaning, reason,
+               signed_at, signed_at_zone,
+               (
+                 to_char(timezone(signed_at_zone, signed_at), 'YYYY-MM-DD"T"HH24:MI:SS')
+                 || CASE
+                      WHEN timezone(signed_at_zone, signed_at)
+                           >= timezone('UTC', signed_at)
+                      THEN '+' ELSE '-'
+                    END
+                 || to_char(
+                      (abs(extract(epoch from (
+                         timezone(signed_at_zone, signed_at)
+                         - timezone('UTC', signed_at)
+                       )))::int / 3600),
+                      'FM00'
+                    )
+                 || ':'
+                 || to_char(
+                      ((abs(extract(epoch from (
+                         timezone(signed_at_zone, signed_at)
+                         - timezone('UTC', signed_at)
+                       )))::int % 3600) / 60),
+                      'FM00'
+                    )
+               ) AS signed_at_local,
+               record_table, record_id, record_version, doc_type,
+               record_content_hash, credential_kind, components_used,
+               EXISTS (
+                 SELECT 1 FROM esign.supersession x
+                  WHERE x.old_signature_id = esign.signature.signature_id
+               ) AS superseded
+          FROM esign.signature
+         WHERE record_table = $1 AND record_id = $2 AND record_version = $3
+         ORDER BY signed_at ASC, signature_id ASC"#;
+
+fn row_to_manifestation(row: ManifestRow) -> Manifestation {
     let mut hash = [0u8; 32];
     if row.12.len() == 32 {
         hash.copy_from_slice(&row.12);
     }
-    Ok(Manifestation {
+    Manifestation {
         signature: SignatureManifest {
             id: row.0.to_string(),
             signer_id: row.1.to_string(),
@@ -155,7 +183,55 @@ pub async fn manifestation(pool: &datum_db::ReadPool, id: SignatureId) -> Result
             components_used: row.14,
             superseded: row.15,
         },
-    })
+    }
+}
+
+/// Read the D-2b-2 manifestation through the published [`ReadPool`]
+/// fetch surface (CONTRACT §5a).
+pub async fn manifestation(pool: &ReadPool, id: SignatureId) -> Result<Manifestation> {
+    let row: Option<ManifestRow> = pool
+        .fetch_optional(sql_query_as(MANIFESTATION_BY_ID_SQL).bind(id.as_uuid()))
+        .await?;
+    let Some(row) = row else {
+        return Err(Error::NotFound);
+    };
+    Ok(row_to_manifestation(row))
+}
+
+/// D-2b-2 manifestations for a record version, oldest first (supersession included).
+///
+/// `datum-print` is the named consumer (R-2s-3): it must not SELECT
+/// `esign.signature` / `esign.supersession`. Empty when the record has no
+/// signatures.
+pub async fn manifestation_for_record(
+    tx: &mut Tx<'_>,
+    record: &RecordRef,
+) -> Result<Vec<Manifestation>> {
+    let rows: Vec<ManifestRow> = tx
+        .fetch_all(
+            sql_query_as(MANIFESTATION_BY_RECORD_SQL)
+                .bind(&record.table)
+                .bind(record.id.as_uuid())
+                .bind(record.version),
+        )
+        .await?;
+    Ok(rows.into_iter().map(row_to_manifestation).collect())
+}
+
+/// [`manifestation_for_record`] through a [`ReadPool`] (no actor bound).
+pub async fn manifestation_for_record_on(
+    pool: &ReadPool,
+    record: &RecordRef,
+) -> Result<Vec<Manifestation>> {
+    let rows: Vec<ManifestRow> = pool
+        .fetch_all(
+            sql_query_as(MANIFESTATION_BY_RECORD_SQL)
+                .bind(&record.table)
+                .bind(record.id.as_uuid())
+                .bind(record.version),
+        )
+        .await?;
+    Ok(rows.into_iter().map(row_to_manifestation).collect())
 }
 
 /// One seal in an archival bundle.

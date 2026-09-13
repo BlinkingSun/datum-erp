@@ -109,6 +109,10 @@ pub fn read_pool(db: &datum_test::TestDb) -> ReadPool {
     ReadPool::new(db.app_pool().clone())
 }
 
+pub fn read_pool_migrate(db: &datum_test::TestDb) -> ReadPool {
+    ReadPool::new(db.migrate_pool().clone())
+}
+
 pub async fn signer_with_perm(write: &WritePool, username: &str, perm: &str) -> Principal {
     let mut tx = datum_db::Tx::begin(write, &system_ctx("identity.create"))
         .await

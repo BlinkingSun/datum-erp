@@ -69,8 +69,23 @@ graph (lane `2b2-glue` / `datum-module`). This crate does not bind them itself.
 | `effective_at` | `(tx, doc, ts)` | same — `[from, until)`; `NULL` from is unbounded past; `NULL` until is unbounded future; both `NULL` is not in force |
 | `verify_blob` | `(hash)` | `verify_blob(store, hash)` |
 | `set_legal_hold` | `(tx, doc, bool)` | same — blocks Obsolete and Superseded when true |
+| `revision_for_render` / `revision_for_render_on` | `(tx\|pool, revision_id)` | render snapshot (number, title, label, live status, effectivity, content manifest + hash). **Consumer: `datum-print`** (R-2s-3) |
+| `attachments_for_render` / `attachments_for_render_on` | `(tx\|pool, revision_id)` | filename, media type, blob hash (bytes handle), size. **Consumer: `datum-print`** (R-2s-3) |
 | `document_machine(profile)` | composition-root registration | same |
 | `manifest(profile)` | permissions + event schemas | same |
+
+### Render read seam (`datum-print` is the consumer)
+
+Kernel crates must not SELECT `documents.*` (R-2s-3). `datum-print` is the named
+consumer of these reads. Direct SELECT of this crate's tables on the sealed
+`Tx` and on `ReadPool` (invoker-rights; no `SECURITY DEFINER`).
+
+| Function | Signature | Source of truth |
+|---|---|---|
+| `revision_for_render` | `async fn revision_for_render(tx: &mut Tx<'_>, revision_id: RevisionId) -> Result<RevisionForRender>` | `documents.revision` ⋈ `documents.document`; live status via `current_state` |
+| `revision_for_render_on` | `async fn revision_for_render_on(pool: &ReadPool, revision_id: RevisionId) -> Result<RevisionForRender>` | same, through `ReadPool` (no actor) |
+| `attachments_for_render` | `async fn attachments_for_render(tx: &mut Tx<'_>, revision_id: RevisionId) -> Result<Vec<AttachmentForRender>>` | `documents.attachment` (filename, media type, blob hash, size) |
+| `attachments_for_render_on` | `async fn attachments_for_render_on(pool: &ReadPool, revision_id: RevisionId) -> Result<Vec<AttachmentForRender>>` | same, through `ReadPool` |
 
 Permissions: `documents.view`, `documents.edit`, `documents.approve`,
 `documents.release`.
