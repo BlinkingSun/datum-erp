@@ -43,6 +43,10 @@ fn blob_file(store: &FsBlobStore, hash: BlobHash) -> std::path::PathBuf {
 /// delete, rename-over, and reopen-for-write until this runs.
 fn clear_readonly(path: &std::path::Path) {
     let mut perms = std::fs::metadata(path).unwrap().permissions();
+    // Same helper as FsBlobStore discard: Windows FILE_ATTRIBUTE_READONLY
+    // forbids unlink/reopen-for-write until cleared. Clippy's unix
+    // world-writable warning does not apply to this test-only tamper path.
+    #[allow(clippy::permissions_set_readonly_false)]
     perms.set_readonly(false);
     std::fs::set_permissions(path, perms).unwrap();
 }
@@ -452,9 +456,9 @@ async fn attachment_immutable() {
         );
         let again = store.put(b"bytes").unwrap();
         assert_eq!(again, hash, "store API dedupes; it does not rewrite");
-        let write = std::fs::OpenOptions::new().write(true).open(&path);
+        let reopen = std::fs::OpenOptions::new().write(true).open(&path);
         assert!(
-            write.is_err(),
+            reopen.is_err(),
             "store API refuses overwrite/modify of a placed blob"
         );
         #[cfg(unix)]

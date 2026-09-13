@@ -216,7 +216,10 @@ fn write_tmp(tmp: &Path, bytes: &[u8]) -> io::Result<()> {
 /// Windows also refuses delete, rename-over, and reopen-for-write until cleared.
 fn set_readonly(path: &Path, readonly: bool) -> io::Result<()> {
     let mut perms = fs::metadata(path)?.permissions();
-    perms.set_readonly(readonly);
+    #[allow(clippy::permissions_set_readonly_false)]
+    {
+        perms.set_readonly(readonly);
+    }
     fs::set_permissions(path, perms)
 }
 
