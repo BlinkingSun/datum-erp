@@ -2,6 +2,7 @@
 # R-2s-3: production src SQL must not DML-reference ledger.* or transient.*
 # except the crates that own those schemas. Invoked with REPO_ROOT set.
 # POSIX bash 3.2; requires rg. Run from the repo root over relative paths.
+# Globs: *.rs and *.sql (include_str!/query_file! includes under src/).
 set -eu
 
 REPO_ROOT="${REPO_ROOT:?REPO_ROOT is required}"
@@ -103,12 +104,13 @@ crate_is_r2s3_exempt() {
   return 1
 }
 
-# Comment lines are not SQL strings (//, ///, //!).
+# Comment lines are not SQL strings (//, ///, //!, --).
 hit_is_comment() {
   text="$1"
   trimmed="${text#"${text%%[![:space:]]*}"}"
   case "$trimmed" in
     //*) return 0 ;;
+    --*) return 0 ;;
   esac
   return 1
 }
@@ -205,7 +207,7 @@ for tree in modules crates; do
     if [ ! -d "$src_dir" ]; then
       continue
     fi
-    hits="$(rg -n --glob '*.rs' \
+    hits="$(rg -n --glob '*.rs' --glob '*.sql' \
       -e '(FROM|JOIN|INTO|UPDATE|TABLE)[[:space:]]+(ONLY[[:space:]]+)?(ledger|transient)\.' \
       "$src_dir" 2>/dev/null || true)"
     if [ -z "$hits" ]; then

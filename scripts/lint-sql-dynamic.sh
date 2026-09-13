@@ -137,6 +137,8 @@ dynamic_awk() {
   run_dynamic_awk stdin "cross:${schema}:x" "$relpath"
 }
 
+# *.rs production source and *.sql include files (include_str!/query_file!).
+# No path-separator globs; relative paths after cd "$REPO_ROOT".
 list_scan_files() {
   dir="$1"
   if [ ! -d "$dir" ]; then
