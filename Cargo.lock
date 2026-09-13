@@ -455,16 +455,19 @@ dependencies = [
 name = "datum-customfields"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "datum-audit",
  "datum-core",
  "datum-db",
  "datum-test",
  "proptest",
+ "rust_decimal",
  "serde",
  "serde_json",
  "sqlx",
  "thiserror",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
