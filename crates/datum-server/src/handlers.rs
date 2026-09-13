@@ -7,7 +7,7 @@ use axum::response::{IntoResponse, Response};
 use datum_core::{
     Identifier, ItemId, LocationId, LotId, RecordRef, SignatureId, SignatureMeaning, SignatureToken,
 };
-use datum_db::{Tx, WritePool};
+use datum_db::{ReadPool, Tx, WritePool};
 use datum_identity::{PasswordProvider, Provider};
 use datum_ledger::CostMethod;
 use datum_mod_inventory::{BalanceQuery, DocumentKind, LineInput, ReceiveRequest, ReleaseRequest};
@@ -484,6 +484,113 @@ impl IntoActor for datum_core::Identifier {
             kind: datum_core::ActorKind::User,
         }
     }
+}
+
+fn dummy_signature_token(
+    actor: datum_core::Actor,
+    meaning: &str,
+    record_id: Identifier,
+    version: i64,
+    signature: SignatureId,
+) -> SignatureToken {
+    SignatureToken {
+        signature,
+        signer: actor,
+        meaning: SignatureMeaning(meaning.into()),
+        record: RecordRef {
+            table: "sm.instance".into(),
+            id: record_id,
+            version,
+        },
+        record_content_hash: [0; 32],
+    }
+}
+
+/// Bound-edge token: `X-Datum-Signature` when present, else a dummy so prepare
+/// (not the missing-token check) refuses under regulated-device.
+async fn required_edge_token(
+    state: &AppState,
+    tx: &mut Tx<'_>,
+    headers: &H,
+    actor: datum_core::Actor,
+    meaning: &str,
+    record_id: Identifier,
+    version: i64,
+) -> Result<SignatureToken> {
+    if let Some(raw) = headers
+        .get("x-datum-signature")
+        .and_then(|v| v.to_str().ok())
+        && let Ok(id) = Uuid::parse_str(raw)
+    {
+        let sid = SignatureId::from_uuid(id);
+        if let Some(tok) = state.kernel().load_signature_token(tx, sid).await? {
+            return Ok(tok);
+        }
+        return Ok(dummy_signature_token(
+            actor, meaning, record_id, version, sid,
+        ));
+    }
+    Ok(dummy_signature_token(
+        actor,
+        meaning,
+        record_id,
+        version,
+        SignatureId::from_uuid(Uuid::nil()),
+    ))
+}
+
+async fn manifestation_via_tx(tx: &mut Tx<'_>, id: SignatureId) -> Result<Value> {
+    type ManifestRow = (
+        Uuid,
+        Uuid,
+        String,
+        String,
+        Option<String>,
+        chrono::DateTime<chrono::Utc>,
+        String,
+        String,
+        String,
+        Uuid,
+        i64,
+        String,
+        Vec<u8>,
+        String,
+        Vec<String>,
+        Option<Uuid>,
+    );
+    let row: Option<ManifestRow> = tx
+        .fetch_optional(sqlx::query_as(include_str!("esign_manifest.sql")).bind(id.as_uuid()))
+        .await?;
+    let Some(row) = row else {
+        return Err(Error::not_found("signature not found"));
+    };
+    let mut hash = [0u8; 32];
+    if row.12.len() == 32 {
+        hash.copy_from_slice(&row.12);
+    }
+    let body = datum_esign::Manifestation {
+        signature: datum_esign::SignatureManifest {
+            id: row.0.to_string(),
+            signer_id: row.1.to_string(),
+            printed_name: row.2,
+            meaning: row.3,
+            reason: row.4,
+            signed_at: row.5.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            signed_at_zone: row.6,
+            signed_at_local: row.7,
+            record: datum_esign::ManifestRecord {
+                table: row.8,
+                doc_type: row.11,
+                id: row.9.to_string(),
+                version: row.10,
+            },
+            record_content_hash: datum_audit::sha256::hex(&hash),
+            credential_kind: row.13,
+            components_used: row.14,
+            superseded: row.15.is_some(),
+        },
+    };
+    Ok(serde_json::to_value(body)?)
 }
 
 /// POST /api/v1/locations
@@ -1792,19 +1899,19 @@ async fn approve_cal_inner(
         tx.commit().await?;
         return Ok(replay);
     }
-    // A Required edge with no provider: present a token so the gate, not the
-    // missing-token check, is what refuses (SIGNATURE_NO_PROVIDER).
-    let token = SignatureToken {
-        signature: SignatureId::from_uuid(Uuid::nil()),
-        signer: session.principal.0.into_actor(),
-        meaning: SignatureMeaning("Approved".into()),
-        record: RecordRef {
-            table: "sm.instance".into(),
-            id: doc_id,
-            version: 1,
-        },
-        record_content_hash: [0; 32],
-    };
+    // A Required edge with esign bound: present a token so prepare, not the
+    // missing-token check, is what refuses (SIGNATURE_REQUIRED / Invalid).
+    // `X-Datum-Signature` carries a minted id (docs/10 §5.2).
+    let token = required_edge_token(
+        state,
+        &mut tx,
+        headers,
+        session.principal.0.into_actor(),
+        "Approved",
+        doc_id,
+        1,
+    )
+    .await?;
     state
         .kernel()
         .transition(&mut tx, &doc, "approve", Some(&token), &ctx)
@@ -1995,6 +2102,262 @@ async fn reverse_inner(
 }
 
 /// Health.
+
+#[derive(Deserialize)]
+struct EsignMintBody {
+    meaning: String,
+    #[serde(default)]
+    reason: Option<String>,
+    record: EsignRecordBody,
+    identification: EsignIdentBody,
+    #[serde(default)]
+    doc_type: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct EsignRecordBody {
+    table: String,
+    id: String,
+    version: i64,
+}
+
+#[derive(Deserialize)]
+struct EsignIdentBody {
+    #[serde(default)]
+    code: Option<String>,
+    #[serde(default)]
+    secret: Option<String>,
+}
+
+fn permission_for_meaning(meaning: &str) -> datum_core::PermissionKey {
+    datum_core::PermissionKey(
+        match meaning {
+            "Approved" => "calibration.approve",
+            "Released" => "wo.release",
+            "Lot released" => "lots.release",
+            other => other,
+        }
+        .into(),
+    )
+}
+
+/// POST /api/v1/esign/challenges
+pub async fn esign_challenge(State(state): State<AppState>, headers: H) -> Response {
+    let request_id = rid(&headers);
+    match esign_challenge_inner(&state, &headers, &request_id).await {
+        Ok(v) => json_status(200, v),
+        Err(e) => error_response(e, &request_id),
+    }
+}
+
+async fn esign_challenge_inner(state: &AppState, headers: &H, request_id: &str) -> Result<Value> {
+    let session = extract::require_mutation(state, headers, request_id, "identity.session").await?;
+    let write = fresh_write(state).await?;
+    let ctx = session::write_context(
+        &session,
+        "esign.challenge",
+        request_id,
+        headers,
+        &state.kernel().profile.spec_version,
+    );
+    let mut tx = Tx::begin(&write, &ctx).await?;
+    let challenge = datum_esign::challenge(
+        &mut tx,
+        session.principal,
+        &state.kernel().profile.session_policy,
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(serde_json::to_value(challenge)?)
+}
+
+/// POST /api/v1/esign/signatures
+pub async fn esign_mint(State(state): State<AppState>, headers: H, body: Bytes) -> Response {
+    let request_id = rid(&headers);
+    match esign_mint_inner(&state, &headers, &request_id, &body).await {
+        Ok((st, v)) => json_status(st, v),
+        Err(e) => error_response(e, &request_id),
+    }
+}
+
+async fn esign_mint_inner(
+    state: &AppState,
+    headers: &H,
+    request_id: &str,
+    raw: &[u8],
+) -> Result<(u16, Value)> {
+    let session = extract::require_mutation(state, headers, request_id, "identity.session").await?;
+    let key = idempotency::require_key(headers)?;
+    let hash = idempotency::body_hash(raw);
+    let body: EsignMintBody = parse_json(raw)?;
+    let write = fresh_write(state).await?;
+    let ctx = session::write_context(
+        &session,
+        "esign.mint",
+        request_id,
+        headers,
+        &state.kernel().profile.spec_version,
+    );
+    let mut tx = Tx::begin(&write, &ctx).await?;
+    if let Some(replay) = idempotency::replay(&mut tx, key, &hash).await? {
+        tx.commit().await?;
+        return Ok(replay);
+    }
+    let principal = datum_identity::load_principal(state.pool(), session.principal).await?;
+    let doc_id = parse_uuid(&body.record.id, "record.id", Identifier::from_uuid)?;
+    let rec = RecordRef {
+        table: body.record.table.clone(),
+        id: doc_id,
+        version: body.record.version,
+    };
+    let meaning = body.meaning.clone();
+    let fallback_type = body
+        .doc_type
+        .clone()
+        .unwrap_or_else(|| body.record.table.clone());
+    let (doc_type, inst) = if body.record.table == "sm.instance" {
+        match state.kernel().load_sm_instance(&mut tx, doc_id).await? {
+            Some((live_type, state_name, version)) => (
+                body.doc_type.unwrap_or(live_type.clone()),
+                datum_esign::InstanceTriple {
+                    doc_type: live_type,
+                    doc_id,
+                    state: state_name,
+                    version,
+                },
+            ),
+            None => (
+                fallback_type.clone(),
+                datum_esign::InstanceTriple {
+                    doc_type: fallback_type.clone(),
+                    doc_id,
+                    state: String::new(),
+                    version: body.record.version,
+                },
+            ),
+        }
+    } else {
+        (
+            fallback_type.clone(),
+            datum_esign::InstanceTriple {
+                doc_type: fallback_type.clone(),
+                doc_id,
+                state: String::new(),
+                version: body.record.version,
+            },
+        )
+    };
+    let mut components = Vec::new();
+    if body
+        .identification
+        .code
+        .as_ref()
+        .is_some_and(|c| !c.is_empty())
+    {
+        components.push("code".into());
+    }
+    if body
+        .identification
+        .secret
+        .as_ref()
+        .is_some_and(|s| !s.is_empty())
+    {
+        components.push("secret".into());
+    }
+    let sig = datum_esign::mint(
+        &mut tx,
+        &datum_esign::MintRequest {
+            components,
+            code: body.identification.code.clone(),
+            secret: body.identification.secret.clone().unwrap_or_default(),
+            meaning: SignatureMeaning(meaning.clone()),
+            reason: body.reason,
+            record: rec,
+            doc_type,
+            projection: serde_json::json!({}),
+            instance: inst,
+            permission: permission_for_meaning(&meaning),
+            signed_at_zone: state
+                .kernel()
+                .profile
+                .seeded_permissions
+                .display_timezone
+                .clone(),
+            policy: state.kernel().profile.session_policy.clone(),
+            principal,
+            login_session_id: Some(session.id),
+            device_fingerprint: headers
+                .get("user-agent")
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_string),
+            source_ip: headers
+                .get("x-forwarded-for")
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.split(',').next().unwrap_or(s).trim().to_string()),
+            boot_epoch: "1".into(),
+            credential_kind: "signing_password".into(),
+        },
+    )
+    .await?;
+    let sig_id = sig.id;
+    let body = manifestation_via_tx(&mut tx, sig_id).await?;
+    idempotency::remember(&mut tx, key, &hash, 201, &body).await?;
+    tx.commit().await?;
+    Ok((201, body))
+}
+
+/// GET /api/v1/esign/signatures/{id}
+pub async fn esign_manifestation(
+    State(state): State<AppState>,
+    headers: H,
+    Path(id): Path<String>,
+) -> Response {
+    let request_id = rid(&headers);
+    match esign_manifestation_inner(&state, &headers, &request_id, &id).await {
+        Ok(v) => json_status(200, v),
+        Err(e) => error_response(e, &request_id),
+    }
+}
+
+async fn esign_manifestation_inner(
+    state: &AppState,
+    headers: &H,
+    request_id: &str,
+    id: &str,
+) -> Result<Value> {
+    let _session =
+        extract::require_permission(state, headers, request_id, "identity.session").await?;
+    let sig_id = parse_uuid(id, "id", datum_core::SignatureId::from_uuid)?;
+    let body = datum_esign::manifestation(&ReadPool::new(state.pool().clone()), sig_id).await?;
+    Ok(serde_json::to_value(body)?)
+}
+
+/// GET /api/v1/esign/signatures/{id}/bundle
+pub async fn esign_bundle(
+    State(state): State<AppState>,
+    headers: H,
+    Path(id): Path<String>,
+) -> Response {
+    let request_id = rid(&headers);
+    match esign_bundle_inner(&state, &headers, &request_id, &id).await {
+        Ok(v) => json_status(200, v),
+        Err(e) => error_response(e, &request_id),
+    }
+}
+
+async fn esign_bundle_inner(
+    state: &AppState,
+    headers: &H,
+    request_id: &str,
+    id: &str,
+) -> Result<Value> {
+    let _session =
+        extract::require_permission(state, headers, request_id, "esign.bundle.read").await?;
+    let sig_id = parse_uuid(id, "id", datum_core::SignatureId::from_uuid)?;
+    let body = datum_esign::archival_bundle(&ReadPool::new(state.pool().clone()), sig_id).await?;
+    Ok(serde_json::to_value(body)?)
+}
+
 pub async fn health() -> &'static str {
     crate::version()
 }

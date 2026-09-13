@@ -173,6 +173,8 @@ pub struct Profile {
     pub signature_edges: Vec<SignatureEdge>,
     /// Key 4.
     pub signature_gate_binding: GateBinding,
+    /// Key 4 sub-keys (`continuous_session`, idle/max windows).
+    pub session_policy: datum_esign::SessionPolicy,
     /// Key 5.
     pub validation_manifest: ValidationManifest,
     /// Key 6.
@@ -286,6 +288,7 @@ impl Profile {
         }
         let gate_tbl = toml::require_table(&root, "signature_gate_binding")?;
         let signature_gate_binding = GateBinding::parse(&toml::require_str(gate_tbl, "gate")?)?;
+        let session_policy = parse_session_policy(gate_tbl)?;
         let vm = toml::require_table(&root, "validation_manifest")?;
         let validation_manifest = ValidationManifest {
             generated: toml::require_bool(vm, "generated")?,
@@ -351,6 +354,7 @@ impl Profile {
             modules,
             signature_edges: Vec::new(),
             signature_gate_binding,
+            session_policy,
             validation_manifest,
             navigation,
             numbering,
@@ -389,7 +393,12 @@ impl Profile {
         );
         map.insert(
             "signature_gate_binding".into(),
-            serde_json::to_value(self.signature_gate_binding)?,
+            serde_json::json!({
+                "gate": self.signature_gate_binding,
+                "continuous_session": self.session_policy.continuous_session,
+                "idle_timeout_secs": self.session_policy.idle_timeout_secs,
+                "max_window_secs": self.session_policy.max_window_secs,
+            }),
         );
         map.insert(
             "validation_manifest".into(),
@@ -437,6 +446,24 @@ fn profile_keys_present(root: &BTreeMap<String, Value>) -> Result<BTreeSet<Strin
         }
     }
     Ok(present)
+}
+
+fn parse_session_policy(gate_tbl: &BTreeMap<String, Value>) -> Result<datum_esign::SessionPolicy> {
+    let defaults = datum_esign::SessionPolicy::default();
+    let continuous_session =
+        toml::optional_str(gate_tbl, "continuous_session")?.unwrap_or(defaults.continuous_session);
+    if continuous_session != "off" && continuous_session != "on" {
+        return Err(Error::Profile(format!(
+            "continuous_session must be \"off\" or \"on\", got {continuous_session}"
+        )));
+    }
+    Ok(datum_esign::SessionPolicy {
+        continuous_session,
+        idle_timeout_secs: toml::optional_int(gate_tbl, "idle_timeout_secs")?
+            .unwrap_or(defaults.idle_timeout_secs),
+        max_window_secs: toml::optional_int(gate_tbl, "max_window_secs")?
+            .unwrap_or(defaults.max_window_secs),
+    })
 }
 
 fn parse_modules(root: &BTreeMap<String, Value>) -> Result<Vec<ProfileModule>> {

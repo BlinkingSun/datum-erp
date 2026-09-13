@@ -74,6 +74,16 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/calibration/certificates/{id}/approve",
             post(handlers::approve_calibration),
         )
+        .route("/api/v1/esign/challenges", post(handlers::esign_challenge))
+        .route("/api/v1/esign/signatures", post(handlers::esign_mint))
+        .route(
+            "/api/v1/esign/signatures/{id}",
+            get(handlers::esign_manifestation),
+        )
+        .route(
+            "/api/v1/esign/signatures/{id}/bundle",
+            get(handlers::esign_bundle),
+        )
         .layer(DefaultBodyLimit::max(1024 * 1024))
         .layer(axum::middleware::from_fn(limits_mw))
         .layer(axum::middleware::from_fn(request_id_mw))

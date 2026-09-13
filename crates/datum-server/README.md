@@ -42,6 +42,20 @@ npx openapi-typescript http://127.0.0.1:8080/api/v1/openapi.json -o src/api.d.ts
 
 The first-party UI uses that client exclusively (ADR 0009).
 
+## Electronic signature HTTP (D-2b-5 / D-2b-8)
+
+| Condition | `code` | HTTP |
+|---|---|---|
+| No signing credential at mint (`identification.secret`) | `SIGNATURE_REQUIRED` | 401 |
+| Login secret presented as the signing component | `VALIDATION` | 400 |
+| Missing token on a `Required` edge | `SIGNATURE_REQUIRED` | 401 |
+| Dummy / invalid token while `datum-esign` is bound | `SIGNATURE_REQUIRED` | 403 |
+| Signer lacks the snapshotted permission | `SIGNATURE_REQUIRED` | 403 |
+| `NoSignatures` bound (`NoProvider`) | `SIGNATURE_NO_PROVIDER` | 409 |
+| `Consumed` / `HashMismatch` | `CONFLICT` | 409 |
+
+Regulated-device binds `datum-esign`, so a dummy token is **403 `SIGNATURE_REQUIRED`**, not 409 — 409 is only `NoProvider`. Plain-shop stays `NoSignatures` and enables no `Required` edge. Clients send the minted id as `X-Datum-Signature` (docs/10 §5.2). `POST /esign/signatures` records the idempotency replay in the **same** mint transaction.
+
 ## HTTP API (Wave 2s slice)
 
 | Method | Path | Permission |

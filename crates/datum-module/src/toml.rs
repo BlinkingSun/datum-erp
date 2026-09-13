@@ -341,6 +341,27 @@ pub(crate) fn require_bool(table: &BTreeMap<String, Value>, key: &str) -> Result
         .ok_or_else(|| Error::Toml(format!("missing bool {key}")))
 }
 
+pub(crate) fn optional_str(table: &BTreeMap<String, Value>, key: &str) -> Result<Option<String>> {
+    match table.get(key) {
+        None => Ok(None),
+        Some(v) => v
+            .as_str()
+            .map(str::to_string)
+            .ok_or_else(|| Error::Toml(format!("{key} must be a string")))
+            .map(Some),
+    }
+}
+
+pub(crate) fn optional_int(table: &BTreeMap<String, Value>, key: &str) -> Result<Option<i64>> {
+    match table.get(key) {
+        None => Ok(None),
+        Some(v) => v
+            .as_integer()
+            .ok_or_else(|| Error::Toml(format!("{key} must be an integer")))
+            .map(Some),
+    }
+}
+
 pub(crate) fn string_array(value: &Value) -> Result<Vec<String>> {
     let Some(arr) = value.as_array() else {
         return Err(Error::Toml("expected string array".into()));

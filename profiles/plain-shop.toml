@@ -115,6 +115,7 @@ permissions = [
   "production.view",
   "genealogy.view",
   "wo.release",
+  "esign.bundle.read",
 ]
 
 [[seeded_permissions.bundles]]
@@ -129,6 +130,7 @@ permissions = [
   "production.view",
   "genealogy.view",
   "wo.release",
+  "esign.bundle.read",
 ]
 
 [acceptance]

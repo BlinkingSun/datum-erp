@@ -7,8 +7,9 @@ mod common;
 use std::collections::BTreeSet;
 
 use datum_core::{
-    Actor, ActorKind, GroupKind, Identifier, PermissionKey, PostingGroupHeader, RecordRef,
-    SignatureError, SignatureId, SignatureMeaning, SignatureRequirement, SignatureToken,
+    Actor, ActorKind, GroupKind, Identifier, NoSignatures, PermissionKey, PostingGroupHeader,
+    RecordRef, SignatureError, SignatureGate, SignatureId, SignatureMeaning, SignatureRequirement,
+    SignatureToken,
 };
 use datum_db::{Tx, WriteContext};
 use datum_events::EventHandler;
@@ -48,6 +49,8 @@ fn kernel_order_is_a_topological_sort_of_contract_graph() {
     assert!(is_topological_sort(KERNEL_ORDER, CONTRACT_KERNEL_EDGES));
     assert_eq!(KERNEL_ORDER[0], "datum-db");
     assert_eq!(KERNEL_ORDER[1], "datum-audit");
+    assert!(KERNEL_ORDER.contains(&"datum-esign"));
+    assert!(KERNEL_ORDER.contains(&"datum-customfields"));
     assert_eq!(*KERNEL_ORDER.last().unwrap(), "datum-statemachine");
 }
 
@@ -201,6 +204,33 @@ fn startup_fails_release_required_edge_with_no_signatures() {
     assert!(err.to_string().contains("startup"), "got {err}");
     startup_fails_if_required_meets_no_signatures(&eng, true, false).unwrap();
     startup_fails_if_required_meets_no_signatures(&eng, false, true).unwrap();
+}
+
+#[test]
+fn regulated_device_startup_fails_if_required_meets_no_signatures() {
+    let req = SignatureRequirement {
+        meaning: SignatureMeaning("Approved".into()),
+        permission: PermissionKey("calibration.approve".into()),
+    };
+    let m = Machine::builder("calibration.certificate")
+        .regulated(true)
+        .edge(EdgeBuilder::new("Open", "Approved", "approve", "calibration.approve").required(req))
+        .build()
+        .unwrap();
+    let mut eng = Engine::new();
+    eng.register_machine(m).unwrap();
+    let err = startup_fails_if_required_meets_no_signatures(&eng, true, true)
+        .expect_err("release + NoSignatures + Required");
+    assert!(err.to_string().contains("startup"), "got {err}");
+    startup_fails_if_required_meets_no_signatures(&eng, true, false).unwrap();
+    startup_fails_if_required_meets_no_signatures(&eng, false, true).unwrap();
+    let profile = Profile::regulated_device().unwrap();
+    assert_eq!(
+        profile.signature_gate_binding,
+        GateBinding::DatumEsign,
+        "regulated-device binds datum-esign so a live release boot is not this failure"
+    );
+    assert_eq!(profile.session_policy.continuous_session, "off");
 }
 
 #[test]
@@ -700,19 +730,59 @@ impl EventHandler for DummySubscriber {
 fn signature_gate_comes_from_profile_toml_gate_field() {
     let regulated = Profile::regulated_device().unwrap();
     let plain = Profile::plain_shop().unwrap();
-    assert_eq!(regulated.signature_gate_binding, GateBinding::NoSignatures);
+    assert_eq!(regulated.signature_gate_binding, GateBinding::DatumEsign);
     assert_eq!(plain.signature_gate_binding, GateBinding::NoSignatures);
+    assert_eq!(regulated.session_policy.continuous_session, "off");
+    assert_eq!(plain.session_policy.continuous_session, "off");
+    let _esign = bind_signature_gate(regulated.signature_gate_binding);
+    let _noop = bind_signature_gate(plain.signature_gate_binding);
     let (token, required, record) = sample_token();
-    for profile in [&regulated, &plain] {
-        let gate = bind_signature_gate(profile.signature_gate_binding);
-        assert!(
-            matches!(
-                datum_core::SignatureGate::verify(&*gate, &token, &required, &record),
-                Err(SignatureError::NoProvider)
-            ),
-            "verify-only gate named by SPEC-profiles key 4 / CONTRACT §6.3"
-        );
-    }
+    assert!(
+        matches!(
+            NoSignatures.verify(&token, &required, &record),
+            Err(SignatureError::NoProvider)
+        ),
+        "NoSignatures factory named by SPEC-profiles key 4 / CONTRACT §6.3"
+    );
+}
+
+#[tokio::test]
+async fn signature_gate_returns_the_bound_gate() {
+    let db_plain = db_case!("mod_sgp");
+    migrate_and_install(&db_plain).await;
+    let (token, required, record) = sample_token();
+
+    let plain = Kernel::build(db_plain.app_pool(), Profile::plain_shop().unwrap())
+        .await
+        .expect("plain");
+    assert!(
+        matches!(
+            plain.signature_gate().verify(&token, &required, &record),
+            Err(SignatureError::NoProvider)
+        ),
+        "plain-shop signature_gate is NoSignatures"
+    );
+    db_plain.finish().await.expect("plain finish");
+
+    let db = db_case!("mod_sgr");
+    migrate_and_install(&db).await;
+    let regulated = Kernel::build(db.app_pool(), Profile::regulated_device().unwrap())
+        .await
+        .expect("regulated");
+    let err = regulated
+        .signature_gate()
+        .verify(&token, &required, &record)
+        .expect_err("dummy token on bound esign");
+    assert!(
+        matches!(err, SignatureError::Invalid(_)),
+        "regulated signature_gate is the esign binding, got {err:?}"
+    );
+    assert_ne!(
+        err,
+        SignatureError::NoProvider,
+        "bound esign must not look like NoSignatures"
+    );
+    db.finish().await.expect("finish");
 }
 
 #[tokio::test]
@@ -724,7 +794,7 @@ async fn regulated_required_set_from_registered_machine() {
         .expect("build regulated");
     assert_eq!(
         kernel.profile.signature_gate_binding,
-        GateBinding::NoSignatures,
+        GateBinding::DatumEsign,
         "gate field comes from the profile TOML"
     );
     assert!(
@@ -737,19 +807,55 @@ async fn regulated_required_set_from_registered_machine() {
         ),
         "calibration.certificate.approve must be listed"
     );
-    let (token, required, record) = sample_token();
-    assert!(matches!(
-        datum_core::SignatureGate::verify(kernel.signature_gate(), &token, &required, &record),
-        Err(SignatureError::NoProvider)
-    ));
+    assert!(
+        !kernel.gate_is_noop(),
+        "regulated-device binds the datum-esign factory"
+    );
     startup_fails_if_required_meets_no_signatures(&kernel.engine, true, true)
         .expect_err("§6.3 startup guard must trip on the live Required set");
+    startup_fails_if_required_meets_no_signatures(&kernel.engine, false, true)
+        .expect("esign-bound release boot is allowed");
     let stored = export_manifest(db.app_pool()).await.expect("export");
     stored.verify_self().expect("hashed");
     assert!(
         stored.signature_edges.iter().any(|e| e.is_required()),
         "manifest must list Required edges"
     );
+    db.finish().await.expect("finish");
+}
+
+#[tokio::test]
+async fn module_manifest_custom_fields_registered() {
+    let catalog = compiled_in().unwrap();
+    let cal = catalog
+        .iter()
+        .find(|m| m.id == "mod-calibration")
+        .expect("calibration");
+    assert!(
+        cal.custom_fields
+            .fields
+            .iter()
+            .any(|f| f.key == "udi_device_identifier"),
+        "compiled-in calibration manifest declares [[custom-fields]]"
+    );
+
+    let db = db_case!("mod_cf");
+    migrate_and_install(&db).await;
+    let kernel = Kernel::build(db.app_pool(), Profile::regulated_device().unwrap())
+        .await
+        .expect("build regulated");
+    let write = kernel.write_pool();
+    let mut tx = Tx::begin(&write, &boot_ctx()).await.expect("begin");
+    let defs = datum_customfields::definitions_for(&mut tx, "items.item")
+        .await
+        .expect("definitions_for");
+    assert!(
+        defs.iter().any(|d| d.key == "udi_device_identifier"
+            && d.entity == "items.item"
+            && d.owner_module == "mod-calibration"),
+        "install graph registered manifest custom fields: {defs:?}"
+    );
+    tx.commit().await.expect("commit");
     db.finish().await.expect("finish");
 }
 

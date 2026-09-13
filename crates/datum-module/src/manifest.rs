@@ -51,6 +51,9 @@ pub struct ModuleManifest {
     /// Job kinds declared on this manifest (`docs/03` §3).
     #[serde(default)]
     pub jobs: Vec<ManifestJob>,
+    /// `[[custom-fields]]` declared on this manifest.
+    #[serde(default, skip)]
+    pub custom_fields: datum_customfields::ManifestCustomFields,
     /// SQL applied inside [`crate::install`]'s transaction (`docs/03` §6).
     ///
     /// Compiled-in Wave 2s modules have none; tests supply `'static` statements.
@@ -140,6 +143,7 @@ impl ModuleManifest {
             Some(v) => toml::string_array(v)?,
             None => Vec::new(),
         };
+        let custom_fields = parse_custom_fields(&root, &id)?;
         let parsed = Self {
             id,
             version,
@@ -154,6 +158,7 @@ impl ModuleManifest {
             subscriptions: parse_subscriptions(&root)?,
             routes: parse_routes(&root)?,
             jobs: parse_jobs(&root)?,
+            custom_fields,
             migrations: Vec::new(),
         };
         parsed.validate()?;
@@ -334,6 +339,41 @@ fn parse_jobs(root: &BTreeMap<String, Value>) -> Result<Vec<ManifestJob>> {
     Ok(out)
 }
 
+fn parse_custom_fields(
+    root: &BTreeMap<String, Value>,
+    owner: &str,
+) -> Result<datum_customfields::ManifestCustomFields> {
+    let mut fields = Vec::new();
+    for table in table_array(root, "custom-fields")? {
+        let type_name = toml::require_str(table, "type")?;
+        let field_type = datum_customfields::FieldType::parse(&type_name)
+            .ok_or_else(|| Error::Manifest(format!("unknown custom field type {type_name}")))?;
+        let field_owner = table
+            .get("owner")
+            .and_then(Value::as_str)
+            .unwrap_or(owner)
+            .to_string();
+        fields.push(datum_customfields::ManifestCustomField {
+            entity: toml::require_str(table, "entity")?,
+            key: toml::require_str(table, "key")?,
+            field_type,
+            label: toml::require_str(table, "label")?,
+            validate: toml::require_str(table, "validate")?,
+            audit: toml::require_bool(table, "audit")?,
+            required: table
+                .get("required")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            indexed: table
+                .get("indexed")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            owner: field_owner,
+        });
+    }
+    Ok(datum_customfields::ManifestCustomFields { fields })
+}
+
 fn string_map(value: Option<&Value>) -> Result<BTreeMap<String, String>> {
     let Some(v) = value else {
         return Ok(BTreeMap::new());
@@ -488,6 +528,17 @@ signature_permission = "calibration.approve"
 [[routes]]
 path = "/api/v1/calibration"
 permission = "calibration.view"
+
+[[custom-fields]]
+entity = "items.item"
+key = "udi_device_identifier"
+type = "string"
+label = "UDI-DI"
+validate = "gs1-gtin"
+audit = true
+required = false
+indexed = false
+owner = "mod-calibration"
 "#;
     let wave = [
         ModuleManifest::parse(crate::install_graph::ITEMS_MANIFEST)?,

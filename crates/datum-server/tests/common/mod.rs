@@ -8,7 +8,9 @@ use axum::http::{Request, StatusCode};
 use datum_core::{Actor, ActorKind, Identifier};
 use datum_db::{Tx, WriteContext, WritePool};
 use datum_identity::rbac::{RoleBundle, assign_role, seed_bundles};
-use datum_identity::{PrincipalKind, create_principal, set_login_credential};
+use datum_identity::{
+    PrincipalKind, create_principal, set_login_credential, set_signing_credential,
+};
 use datum_module::{Profile, ProfileId};
 use datum_server::{App, AppState, router};
 use serde_json::{Value, json};
@@ -28,6 +30,7 @@ fn rewrite_db(url: &str, database: &str) -> String {
 
 pub const PASSWORD: &str = "reyes-login";
 pub const USERNAME: &str = "mreyes";
+pub const SIGNING_SECRET: &str = "signing-secret-ok";
 pub const NOPERM_USER: &str = "noperm";
 pub const NOPERM_PASSWORD: &str = "noperm-login";
 
@@ -115,6 +118,9 @@ async fn seed_operator(pool: &datum_db::Pool, profile: &Profile) {
     set_login_credential(&mut tx, p.id, PASSWORD)
         .await
         .expect("password");
+    set_signing_credential(&mut tx, p.id, SIGNING_SECRET)
+        .await
+        .expect("signing cred");
     let roles = seed_bundles(
         &mut tx,
         &[RoleBundle {
@@ -145,6 +151,7 @@ async fn seed_operator(pool: &datum_db::Pool, profile: &Profile) {
                 "audit.export".into(),
                 "wo.release".into(),
                 "calibration.approve".into(),
+                "esign.bundle.read".into(),
             ],
         }],
     )
