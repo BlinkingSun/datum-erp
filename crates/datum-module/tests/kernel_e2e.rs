@@ -6,8 +6,8 @@ mod common;
 
 use datum_core::{
     AnyQuantity, Boundary, ConversionContext, CostElement, CountDim, CurrencyId, DimensionKind,
-    Identifier, ItemId, LocationId, Money, PermissionKey, PostingIntent, PostingSink, Quantity,
-    QuantityPosting, SignatureError, SignatureGate, SignatureId, SignatureMeaning,
+    Identifier, ItemId, LocationId, Money, NoPostings, PermissionKey, PostingIntent, PostingSink,
+    Quantity, QuantityPosting, SignatureError, SignatureGate, SignatureId, SignatureMeaning,
     SignatureRequirement, SignatureToken, UnitId, UnitRef, ValueAccount, ValuePosting,
 };
 use datum_db::Tx;
@@ -842,5 +842,200 @@ async fn kernel_e2e_regulated_release_with_real_signature() {
         .expect_err("second use");
     assert_eq!(err, SignatureError::Consumed);
     tx.rollback().await.ok();
+    db.finish().await.expect("finish");
+}
+
+#[tokio::test]
+async fn regulated_release_refused_without_signature_succeeds_with_two_component_signature() {
+    let db_plain = db_case!("e2e_cmpp");
+    migrate_and_install(&db_plain).await;
+
+    let plain = Kernel::build(db_plain.app_pool(), Profile::plain_shop().unwrap())
+        .await
+        .expect("plain");
+    let plain_write = plain.write_pool();
+    let wo = DocRef {
+        doc_type: "wo".into(),
+        doc_id: Identifier::generate(),
+    };
+    let actor = actor_with_perms(&plain_write, &["wo.release"]).await;
+    let mut ctx = plain.transition_context(actor, &wo, "release");
+    ctx.actor_display = Some("Operator".into());
+    ctx.reason = Some("kernel-e2e".into());
+    let mut tx = Tx::begin(&plain_write, &ctx).await.expect("spawn wo");
+    plain.spawn(&mut tx, &wo, "Draft").await.expect("spawn wo");
+    tx.commit().await.expect("spawn wo commit");
+    let mut tx = Tx::begin(&plain_write, &ctx).await.expect("plain rel");
+    plain
+        .transition(&mut tx, &wo, "release", None, &ctx)
+        .await
+        .expect("plain-shop unsigned release");
+    tx.commit().await.expect("plain commit");
+    assert!(
+        matches!(
+            plain.signature_gate().verify(
+                &dummy_token(&wo, 1, actor),
+                &SignatureRequirement {
+                    meaning: SignatureMeaning("Released".into()),
+                    permission: PermissionKey("wo.release".into()),
+                },
+                &datum_core::RecordRef {
+                    table: "sm.instance".into(),
+                    id: wo.doc_id,
+                    version: 1,
+                },
+            ),
+            Err(SignatureError::NoProvider)
+        ),
+        "plain-shop signature_gate stays NoSignatures"
+    );
+    db_plain.finish().await.expect("plain finish");
+
+    let db = db_case!("e2e_cmpr");
+    migrate_and_install(&db).await;
+    let kernel = Kernel::build(db.app_pool(), Profile::regulated_device().unwrap())
+        .await
+        .expect("regulated");
+    let write = kernel.write_pool();
+    let principal = signer_with_perms(&write, &["calibration.approve"]).await;
+    let doc = DocRef {
+        doc_type: "calibration.certificate".into(),
+        doc_id: Identifier::generate(),
+    };
+    let mut spawn_ctx = kernel.transition_context(principal.actor(), &doc, "approve");
+    spawn_ctx.actor_display = Some(principal.display_name.clone());
+    spawn_ctx.reason = Some("kernel-e2e".into());
+    let mut tx = Tx::begin(&write, &spawn_ctx)
+        .await
+        .expect("spawn");
+    kernel.spawn(&mut tx, &doc, "Open").await.expect("spawn");
+    tx.commit().await.expect("spawn commit");
+
+    let dummy = dummy_token(&doc, 1, principal.actor());
+    let required = SignatureRequirement {
+        meaning: SignatureMeaning("Approved".into()),
+        permission: PermissionKey("calibration.approve".into()),
+    };
+    let rec = datum_core::RecordRef {
+        table: "sm.instance".into(),
+        id: doc.doc_id,
+        version: 1,
+    };
+    let gate_err = kernel
+        .signature_gate()
+        .verify(&dummy, &required, &rec)
+        .expect_err("bound esign");
+    assert!(
+        matches!(gate_err, SignatureError::Invalid(_)),
+        "inventory-style Engine::transition callers see the bound gate, got {gate_err:?}"
+    );
+
+    let mut tx = Tx::begin(&write, &spawn_ctx)
+        .await
+        .expect("dummy begin");
+    let dummy_err = kernel
+        .engine
+        .transition(
+            &mut tx,
+            Box::new(NoPostings),
+            &doc,
+            "approve",
+            Some(&dummy),
+            kernel.signature_gate(),
+            &spawn_ctx,
+        )
+        .await
+        .expect_err("dummy Engine::transition");
+    assert!(
+        matches!(
+            dummy_err,
+            datum_statemachine::Error::Signature(SignatureError::Invalid(_))
+        ),
+        "Engine::transition through signature_gate refuses dummy, got {dummy_err:?}"
+    );
+    tx.rollback().await.ok();
+
+    let mut tx = Tx::begin(&write, &spawn_ctx)
+        .await
+        .expect("kt dummy");
+    let kt_err = kernel
+        .transition(&mut tx, &doc, "approve", Some(&dummy), &spawn_ctx)
+        .await
+        .expect_err("Kernel dummy");
+    assert!(
+        matches!(
+            kt_err,
+            datum_module::Error::Statemachine(datum_statemachine::Error::Signature(
+                SignatureError::Invalid(_)
+            ))
+        ),
+        "Kernel::transition dummy, got {kt_err:?}"
+    );
+    tx.rollback().await.ok();
+
+    let (state, version): (String, i64) = sqlx::query_as(
+        r#"SELECT state, version FROM sm.instance
+            WHERE doc_type = $1 AND doc_id = $2"#,
+    )
+    .bind(&doc.doc_type)
+    .bind(doc.doc_id.as_uuid())
+    .fetch_one(db.app_pool())
+    .await
+    .expect("instance");
+    let inst = InstanceTriple {
+        doc_type: doc.doc_type.clone(),
+        doc_id: doc.doc_id,
+        state,
+        version,
+    };
+    let rec = datum_core::RecordRef {
+        table: "sm.instance".into(),
+        id: doc.doc_id,
+        version,
+    };
+    let mint_ctx = boot_ctx();
+    let mut mint_tx = Tx::begin(&write, &mint_ctx)
+        .await
+        .expect("mint");
+    let sig = mint(
+        &mut mint_tx,
+        &MintRequest {
+            components: vec!["code".into(), "secret".into()],
+            code: Some(principal.username.clone()),
+            secret: SIGNING_SECRET.into(),
+            meaning: SignatureMeaning("Approved".into()),
+            reason: None,
+            record: rec.clone(),
+            doc_type: doc.doc_type.clone(),
+            projection: json!({}),
+            instance: inst,
+            permission: PermissionKey("calibration.approve".into()),
+            signed_at_zone: kernel.profile.seeded_permissions.display_timezone.clone(),
+            policy: kernel.profile.session_policy.clone(),
+            principal: principal.clone(),
+            login_session_id: None,
+            device_fingerprint: Some("e2e-tablet".into()),
+            source_ip: Some("127.0.0.1".into()),
+            boot_epoch: "1".into(),
+            credential_kind: "signing_password".into(),
+        },
+    )
+    .await
+    .expect("mint both components");
+    mint_tx.commit().await.expect("mint commit");
+
+    let token = sig.token(principal.actor());
+    let mut ctx = kernel.transition_context(principal.actor(), &doc, "approve");
+    ctx.actor_display = Some(principal.display_name.clone());
+    ctx.reason = Some("kernel-e2e".into());
+    let mut tx = Tx::begin(&write, &ctx)
+        .await
+        .expect("signed begin");
+    let out = kernel
+        .transition(&mut tx, &doc, "approve", Some(&token), &ctx)
+        .await
+        .expect("two-component signature is consumed");
+    assert_eq!(out.state.0, "Approved");
+    tx.commit().await.expect("signed commit");
     db.finish().await.expect("finish");
 }

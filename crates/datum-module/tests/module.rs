@@ -747,6 +747,45 @@ fn signature_gate_comes_from_profile_toml_gate_field() {
 }
 
 #[tokio::test]
+async fn signature_gate_returns_the_bound_gate() {
+    let db_plain = db_case!("mod_sgp");
+    migrate_and_install(&db_plain).await;
+    let (token, required, record) = sample_token();
+
+    let plain = Kernel::build(db_plain.app_pool(), Profile::plain_shop().unwrap())
+        .await
+        .expect("plain");
+    assert!(
+        matches!(
+            plain.signature_gate().verify(&token, &required, &record),
+            Err(SignatureError::NoProvider)
+        ),
+        "plain-shop signature_gate is NoSignatures"
+    );
+    db_plain.finish().await.expect("plain finish");
+
+    let db = db_case!("mod_sgr");
+    migrate_and_install(&db).await;
+    let regulated = Kernel::build(db.app_pool(), Profile::regulated_device().unwrap())
+        .await
+        .expect("regulated");
+    let err = regulated
+        .signature_gate()
+        .verify(&token, &required, &record)
+        .expect_err("dummy token on bound esign");
+    assert!(
+        matches!(err, SignatureError::Invalid(_)),
+        "regulated signature_gate is the esign binding, got {err:?}"
+    );
+    assert_ne!(
+        err,
+        SignatureError::NoProvider,
+        "bound esign must not look like NoSignatures"
+    );
+    db.finish().await.expect("finish");
+}
+
+#[tokio::test]
 async fn regulated_required_set_from_registered_machine() {
     let db = db_case!("mod_reqd");
     migrate_and_install(&db).await;

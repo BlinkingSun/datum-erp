@@ -81,11 +81,47 @@ pub struct Kernel {
     pub job_kinds: Vec<ModuleJob>,
     /// Bound from the profile TOML `gate` field (SPEC-profiles key 4).
     gate: GateFactory,
-    /// Sync `SignatureGate` for callers that still pass a gate into `Engine::transition`.
-    /// `Kernel::transition` uses [`Self::gate`] (the factory) instead.
-    noop: NoSignatures,
+    /// Profile-bound sync gate for `Engine::transition` callers (inventory, production).
+    /// [`Kernel::transition`] prepares a per-Tx gate from [`Self::gate`] instead.
+    bound: BoundSyncGate,
     catalog: Vec<ModuleManifest>,
     pool: Pool,
+}
+
+/// Sync stand-in returned by [`Kernel::signature_gate`].
+///
+/// [`Kernel::transition`] still calls [`GateFactory::prepare`] inside the
+/// transition Tx. This type exists so modules that pass
+/// `kernel.signature_gate()` into `Engine::transition` observe the **bound**
+/// provider: `NoSignatures` under plain-shop, and `Invalid` (never
+/// `NoProvider`) when `datum-esign` is bound.
+#[derive(Debug, Clone, Copy)]
+enum BoundSyncGate {
+    NoSignatures(NoSignatures),
+    DatumEsign,
+}
+
+impl BoundSyncGate {
+    fn from_binding(binding: GateBinding) -> Self {
+        match binding {
+            GateBinding::NoSignatures => Self::NoSignatures(NoSignatures),
+            GateBinding::DatumEsign => Self::DatumEsign,
+        }
+    }
+}
+
+impl SignatureGate for BoundSyncGate {
+    fn verify(
+        &self,
+        token: &SignatureToken,
+        required: &SignatureRequirement,
+        record: &RecordRef,
+    ) -> core::result::Result<(), SignatureError> {
+        match self {
+            Self::NoSignatures(g) => g.verify(token, required, record),
+            Self::DatumEsign => Err(SignatureError::Invalid("no such signature".into())),
+        }
+    }
 }
 
 /// Registration callback: machines and hooks are registered, then [`Kernel::build`] freezes.
@@ -230,6 +266,7 @@ impl Kernel {
         engine.freeze()?;
 
         let gate = bind_signature_gate(profile.signature_gate_binding);
+        let bound = BoundSyncGate::from_binding(profile.signature_gate_binding);
         let events = datum_events::Registry::new();
         let jobs = datum_jobs::Registry::new();
         datum_jobs::register_maintenance(&jobs);
@@ -248,7 +285,7 @@ impl Kernel {
             subscriptions,
             job_kinds,
             gate,
-            noop: NoSignatures,
+            bound,
             catalog,
             pool,
         };
@@ -316,11 +353,56 @@ impl Kernel {
             .await?)
     }
 
-    /// Sync [`SignatureGate`] for callers that still pass a gate into `Engine::transition`.
+    /// Bound [`SignatureGate`] for callers that pass a gate into `Engine::transition`.
     ///
-    /// `Kernel::transition` prepares a per-transaction gate from [`Self::signature_gate_factory`].
+    /// Plain-shop: [`NoSignatures`]. Regulated-device: the esign binding (dummy /
+    /// unprepared tokens are [`SignatureError::Invalid`], never `NoProvider`).
+    /// [`Kernel::transition`] prepares a per-transaction gate from
+    /// [`Self::signature_gate_factory`] so a real two-component token is claimed
+    /// in the same Tx as `sm.instance` and audit.
     pub fn signature_gate(&self) -> &dyn SignatureGate {
-        &self.noop
+        &self.bound
+    }
+
+    /// Load a [`SignatureToken`] for `X-Datum-Signature` (composition-root read).
+    pub async fn load_signature_token(
+        &self,
+        tx: &mut Tx<'_>,
+        id: SignatureId,
+    ) -> Result<Option<SignatureToken>> {
+        let row: Option<(sqlx::types::Uuid, String, String, sqlx::types::Uuid, i64, Vec<u8>)> =
+            tx
+            .fetch_optional(
+                sqlx::query_as(
+                    r#"SELECT signer_id, meaning, record_table, record_id, record_version,
+                              record_content_hash
+                         FROM esign.signature
+                        WHERE signature_id = $1"#,
+                )
+                .bind(id.as_uuid()),
+            )
+            .await?;
+        let Some((signer_id, meaning, table, rec_id, version, hash_bytes)) = row else {
+            return Ok(None);
+        };
+        let mut record_content_hash = [0u8; 32];
+        if hash_bytes.len() == 32 {
+            record_content_hash.copy_from_slice(&hash_bytes);
+        }
+        Ok(Some(SignatureToken {
+            signature: id,
+            signer: Actor {
+                id: Identifier::from_uuid(signer_id),
+                kind: ActorKind::User,
+            },
+            meaning: SignatureMeaning(meaning),
+            record: RecordRef {
+                table,
+                id: Identifier::from_uuid(rec_id),
+                version,
+            },
+            record_content_hash,
+        }))
     }
 
     /// `WriteContext` whose bound action is `"<doc_type>.<edge>"` (executor obligation).
