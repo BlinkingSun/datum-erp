@@ -233,6 +233,79 @@ pub async fn count_security(pool: &PgPool) -> i64 {
     .expect("security count")
 }
 
-pub fn both_profiles() -> [&'static str; 2] {
-    ["plain-shop", "regulated-device"]
+/// A shipped (or test-variant) profile's session policy, parsed from TOML.
+#[derive(Debug, Clone)]
+pub struct ProfileCase {
+    /// Short slug for database names.
+    pub slug: &'static str,
+    /// Profile file id (`plain-shop`, `regulated-device`, …).
+    pub id: &'static str,
+    /// `[signature_gate_binding]` sub-keys.
+    pub policy: SessionPolicy,
+}
+
+/// Both shipped profile TOMLs (SPEC-profiles key 4). Missing sub-keys default off/300/900.
+pub fn both_profiles() -> [ProfileCase; 2] {
+    [
+        parse_profile(
+            "ps",
+            "plain-shop",
+            include_str!("../../../../profiles/plain-shop.toml"),
+        ),
+        parse_profile(
+            "rd",
+            "regulated-device",
+            include_str!("../../../../profiles/regulated-device.toml"),
+        ),
+    ]
+}
+
+/// Relaxation-on variant for `one_component_continuation_accepted_when_on` only.
+pub fn relaxation_on_profile() -> ProfileCase {
+    parse_profile(
+        "on",
+        "regulated-device-on",
+        r#"
+[signature_gate_binding]
+gate = "datum-esign"
+continuous_session = "on"
+idle_timeout_secs = 300
+max_window_secs = 900
+"#,
+    )
+}
+
+pub fn parse_profile(slug: &'static str, id: &'static str, toml: &str) -> ProfileCase {
+    let mut policy = SessionPolicy::default();
+    let mut in_gate = false;
+    for line in toml.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            in_gate = line.starts_with("[signature_gate_binding]");
+            continue;
+        }
+        if !in_gate || line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((k, v)) = line.split_once('=') else {
+            continue;
+        };
+        let k = k.trim();
+        let v = v.trim().trim_matches('"');
+        match k {
+            "continuous_session" => policy.continuous_session = v.to_owned(),
+            "idle_timeout_secs" => {
+                if let Ok(n) = v.parse() {
+                    policy.idle_timeout_secs = n;
+                }
+            }
+            "max_window_secs" => {
+                if let Ok(n) = v.parse() {
+                    policy.max_window_secs = n;
+                }
+            }
+            _ => {}
+        }
+    }
+    ProfileCase { slug, id, policy }
 }
