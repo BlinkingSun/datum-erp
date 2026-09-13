@@ -15,7 +15,7 @@ command -v rg >/dev/null 2>&1 || {
 cd "$REPO_ROOT" || exit 1
 
 # schema:owning-crate-basename (modules use directory name; owner is Cargo package name).
-SCHEMA_OWNERS='identity:datum-identity uom:datum-uom ledger:datum-ledger sm:datum-statemachine jobs:datum-jobs events:datum-events numbering:datum-numbering audit:datum-audit items:datum-mod-items locations:datum-mod-locations lots:datum-mod-lots inventory:datum-mod-inventory genealogy:datum-mod-genealogy production_min:datum-mod-production-min server:datum-server datum:datum-db'
+SCHEMA_OWNERS='identity:datum-identity uom:datum-uom ledger:datum-ledger sm:datum-statemachine jobs:datum-jobs events:datum-events numbering:datum-numbering audit:datum-audit items:datum-mod-items locations:datum-mod-locations lots:datum-mod-lots inventory:datum-mod-inventory genealogy:datum-mod-genealogy production_min:datum-mod-production-min documents:datum-documents print:datum-print esign:datum-esign customfields:datum-customfields server:datum-server datum:datum-db'
 
 # Parse rg -n "file:line:text", including an optional Windows drive letter (C:).
 # Sets HIT_FILE, HIT_LINE, HIT_TEXT. Returns 0 on success.

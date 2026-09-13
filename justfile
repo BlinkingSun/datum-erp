@@ -46,8 +46,9 @@ lint-sql:
     # Allow-list: owning crate, datum-module (composition root), datum-test (harness).
     # Production src only - kernel tests may probe audit.event / seed uom.item_stock.
     # Scan per-crate src/ (no path-separator globs): negative **/owner/** fails on Windows paths.
+    # Dynamic construction (format/quote_ident/'schema.' concat) is lint-sql-dynamic.sh.
     fail=0; \
-    for pair in identity:datum-identity uom:datum-uom ledger:datum-ledger sm:datum-statemachine jobs:datum-jobs events:datum-events numbering:datum-numbering audit:datum-audit items:datum-mod-items locations:datum-mod-locations lots:datum-mod-lots inventory:datum-mod-inventory production_min:datum-mod-production-min genealogy:datum-mod-genealogy; do \
+    for pair in identity:datum-identity uom:datum-uom ledger:datum-ledger sm:datum-statemachine jobs:datum-jobs events:datum-events numbering:datum-numbering audit:datum-audit items:datum-mod-items locations:datum-mod-locations lots:datum-mod-lots inventory:datum-mod-inventory production_min:datum-mod-production-min genealogy:datum-mod-genealogy documents:datum-documents print:datum-print esign:datum-esign customfields:datum-customfields; do \
       schema="${pair%%:*}"; \
       owner="${pair##*:}"; \
       for tree in "{{root}}/crates" "{{root}}/modules"; do \
@@ -73,6 +74,9 @@ lint-sql:
     # outside the explicit owner exemption set (see scripts/lint-sql-r2s3.sh).
     REPO_ROOT="{{root}}" bash "{{root}}/scripts/lint-sql-r2s3.sh"
     REPO_ROOT="{{root}}" bash "{{root}}/scripts/lint-sql-migrations.sh"
+    # Dynamic schema construction: format()/quote_ident/'schema.' concat
+    # (the documents live_machine_state evasion). Same exemption lists.
+    REPO_ROOT="{{root}}" bash "{{root}}/scripts/lint-sql-dynamic.sh"
 
 # Plant bad migrations in a throwaway tree (never the real repo) and assert the lints fail.
 lint-sql-selftest:
@@ -85,6 +89,10 @@ lint-sql-selftest:
     mkdir -p \
       "$tmp/crates/datum-server/migrations" \
       "$tmp/crates/datum-uom/migrations" \
+      "$tmp/crates/datum-documents/migrations" \
+      "$tmp/crates/datum-documents/src" \
+      "$tmp/crates/datum-module/src" \
+      "$tmp/crates/datum-ledger/src" \
       "$tmp/modules/items/migrations" \
       "$tmp/modules/items/src" \
       "$tmp/modules/lots/src" \
@@ -106,6 +114,10 @@ lint-sql-selftest:
     fi; \
     if ! REPO_ROOT="$tmp" bash "$root/scripts/lint-sql-r2s3.sh" --selftest-hits; then \
       echo 'lint-sql-selftest: Windows-shaped R-2s-3 hit parser failed' >&2; \
+      exit 1; \
+    fi; \
+    if ! REPO_ROOT="$tmp" bash "$root/scripts/lint-sql-dynamic.sh" --selftest-hits; then \
+      echo 'lint-sql-selftest: dynamic SQL fixture parser failed' >&2; \
       exit 1; \
     fi; \
     run_lint() { REPO_ROOT="$tmp" bash "$root/scripts/lint-sql-migrations.sh" 2>/dev/null; }; \
@@ -164,7 +176,78 @@ lint-sql-selftest:
       exit 1; \
     fi; \
     echo 'lint-sql-selftest: planted R-2s-3 ledger.* SQL correctly rejected'; \
-    echo 'lint-sql-selftest: R-2s-3 negatives (comment, ::ledger.boundary, inventory_transient, has_postings) correctly allowed'
+    echo 'lint-sql-selftest: R-2s-3 negatives (comment, ::ledger.boundary, inventory_transient, has_postings) correctly allowed'; \
+    plant_dyn_doc="$tmp/crates/datum-documents/migrations/99999999999999_lint_sql_dyn_documents.up.sql"; \
+    plant_dyn_qid="$tmp/modules/items/src/_lint_sql_dyn_quote_ident.rs"; \
+    plant_dyn_concat="$tmp/modules/items/src/_lint_sql_dyn_concat.rs"; \
+    plant_dyn_ok="$tmp/modules/lots/src/_lint_sql_dyn_ok.rs"; \
+    plant_dyn_exempt="$tmp/crates/datum-module/src/_lint_sql_dyn_exempt.rs"; \
+    plant_dyn_own="$tmp/crates/datum-documents/src/_lint_sql_dyn_own.rs"; \
+    plant_dyn_r2s3_ex="$tmp/crates/datum-ledger/src/_lint_sql_dyn_r2s3_exempt.rs"; \
+    printf '%s\n' \
+      '-- lint-sql-selftest: documents live_machine_state evasion' \
+      'CREATE FUNCTION documents.live_machine_state(p_doc_id uuid) RETURNS text' \
+      'LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog, pg_temp AS $fn$' \
+      'DECLARE' \
+      '  live_state text;' \
+      'BEGIN' \
+      '  EXECUTE format(' \
+      "    'SELECT state FROM %I.%I WHERE doc_type = \$1 AND doc_id = \$2'," \
+      "    'sm'," \
+      "    'instance'" \
+      '  )' \
+      '  INTO live_state' \
+      "  USING 'document', p_doc_id;" \
+      '  RETURN live_state;' \
+      'END' \
+      '$fn$;' \
+      > "$plant_dyn_doc"; \
+    printf '%s\n' \
+      'fn _lint_sql_dyn_quote_ident() { let _ = "SELECT state FROM " + quote_ident("sm"); }' \
+      > "$plant_dyn_qid"; \
+    printf '%s\n' \
+      'fn _lint_sql_dyn_concat() { let _ = "SELECT 1 FROM " + "ledger." + "posting"; }' \
+      > "$plant_dyn_concat"; \
+    printf '%s\n' \
+      '/// comment format('\''sm'\'') and quote_ident('\''ledger'\'') must not trip the rule' \
+      'fn _lint_sql_dyn_ok() {' \
+      '    let _ = format!("status {sm}");' \
+      '    let _ = ts.format("%Y-%m-%d");' \
+      '}' \
+      > "$plant_dyn_ok"; \
+    printf '%s\n' \
+      'fn _lint_sql_dyn_exempt() { let _ = "EXECUTE format('\''%I.%I'\'', '\''sm'\'', '\''instance'\'')"; }' \
+      > "$plant_dyn_exempt"; \
+    printf '%s\n' \
+      'fn _lint_sql_dyn_own() { let _ = "EXECUTE format('\''%I.%I'\'', '\''documents'\'', '\''document'\'')"; }' \
+      > "$plant_dyn_own"; \
+    printf '%s\n' \
+      'fn _lint_sql_dyn_r2s3_exempt() { let _ = "EXECUTE format('\''%I.%I'\'', '\''ledger'\'', '\''posting'\'')"; }' \
+      > "$plant_dyn_r2s3_ex"; \
+    dyn_out="$(REPO_ROOT="$tmp" bash "$root/scripts/lint-sql-dynamic.sh" 2>&1 || true)"; \
+    if ! printf '%s\n' "$dyn_out" | grep -F 'crates/datum-documents/migrations/99999999999999_lint_sql_dyn_documents.up.sql' >/dev/null; then \
+      echo 'lint-sql-selftest: expected dynamic lint to report planted documents format('\''sm'\'') evasion' >&2; \
+      printf '%s\n' "$dyn_out" >&2; \
+      exit 1; \
+    fi; \
+    if ! printf '%s\n' "$dyn_out" | grep -F 'modules/items/src/_lint_sql_dyn_quote_ident.rs' >/dev/null; then \
+      echo 'lint-sql-selftest: expected dynamic lint to report planted quote_ident("sm")' >&2; \
+      printf '%s\n' "$dyn_out" >&2; \
+      exit 1; \
+    fi; \
+    if ! printf '%s\n' "$dyn_out" | grep -F 'modules/items/src/_lint_sql_dyn_concat.rs' >/dev/null; then \
+      echo 'lint-sql-selftest: expected dynamic lint to report planted concatenation '\''ledger.'\''' >&2; \
+      printf '%s\n' "$dyn_out" >&2; \
+      exit 1; \
+    fi; \
+    if printf '%s\n' "$dyn_out" | grep -E 'modules/lots/src/_lint_sql_dyn_ok.rs|crates/datum-module/src/_lint_sql_dyn_exempt.rs|crates/datum-documents/src/_lint_sql_dyn_own.rs|crates/datum-ledger/src/_lint_sql_dyn_r2s3_exempt.rs' >/dev/null; then \
+      echo 'lint-sql-selftest: dynamic lint false-positive on comment / format! / .format / exempt crate / own schema' >&2; \
+      printf '%s\n' "$dyn_out" >&2; \
+      exit 1; \
+    fi; \
+    echo 'lint-sql-selftest: planted documents EXECUTE format('\''%I.%I'\'','\''sm'\'',...) evasion correctly rejected'; \
+    echo 'lint-sql-selftest: planted quote_ident and '\''schema.'\'' concatenation correctly rejected'; \
+    echo 'lint-sql-selftest: dynamic SQL negatives (comment, format!, .format, datum-module, own schema, R-2s-3 exempt) correctly allowed'
 
 # All tests, including integration.
 test:
