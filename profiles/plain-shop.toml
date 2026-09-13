@@ -115,6 +115,15 @@ permissions = [
   "production.view",
   "genealogy.view",
   "wo.release",
+  "customfields.view",
+  "documents.view",
+  "print.templates",
+  "print.render",
+  "customfields.define",
+  "customfields.set",
+  "customfields.retire",
+  "documents.edit",
+  "print.archive",
 ]
 
 [[seeded_permissions.bundles]]
@@ -129,6 +138,17 @@ permissions = [
   "production.view",
   "genealogy.view",
   "wo.release",
+  "customfields.define",
+  "customfields.retire",
+  "customfields.view",
+  "customfields.set",
+  "documents.view",
+  "documents.edit",
+  "documents.approve",
+  "documents.release",
+  "print.render",
+  "print.archive",
+  "print.templates",
 ]
 
 [acceptance]

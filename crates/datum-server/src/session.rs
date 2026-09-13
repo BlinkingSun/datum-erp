@@ -38,6 +38,17 @@ pub const KNOWN_PERMISSIONS: &[&str] = &[
     "calibration.approve",
     "wo.release",
     "esign.bundle.read",
+    "customfields.define",
+    "customfields.retire",
+    "customfields.view",
+    "customfields.set",
+    "documents.view",
+    "documents.edit",
+    "documents.approve",
+    "documents.release",
+    "print.render",
+    "print.archive",
+    "print.templates",
 ];
 
 /// Authenticated HTTP session copied from `datum-identity::login` into

@@ -300,6 +300,9 @@ pub const MOUNTED: &[Mounted] = &[
         permission: "esign.bundle.read",
         state_transition: false,
     },
+    // w3b:customfields
+    // w3b:documents
+    // w3b:print
 ];
 
 /// Merge kernel + mounted routes into one OpenAPI 3 document.

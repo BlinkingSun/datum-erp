@@ -46,6 +46,15 @@ pub enum Error {
     /// Genealogy module.
     #[error(transparent)]
     Genealogy(#[from] datum_mod_genealogy::Error),
+    /// Custom fields.
+    #[error(transparent)]
+    Customfields(#[from] datum_customfields::Error),
+    /// Controlled documents.
+    #[error(transparent)]
+    Documents(#[from] datum_documents::Error),
+    /// Print / render.
+    #[error(transparent)]
+    Print(#[from] datum_print::Error),
     /// Ledger error.
     #[error(transparent)]
     Ledger(#[from] datum_ledger::Error),
@@ -265,6 +274,9 @@ impl Error {
                 None,
                 self.to_string(),
             ),
+            Self::Customfields(e) => crate::handlers::customfields::envelope_arm(e),
+            Self::Documents(e) => crate::handlers::documents::envelope_arm(e),
+            Self::Print(e) => crate::handlers::print::envelope_arm(e),
             _ => (
                 "INTERNAL",
                 StatusCode::INTERNAL_SERVER_ERROR,

@@ -1107,7 +1107,7 @@ async fn issue_wo_is_one_transaction() {
     if common::skip_if_no_pg() {
         return;
     }
-    let src = include_str!("../src/handlers.rs");
+    let src = include_str!("../src/handlers/mod.rs");
     let start = src.find("async fn issue_wo_inner").expect("issue_wo_inner");
     let rest = &src[start..];
     let end = rest
@@ -1287,7 +1287,7 @@ async fn reverse_issue_restores_on_hand() {
     if common::skip_if_no_pg() {
         return;
     }
-    let src = include_str!("../src/handlers.rs");
+    let src = include_str!("../src/handlers/mod.rs");
     let start = src.find("async fn reverse_inner").expect("reverse_inner");
     let rest = &src[start..];
     let end = rest.find("/// Health.").unwrap_or(rest.len());
@@ -1599,7 +1599,7 @@ async fn get_handlers_are_read_only() {
         "esign_bundle",
         "esign_bundle_inner",
     ];
-    let src = include_str!("../src/handlers.rs");
+    let src = include_str!("../src/handlers/mod.rs");
     for name in GET_FNS {
         let body = fn_src(src, name);
         assert_eq!(
