@@ -10,8 +10,83 @@ command -v rg >/dev/null 2>&1 || {
   exit 1
 }
 
+cd "$REPO_ROOT" || exit 1
+
 # schema:owning-crate-basename (modules use directory name; owner is Cargo package name).
 SCHEMA_OWNERS='identity:datum-identity uom:datum-uom ledger:datum-ledger sm:datum-statemachine jobs:datum-jobs events:datum-events numbering:datum-numbering audit:datum-audit items:datum-mod-items locations:datum-mod-locations lots:datum-mod-lots inventory:datum-mod-inventory genealogy:datum-mod-genealogy production_min:datum-mod-production-min server:datum-server datum:datum-db'
+
+# Parse rg -n "file:line:text", including an optional Windows drive letter (C:).
+# Sets HIT_FILE, HIT_LINE, HIT_TEXT. Returns 0 on success.
+# Portable awk: no match(array), gensub, or interval expressions.
+parse_rg_hit() {
+  hit="$1"
+  HIT_FILE=""
+  HIT_LINE=""
+  HIT_TEXT=""
+  parsed="$(printf '%s\n' "$hit" | awk '
+    {
+      s = $0
+      drive = ""
+      if (s ~ /^[A-Za-z]:/) {
+        drive = substr(s, 1, 2)
+        s = substr(s, 3)
+      }
+      c1 = index(s, ":")
+      if (c1 < 1) exit 1
+      file = drive substr(s, 1, c1 - 1)
+      rest = substr(s, c1 + 1)
+      c2 = index(rest, ":")
+      if (c2 < 1) exit 1
+      line = substr(rest, 1, c2 - 1)
+      if (line !~ /^[0-9]+$/) exit 1
+      text = substr(rest, c2 + 1)
+      printf "%s\036%s\036%s\n", file, line, text
+    }
+  ')" || return 1
+  [ -n "$parsed" ] || return 1
+  IFS="$(printf '\036')" read -r HIT_FILE HIT_LINE HIT_TEXT <<EOF
+$parsed
+EOF
+  [ -n "$HIT_FILE" ] && [ -n "$HIT_LINE" ]
+}
+
+# After cd "$REPO_ROOT", open files via relative paths. Convert backslashes and
+# strip a drive-letter / REPO_ROOT prefix so a Windows-shaped hit still maps.
+localize_hit_file() {
+  f="$1"
+  f="$(printf '%s' "$f" | tr '\\' '/')"
+  if [ -f "$f" ]; then
+    printf '%s' "$f"
+    return 0
+  fi
+  root_n="$(printf '%s' "${REPO_ROOT:-}" | tr '\\' '/')"
+  root_n="${root_n%/}"
+  if [ -n "$root_n" ]; then
+    case "$f" in
+      "$root_n"/*)
+        f="${f#"$root_n"/}"
+        if [ -f "$f" ]; then
+          printf '%s' "$f"
+          return 0
+        fi
+        ;;
+    esac
+  fi
+  case "$f" in
+    [A-Za-z]:*)
+      f="${f#?:}"
+      ;;
+  esac
+  case "$f" in
+    */crates/*)
+      f="crates/${f#*/crates/}"
+      ;;
+    */modules/*)
+      f="modules/${f#*/modules/}"
+      ;;
+  esac
+  printf '%s' "$f"
+}
 
 migration_unit_owns_schema() {
   unit="$1"
@@ -152,6 +227,9 @@ func_dropped_later() {
 enclosing_create_func() {
   file="$1"
   line_no="$2"
+  if [ ! -f "$file" ]; then
+    return 0
+  fi
   awk -v target="$line_no" '
     /^[[:space:]]*CREATE[[:space:]]+FUNCTION[[:space:]]+[[:alnum:]_]+\.[[:alnum:]_]+/ {
       line = $0
@@ -191,9 +269,11 @@ foreign_grant_neutralized() {
 cross_schema_hit_neutralized() {
   mig_dir="$1"
   hit_line="$2"
-  file="${hit_line%%:*}"
-  rest="${hit_line#*:}"
-  line_no="${rest%%:*}"
+  if ! parse_rg_hit "$hit_line"; then
+    return 1
+  fi
+  file="$(localize_hit_file "$HIT_FILE")"
+  line_no="$HIT_LINE"
   after_base="$(basename "$file")"
   case "$hit_line" in
     *REVOKE*|*revoke*)
@@ -266,9 +346,63 @@ EOF
   return "$found"
 }
 
+# Parser + neutralization fixtures for Windows-shaped rg hits (just lint-sql-selftest).
+run_hit_selftest() {
+  fail=0
+  win_hit='C:\ci\datum-erp\crates\datum-uom\migrations\0001.up.sql:12:FROM ledger.posting'
+  rel_hit='crates/datum-uom/migrations/0001.up.sql:12:FROM ledger.posting'
+  win_file='C:\ci\datum-erp\crates\datum-uom\migrations\0001.up.sql'
+  rel_file='crates/datum-uom/migrations/0001.up.sql'
+
+  if ! parse_rg_hit "$win_hit"; then
+    echo "lint-sql-selftest: Windows-shaped hit failed to parse: $win_hit" >&2
+    fail=1
+  elif [ "$HIT_FILE" != "$win_file" ] || [ "$HIT_LINE" != "12" ] || [ "$HIT_TEXT" != "FROM ledger.posting" ]; then
+    echo "lint-sql-selftest: Windows-shaped hit parsed file='$HIT_FILE' line='$HIT_LINE' text='$HIT_TEXT' (expected file='$win_file' line=12 text='FROM ledger.posting')" >&2
+    fail=1
+  else
+    echo "lint-sql-selftest: Windows-shaped hit parsed file='$HIT_FILE' line=$HIT_LINE"
+  fi
+
+  if ! parse_rg_hit "$rel_hit"; then
+    echo "lint-sql-selftest: relative hit failed to parse: $rel_hit" >&2
+    fail=1
+  elif [ "$HIT_FILE" != "$rel_file" ] || [ "$HIT_LINE" != "12" ] || [ "$HIT_TEXT" != "FROM ledger.posting" ]; then
+    echo "lint-sql-selftest: relative hit parsed file='$HIT_FILE' line='$HIT_LINE' text='$HIT_TEXT' (expected file='$rel_file' line=12 text='FROM ledger.posting')" >&2
+    fail=1
+  else
+    echo "lint-sql-selftest: relative hit parsed file='$HIT_FILE' line=$HIT_LINE"
+  fi
+
+  mig_dir='crates/datum-uom/migrations'
+  real_rel='crates/datum-uom/migrations/00000000000001_uom.up.sql:89:      SELECT 1 FROM ledger.posting p WHERE p.item_id = p_item_id'
+  win_real='C:\ci\datum-erp\crates\datum-uom\migrations\00000000000001_uom.up.sql:89:      SELECT 1 FROM ledger.posting p WHERE p.item_id = p_item_id'
+
+  if ! cross_schema_hit_neutralized "$mig_dir" "$real_rel"; then
+    echo 'lint-sql-selftest: relative ledger.posting hit in datum-uom should be neutralized (owner check must not misfire)' >&2
+    fail=1
+  else
+    echo 'lint-sql-selftest: relative hit neutralization correctly allowed'
+  fi
+
+  if ! cross_schema_hit_neutralized "$mig_dir" "$win_real"; then
+    echo 'lint-sql-selftest: Windows-shaped ledger.posting hit in datum-uom should be neutralized (owner check must not misfire)' >&2
+    fail=1
+  else
+    echo 'lint-sql-selftest: Windows-shaped hit neutralization correctly allowed'
+  fi
+
+  return "$fail"
+}
+
+if [ "${1:-}" = "--selftest-hits" ]; then
+  run_hit_selftest
+  exit $?
+fi
+
 lint_fail=0
 
-for tree in "$REPO_ROOT/crates" "$REPO_ROOT/modules"; do
+for tree in crates modules; do
   if [ ! -d "$tree" ]; then
     continue
   fi
@@ -331,7 +465,7 @@ EOF
     esac
 
     # (c) GRANT/REVOKE on foreign schemas outside datum-db bootstrap migration.
-    bootstrap="$REPO_ROOT/crates/datum-db/migrations/00000000000001_datum_schema.up.sql"
+    bootstrap="crates/datum-db/migrations/00000000000001_datum_schema.up.sql"
     for sql in "$mig_dir"/*.sql; do
       if [ ! -f "$sql" ]; then
         continue
@@ -353,7 +487,7 @@ EOF
         schema_hits="$(printf '%s\n' "$grant_hits" | rg "${schema}\\." || true)"
         if [ -n "$schema_hits" ]; then
           printf '%s\n' "$schema_hits"
-          echo "lint-sql: GRANT/REVOKE on ${schema}.* in ${sql#$REPO_ROOT/} (only datum-db bootstrap may grant foreign schemas)" >&2
+          echo "lint-sql: GRANT/REVOKE on ${schema}.* in ${sql} (only datum-db bootstrap may grant foreign schemas)" >&2
           lint_fail=1
         fi
       done
@@ -377,9 +511,12 @@ EOF
             case "$hit" in
               *DEFAULT*current_setting*datum.*) continue ;;
             esac
-            file="${hit%%:*}"
+            file="$hit"
+            if parse_rg_hit "$hit"; then
+              file="$(localize_hit_file "$HIT_FILE")"
+            fi
             printf '%s\n' "$hit"
-            echo "lint-sql: session-protocol fence bypass in ${file#$REPO_ROOT/} (datum.* GUC outside datum-db/datum-audit migrations)" >&2
+            echo "lint-sql: session-protocol fence bypass in ${file} (datum.* GUC outside datum-db/datum-audit migrations)" >&2
             lint_fail=1
           done <<EOF
 $session_hits

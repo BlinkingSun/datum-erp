@@ -82,6 +82,10 @@ lint-sql-selftest:
     plant_orphan="$root/crates/datum-server/migrations/99999999999999_lint_sql_selftest_definer_orphan.up.sql"; \
     cleanup() { rm -f "$plant_cross" "$plant_session" "$plant_create" "$plant_drop" "$plant_orphan"; }; \
     trap cleanup EXIT; \
+    if ! REPO_ROOT="$root" bash "$root/scripts/lint-sql-migrations.sh" --selftest-hits; then \
+      echo 'lint-sql-selftest: Windows-shaped hit parser/neutralization failed' >&2; \
+      exit 1; \
+    fi; \
     run_lint() { REPO_ROOT="$root" bash "$root/scripts/lint-sql-migrations.sh" 2>/dev/null; }; \
     printf '%s\n' '-- lint-sql-selftest: must be rejected (cross-schema DML)' \
       'UPDATE sm.machine SET name = name WHERE false;' > "$plant_cross"; \
