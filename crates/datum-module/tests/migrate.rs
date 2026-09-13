@@ -2,7 +2,12 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, unused_crate_dependencies)]
 
-use datum_module::MIGRATOR;
+use std::collections::BTreeSet;
+
+use datum_module::{
+    CANONICAL_ORDER, MIGRATOR, attach_kernel_audit, attach_slice_audit, canonical_migrators,
+    install_upto,
+};
 use datum_test::db_case;
 use sqlx::migrate::Migrator;
 
@@ -75,9 +80,11 @@ async fn catalog_module(pool: &sqlx::PgPool) -> String {
 #[tokio::test]
 async fn migrate_down_then_up() {
     let db = db_case!("mod_down_up");
-    datum_module::migrate_prefix(db.migrate_pool())
+    let boot = db.bootstrap_pool().await.expect("bootstrap");
+    install_upto(db.migrate_pool(), &boot, "datum-print")
         .await
-        .expect("db+audit");
+        .expect("install_upto through predecessor");
+    boot.close().await;
 
     let migrator = reversible_migrator();
     migrator.run(db.migrate_pool()).await.expect("up");
@@ -112,12 +119,11 @@ async fn migrate_down_then_up() {
 #[tokio::test]
 async fn wave_2s1_migrate_down_then_up() {
     let db = db_case!("w2s1_down_up");
-    datum_module::migrate_prefix(db.migrate_pool())
+    let boot = db.bootstrap_pool().await.expect("bootstrap");
+    install_upto(db.migrate_pool(), &boot, "datum-module")
         .await
-        .expect("prefix");
-    datum_module::migrate_suffix(db.migrate_pool())
-        .await
-        .expect("suffix");
+        .expect("install_upto through datum-module");
+    boot.close().await;
 
     let order = datum_module::wave_2s1_order().expect("order");
     assert_eq!(
@@ -167,4 +173,84 @@ async fn wave_2s1_migrate_down_then_up() {
         assert!(again, "{name} second up must recreate {rel}");
     }
     db.finish().await.expect("finish");
+}
+
+async fn zz_audit_set(pool: &sqlx::PgPool) -> BTreeSet<(String, String)> {
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        r#"
+        SELECT n.nspname::text, c.relname::text
+          FROM pg_trigger t
+          JOIN pg_class c ON c.oid = t.tgrelid
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE t.tgname = 'zz_audit_row' AND NOT t.tgisinternal
+         ORDER BY 1, 2
+        "#,
+    )
+    .fetch_all(pool)
+    .await
+    .expect("zz_audit_row set");
+    rows.into_iter().collect()
+}
+
+/// Predecessors with the trigger down, then `install_privileged`, then `crate_name`.
+/// The bootstrap pair has no event trigger until `datum-audit` itself is applied,
+/// so both trigger states collapse to [`install_upto`].
+async fn install_crate_last(migrate: &sqlx::PgPool, bootstrap: &sqlx::PgPool, crate_name: &str) {
+    if matches!(crate_name, "datum-db" | "datum-audit") {
+        install_upto(migrate, bootstrap, crate_name)
+            .await
+            .unwrap_or_else(|e| panic!("install_upto {crate_name}: {e:#}"));
+        return;
+    }
+    let crates = canonical_migrators().expect("canonical migrators");
+    let idx = crates
+        .iter()
+        .position(|(name, _)| *name == crate_name)
+        .unwrap_or_else(|| panic!("{crate_name} not in CANONICAL_ORDER"));
+    for (name, migrator) in crates.iter().take(idx) {
+        datum_db::migrate::run(migrate, &[(*name, *migrator)])
+            .await
+            .unwrap_or_else(|e| panic!("predecessor {name}: {e:#}"));
+    }
+    datum_audit::install_privileged(bootstrap)
+        .await
+        .expect("install_privileged after predecessors");
+    let (name, migrator) = crates[idx];
+    datum_db::migrate::run(migrate, &[(name, migrator)])
+        .await
+        .unwrap_or_else(|e| panic!("crate last {name}: {e:#}"));
+    attach_kernel_audit(migrate)
+        .await
+        .expect("belt-and-braces kernel attach");
+    attach_slice_audit(migrate)
+        .await
+        .expect("belt-and-braces slice attach");
+}
+
+#[tokio::test]
+async fn every_crate_migrates_in_both_trigger_states() {
+    for crate_name in CANONICAL_ORDER {
+        let slug = crate_name.replace('-', "_");
+
+        let db_canon = db_case!(&format!("c_{slug}"));
+        let boot_canon = db_canon.bootstrap_pool().await.expect("bootstrap canon");
+        install_upto(db_canon.migrate_pool(), &boot_canon, crate_name)
+            .await
+            .unwrap_or_else(|e| panic!("canonical {crate_name}: {e:#}"));
+        boot_canon.close().await;
+        let canon = zz_audit_set(db_canon.migrate_pool()).await;
+
+        let db_last = db_case!(&format!("l_{slug}"));
+        let boot_last = db_last.bootstrap_pool().await.expect("bootstrap last");
+        install_crate_last(db_last.migrate_pool(), &boot_last, crate_name).await;
+        boot_last.close().await;
+        let last = zz_audit_set(db_last.migrate_pool()).await;
+
+        assert_eq!(
+            canon, last,
+            "{crate_name}: zz_audit_row set must be identical at canonical position vs last-crate"
+        );
+        db_canon.finish().await.expect("finish canon");
+        db_last.finish().await.expect("finish last");
+    }
 }

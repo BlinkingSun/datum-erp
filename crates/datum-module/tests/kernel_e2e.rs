@@ -196,17 +196,13 @@ fn dummy_token(doc: &DocRef, version: i64, actor: datum_core::Actor) -> Signatur
 async fn assert_migrators_and_history(db: &datum_test::TestDb) {
     assert!(
         has_zz_audit(db.migrate_pool(), "datum", "schema_history").await,
-        "schema_history attached after migrate_suffix"
+        "schema_history attached after install_upto"
     );
     let crates: Vec<String> = sqlx::query_scalar("SELECT DISTINCT crate FROM datum.schema_history")
         .fetch_all(db.app_pool())
         .await
         .expect("schema_history");
-    for name in KERNEL_ORDER
-        .iter()
-        .copied()
-        .chain(std::iter::once("datum-module"))
-    {
+    for name in KERNEL_ORDER.iter().copied() {
         assert!(
             crates.iter().any(|c| c == name),
             "schema_history missing {name}, have {crates:?}"

@@ -12,12 +12,12 @@ Frozen public API for Wave 2s.
 - Lifecycle: `install` / `enable` / `disable` / `upgrade` against
   `module.installed` (`docs/03` §6). Disable never drops; disabling a depended-on
   module is refused with the dependents named.
-- `KERNEL_ORDER` and `run_migrations` / `migrate_prefix` / `migrate_suffix` /
-  `install_kernel` (privileged before identity seeds; `datum-documents` after
-  esign, customfields, numbering, and statemachine). `install_slice` adds the
-  Wave 2s slice migrators and attaches `SLICE_AUDIT_RELS` (the same list
-  `datum-server` boot consumes). `KERNEL_AUDIT_RELS` includes the five
-  `documents.*` tables so `audit_trigger_matrix` covers the product migrate path.
+- `CANONICAL_ORDER` / `KERNEL_ORDER` and `install_upto` (the one harness
+  entry point; `install_privileged` once after `datum-audit`, never dropped).
+  `install_kernel` is `install_upto(..., "datum-module")`; `install_slice` is
+  `install_upto(..., "datum-server")`. `KERNEL_AUDIT_RELS` includes the five
+  `documents.*` tables and the three `print.*` tables so `audit_trigger_matrix`
+  covers the product migrate path.
 - Configuration manifest export/verify (`docs/03` §8).
 - The composed kernel path (ADDENDUM 1).
 

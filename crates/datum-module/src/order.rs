@@ -1,4 +1,4 @@
-//! Kernel crate order (CONTRACT §4) and module-graph topological sort.
+//! Canonical install order (D-2b-10) and module-graph topological sort.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -6,37 +6,63 @@ use sqlx::migrate::Migrator;
 
 use crate::{Error, MIGRATOR, Result};
 
-/// Kernel crates' migrators in dependency order (SPEC deliverable 3).
+/// Kernel crates' migrators in dependency order (CONTRACT §4; D-2b-10).
 ///
-/// After this list, first-party modules run in topological order. This crate's
-/// own migrator (`datum-module`) is appended by [`kernel_migrators`].
+/// Prefix of [`CANONICAL_ORDER`]. First-party modules follow via
+/// [`crate::wave_2s1_order`] then [`crate::slice_migrators`].
 pub const KERNEL_ORDER: &[&str] = &[
     "datum-db",
     "datum-audit",
     "datum-identity",
-    "datum-esign",
-    "datum-customfields",
     "datum-numbering",
     "datum-uom",
     "datum-events",
     "datum-jobs",
     "datum-ledger",
     "datum-statemachine",
+    "datum-esign",
+    "datum-customfields",
     "datum-documents",
+    "datum-print",
+    "datum-module",
 ];
 
-/// CONTRACT §4 kernel edges used to prove [`KERNEL_ORDER`] is a topological sort.
+/// The only install order (D-2b-10). Extends [`KERNEL_ORDER`] by
+/// `wave_2s1_order()` (`items`, `locations`, `lots`) then
+/// [`crate::slice_migrators`] (`inventory`, `production-min`, `genealogy`,
+/// `server`). Nothing outside this module may name a migrator list.
+pub const CANONICAL_ORDER: &[&str] = &[
+    "datum-db",
+    "datum-audit",
+    "datum-identity",
+    "datum-numbering",
+    "datum-uom",
+    "datum-events",
+    "datum-jobs",
+    "datum-ledger",
+    "datum-statemachine",
+    "datum-esign",
+    "datum-customfields",
+    "datum-documents",
+    "datum-print",
+    "datum-module",
+    "datum-mod-items",
+    "datum-mod-locations",
+    "datum-mod-lots",
+    "datum-mod-inventory",
+    "datum-mod-production-min",
+    "datum-mod-genealogy",
+    "datum-server",
+];
+
+/// CONTRACT §4 kernel edges used to prove [`KERNEL_ORDER`] (and
+/// [`CANONICAL_ORDER`]) is a topological sort.
 ///
 /// `datum-core` is omitted: it has no migrator and is not in [`KERNEL_ORDER`].
 pub const CONTRACT_KERNEL_EDGES: &[(&str, &str)] = &[
     ("datum-audit", "datum-db"),
     ("datum-identity", "datum-db"),
     ("datum-identity", "datum-audit"),
-    ("datum-esign", "datum-db"),
-    ("datum-esign", "datum-audit"),
-    ("datum-esign", "datum-identity"),
-    ("datum-customfields", "datum-db"),
-    ("datum-customfields", "datum-audit"),
     ("datum-numbering", "datum-db"),
     ("datum-uom", "datum-db"),
     ("datum-uom", "datum-audit"),
@@ -49,11 +75,58 @@ pub const CONTRACT_KERNEL_EDGES: &[(&str, &str)] = &[
     ("datum-statemachine", "datum-db"),
     ("datum-statemachine", "datum-audit"),
     ("datum-statemachine", "datum-identity"),
+    ("datum-esign", "datum-db"),
+    ("datum-esign", "datum-audit"),
+    ("datum-esign", "datum-identity"),
+    ("datum-customfields", "datum-db"),
+    ("datum-customfields", "datum-audit"),
     ("datum-documents", "datum-db"),
     ("datum-documents", "datum-audit"),
     ("datum-documents", "datum-identity"),
     ("datum-documents", "datum-numbering"),
     ("datum-documents", "datum-statemachine"),
+    ("datum-print", "datum-db"),
+    ("datum-print", "datum-audit"),
+    ("datum-print", "datum-documents"),
+    ("datum-print", "datum-esign"),
+    ("datum-module", "datum-db"),
+    ("datum-module", "datum-audit"),
+    ("datum-module", "datum-identity"),
+    ("datum-module", "datum-numbering"),
+    ("datum-module", "datum-uom"),
+    ("datum-module", "datum-events"),
+    ("datum-module", "datum-jobs"),
+    ("datum-module", "datum-ledger"),
+    ("datum-module", "datum-statemachine"),
+    ("datum-module", "datum-esign"),
+    ("datum-module", "datum-customfields"),
+    ("datum-module", "datum-documents"),
+    ("datum-module", "datum-print"),
+];
+
+/// First-party module edges used to prove [`CANONICAL_ORDER`] is a
+/// topological sort of the Wave 2s graph (`module.toml` `depends_on`).
+pub const CONTRACT_SLICE_EDGES: &[(&str, &str)] = &[
+    ("datum-mod-lots", "datum-mod-items"),
+    ("datum-mod-lots", "datum-mod-locations"),
+    ("datum-mod-inventory", "datum-mod-items"),
+    ("datum-mod-inventory", "datum-mod-locations"),
+    ("datum-mod-inventory", "datum-mod-lots"),
+    ("datum-mod-production-min", "datum-mod-items"),
+    ("datum-mod-production-min", "datum-mod-locations"),
+    ("datum-mod-production-min", "datum-mod-lots"),
+    ("datum-mod-production-min", "datum-mod-inventory"),
+    ("datum-mod-genealogy", "datum-mod-items"),
+    ("datum-mod-genealogy", "datum-mod-locations"),
+    ("datum-mod-genealogy", "datum-mod-lots"),
+    ("datum-mod-genealogy", "datum-mod-inventory"),
+    ("datum-server", "datum-module"),
+    ("datum-server", "datum-mod-items"),
+    ("datum-server", "datum-mod-locations"),
+    ("datum-server", "datum-mod-lots"),
+    ("datum-server", "datum-mod-inventory"),
+    ("datum-server", "datum-mod-production-min"),
+    ("datum-server", "datum-mod-genealogy"),
 ];
 
 /// [`KERNEL_ORDER`] paired with each crate's embedded migrator.
@@ -62,23 +135,48 @@ pub fn kernel_crates() -> Vec<(&'static str, &'static Migrator)> {
         ("datum-db", &datum_db::MIGRATOR),
         ("datum-audit", &datum_audit::MIGRATOR),
         ("datum-identity", &datum_identity::MIGRATOR),
-        ("datum-esign", &datum_esign::MIGRATOR),
-        ("datum-customfields", &datum_customfields::MIGRATOR),
         ("datum-numbering", &datum_numbering::MIGRATOR),
         ("datum-uom", &datum_uom::MIGRATOR),
         ("datum-events", &datum_events::MIGRATOR),
         ("datum-jobs", &datum_jobs::MIGRATOR),
         ("datum-ledger", &datum_ledger::MIGRATOR),
         ("datum-statemachine", &datum_statemachine::MIGRATOR),
+        ("datum-esign", &datum_esign::MIGRATOR),
+        ("datum-customfields", &datum_customfields::MIGRATOR),
         ("datum-documents", &datum_documents::MIGRATOR),
+        ("datum-print", &datum_print::MIGRATOR),
+        ("datum-module", &MIGRATOR),
     ]
 }
 
-/// [`kernel_crates`] plus this crate's registry schema.
+/// [`KERNEL_ORDER`] migrators. Alias of [`kernel_crates`] (D-2b-10 includes
+/// `datum-print` and `datum-module` in the kernel prefix).
 pub fn kernel_migrators() -> Vec<(&'static str, &'static Migrator)> {
-    let mut crates = kernel_crates();
-    crates.push(("datum-module", &MIGRATOR));
-    crates
+    kernel_crates()
+}
+
+/// [`CANONICAL_ORDER`] paired with each crate's embedded migrator.
+pub fn canonical_migrators() -> Result<Vec<(&'static str, &'static Migrator)>> {
+    let mut by_name: HashMap<&str, &'static Migrator> = HashMap::new();
+    for (name, migrator) in kernel_crates() {
+        by_name.insert(name, migrator);
+    }
+    for (name, migrator) in crate::install_graph::wave_2s1_migrators()? {
+        by_name.insert(name, migrator);
+    }
+    for (name, migrator) in crate::install_graph::slice_migrators() {
+        by_name.insert(name, migrator);
+    }
+    CANONICAL_ORDER
+        .iter()
+        .map(|name| {
+            by_name
+                .get(name)
+                .copied()
+                .map(|migrator| (*name, migrator))
+                .ok_or_else(|| Error::Manifest(format!("canonical migrator missing for {name}")))
+        })
+        .collect()
 }
 
 /// Names of the crates [`migrate_prefix`] applies (db + audit).
@@ -86,9 +184,8 @@ pub const MIGRATE_PREFIX: &[&str] = &["datum-db", "datum-audit"];
 
 /// Apply `datum-db` then `datum-audit`.
 ///
-/// `datum.schema_history` is attached after the remaining crates in
-/// [`migrate_suffix`]: attaching earlier would 42501 the runner's own
-/// history inserts (no actor GUC on that path).
+/// Harnesses that need the event trigger up should call [`install_upto`]
+/// rather than this plus a hand-rolled suffix (D-2b-13).
 pub async fn migrate_prefix(pool: &datum_db::Pool) -> Result<()> {
     datum_db::migrate::run(
         pool,
@@ -101,10 +198,9 @@ pub async fn migrate_prefix(pool: &datum_db::Pool) -> Result<()> {
     Ok(())
 }
 
-/// Apply identity through this crate. Identity builtin INSERTs are audited
-/// when [`install_kernel`] runs privileged **before** this crate and drops the
-/// event trigger before the remaining suffix (uom/events/ledger have no
-/// TRIGGER default-privilege grant). Then [`attach_kernel_audit`].
+/// Apply identity through this crate (the [`KERNEL_ORDER`] suffix after
+/// [`MIGRATE_PREFIX`]). Prefer [`install_upto`]: this path does not install
+/// the event trigger (D-2b-11 / D-2b-13).
 pub async fn migrate_suffix(pool: &datum_db::Pool) -> Result<()> {
     let crates = kernel_migrators();
     let rest: Vec<_> = crates
@@ -120,12 +216,12 @@ pub async fn migrate_suffix(pool: &datum_db::Pool) -> Result<()> {
     Ok(())
 }
 
-/// App-class tables the event trigger misses (`datum` schema is skipped;
+/// App-class tables the event trigger may miss (`datum` schema is skipped;
 /// numbering.counter is `audit.exempt`; `datum.schema_class` stays unattached
 /// so later migrators can INSERT class rows without actor GUCs).
 ///
-/// Documentation of the attach set; the catalog (`datum.schema_class`) is the
-/// coverage truth. [`attach_kernel_audit`] is idempotent.
+/// Belt-and-braces (D-2b-13): under D-2b-11 every crate attaches its own.
+/// [`attach_kernel_audit`] is idempotent.
 pub const KERNEL_AUDIT_RELS: &[&str] = &[
     "datum.schema_history",
     "module.installed",
@@ -173,6 +269,9 @@ pub const KERNEL_AUDIT_RELS: &[&str] = &[
     "documents.blob",
     "documents.attachment",
     "documents.link",
+    "print.install",
+    "print.template",
+    "print.render_log",
     "items.item",
     "items.item_revision_history",
     "locations.site",
@@ -184,9 +283,7 @@ pub const KERNEL_AUDIT_RELS: &[&str] = &[
 ];
 
 /// App-class tables owned by the Wave 2s slice (inventory / production_min /
-/// server). The event trigger misses these because slice migrators run after
-/// privileged install is dropped. Single source of truth for `datum-server`
-/// boot and [`install_slice`].
+/// server). Belt-and-braces attach set for [`install_upto`] / [`install_slice`].
 pub const SLICE_AUDIT_RELS: &[&str] = &[
     "inventory.document",
     "inventory.document_line",
@@ -220,56 +317,51 @@ async fn attach_listed_audit(pool: &datum_db::Pool, rels: &[&str]) -> Result<()>
     Ok(())
 }
 
-/// Prefix, privileged event triggers, identity (so builtin seeds are audited),
-/// remaining suffix with the event trigger down, attach, then privileged again.
+/// Apply [`CANONICAL_ORDER`] through `crate_name` (inclusive).
 ///
-/// Identity 0001 is written to be judged by `zz_audit_row` (GUCs + TRIGGER
-/// grants). Later kernel crates create tables as `datum_migrate` without that
-/// grant; attaching after `ALTER TABLE ... OWNER TO datum_owner` is the
-/// composition-path attach, same as before this residual.
-pub async fn install_kernel(migrate: &datum_db::Pool, bootstrap: &datum_db::Pool) -> Result<()> {
-    install_kernel_inner(migrate, bootstrap, false).await
-}
-
-/// Kernel + Wave 2s.1 + slice migrators, then attach [`KERNEL_AUDIT_RELS`] and
-/// [`SLICE_AUDIT_RELS`]. Slice DDL runs *before* attach so `datum.schema_history`
-/// inserts are not judged by `zz_audit_row`.
-pub async fn install_slice(migrate: &datum_db::Pool, bootstrap: &datum_db::Pool) -> Result<()> {
-    install_kernel_inner(migrate, bootstrap, true).await
-}
-
-async fn install_kernel_inner(
+/// The one published harness entry point (D-2b-13). `install_privileged`
+/// runs once, immediately after `datum-audit`, and is never dropped
+/// (D-2b-11). [`attach_kernel_audit`] / [`attach_slice_audit`] run afterwards
+/// as belt-and-braces: under D-2b-11 every crate attaches its own tables.
+pub async fn install_upto(
     migrate: &datum_db::Pool,
     bootstrap: &datum_db::Pool,
-    slice: bool,
+    crate_name: &str,
 ) -> Result<()> {
-    migrate_prefix(migrate).await?;
-    datum_audit::install_privileged(bootstrap).await?;
-    datum_db::migrate::run(migrate, &[("datum-identity", &datum_identity::MIGRATOR)])
-        .await
-        .map_err(|e| Error::Manifest(format!("migrate datum-identity: {e}")))?;
-    datum_audit::uninstall_privileged(bootstrap).await?;
-    let rest: Vec<_> = kernel_migrators()
-        .into_iter()
-        .filter(|(name, _)| {
-            *name != "datum-db" && *name != "datum-audit" && *name != "datum-identity"
-        })
-        .collect();
-    for (name, migrator) in &rest {
+    let crates = canonical_migrators()?;
+    let idx = crates
+        .iter()
+        .position(|(name, _)| *name == crate_name)
+        .ok_or_else(|| {
+            Error::Manifest(format!(
+                "unknown crate {crate_name}; not in CANONICAL_ORDER"
+            ))
+        })?;
+    let mut saw_audit = false;
+    for (name, migrator) in crates.iter().take(idx + 1) {
         datum_db::migrate::run(migrate, &[(*name, *migrator)])
             .await
             .map_err(|e| Error::Manifest(format!("migrate {name}: {e}")))?;
+        if *name == "datum-audit" {
+            datum_audit::install_privileged(bootstrap).await?;
+            saw_audit = true;
+        }
     }
-    crate::install_graph::migrate_wave_2s1_modules(migrate).await?;
-    if slice {
-        crate::install_graph::migrate_slice_modules(migrate).await?;
-    }
-    attach_kernel_audit(migrate).await?;
-    if slice {
+    if saw_audit {
+        attach_kernel_audit(migrate).await?;
         attach_slice_audit(migrate).await?;
     }
-    datum_audit::install_privileged(bootstrap).await?;
     Ok(())
+}
+
+/// [`install_upto`] through [`KERNEL_ORDER`]'s last crate (`datum-module`).
+pub async fn install_kernel(migrate: &datum_db::Pool, bootstrap: &datum_db::Pool) -> Result<()> {
+    install_upto(migrate, bootstrap, "datum-module").await
+}
+
+/// [`install_upto`] through [`CANONICAL_ORDER`]'s last crate (`datum-server`).
+pub async fn install_slice(migrate: &datum_db::Pool, bootstrap: &datum_db::Pool) -> Result<()> {
+    install_upto(migrate, bootstrap, "datum-server").await
 }
 
 /// Run the full kernel (and this crate) without the privileged event-trigger step.
