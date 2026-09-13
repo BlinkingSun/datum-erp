@@ -1,6 +1,6 @@
 //! `Kernel::build`: wiring, seeds, freeze, spawn/transition glue, startup guard.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -194,9 +194,10 @@ impl KernelBuilder {
 
     /// Register the esign projection for `doc_type` (D-2b-3).
     ///
-    /// The owning module declares the signed subset of its business record.
-    /// [`Kernel::assemble`] also registers [`datum_esign::identity_projection`]
-    /// for every bound machine that has no explicit projection.
+    /// Required for every extra bound machine (tests / `KernelBuilder::register_machine`
+    /// types that are not first-party). A bound machine with neither this
+    /// registration nor a first-party identity default fails [`Kernel::build`]
+    /// with [`Error::MissingProjection`].
     pub fn register_projection(
         &mut self,
         doc_type: impl Into<String>,
@@ -289,7 +290,7 @@ impl Kernel {
             )?;
         }
         engine.freeze()?;
-        register_bound_projections(&engine, &extra_projections);
+        register_bound_projections(&engine, &extra_projections)?;
 
         let gate = bind_signature_gate(profile.signature_gate_binding);
         let bound = BoundSyncGate::from_binding(profile.signature_gate_binding);
@@ -579,7 +580,11 @@ impl Kernel {
                 if let datum_statemachine::Error::Signature(sig) = &e
                     && audited_refusal(sig)
                 {
-                    self.log_gate_refusal(ctx, doc, edge, sig).await;
+                    // D-2b-5: refusal audit after rollback, never while this Tx
+                    // still holds `identity.principal` / `esign.signature` FOR UPDATE.
+                    if abort_claim_tx(tx).await.is_ok() {
+                        self.log_gate_refusal(ctx, doc, edge, sig).await;
+                    }
                 }
                 Err(e.into())
             }
@@ -920,22 +925,68 @@ async fn seed_profile(
     Ok(())
 }
 
-/// Register a projection per bound machine (D-2b-3). Explicit builder
-/// registrations win; every other machine gets the identity projection.
-fn register_bound_projections(engine: &Engine, extra: &BTreeMap<String, fn(&Value) -> Value>) {
-    let mut types: std::collections::BTreeSet<String> = engine
+/// Abort the claim Tx without consuming the caller's `Tx` handle (D-2b-5).
+///
+/// `Tx::rollback` takes `self`. Gate refusal must release `FOR UPDATE` on
+/// `identity.principal` before `audit.log_event` on a second pool connection
+/// (`max_connections=2`).
+async fn abort_claim_tx(tx: &mut Tx<'_>) -> Result<()> {
+    tx.execute(sqlx::query("ROLLBACK")).await?;
+    Ok(())
+}
+
+/// First-party machines may use the identity projection; extra bound machines
+/// must call [`KernelBuilder::register_projection`] or [`Kernel::build`] fails.
+fn first_party_projection_types() -> Result<BTreeSet<String>> {
+    let mut types = BTreeSet::new();
+    types.insert(datum_documents::DOC_TYPE.to_owned());
+    for m in compiled_in()? {
+        for machine in m.machines {
+            types.insert(machine.doc_type);
+        }
+    }
+    for raw in [
+        crate::install_graph::ITEMS_MANIFEST,
+        crate::install_graph::LOTS_MANIFEST,
+        include_str!("../../../modules/inventory/module.toml"),
+        include_str!("../../../modules/production_min/module.toml"),
+    ] {
+        let m = ModuleManifest::parse(raw)?;
+        for machine in m.machines {
+            types.insert(machine.doc_type);
+        }
+    }
+    Ok(types)
+}
+
+/// Register a projection per bound machine (D-2b-3).
+///
+/// Explicit builder registrations win. First-party machines default to
+/// [`datum_esign::identity_projection`]. Any other bound machine without a
+/// registration is [`Error::MissingProjection`].
+fn register_bound_projections(
+    engine: &Engine,
+    extra: &BTreeMap<String, fn(&Value) -> Value>,
+) -> Result<()> {
+    let known = first_party_projection_types()?;
+    let mut types: BTreeSet<String> = engine
         .edges_for_manifest()
         .into_iter()
         .map(|e| e.doc_type)
         .collect();
     types.extend(extra.keys().cloned());
     for doc_type in types {
-        let project = extra
-            .get(&doc_type)
-            .copied()
-            .unwrap_or(datum_esign::identity_projection);
+        let project = extra.get(&doc_type).copied().or_else(|| {
+            known
+                .contains(&doc_type)
+                .then_some(datum_esign::identity_projection)
+        });
+        let Some(project) = project else {
+            return Err(Error::MissingProjection(doc_type));
+        };
         datum_esign::register_projection(&doc_type, project);
     }
+    Ok(())
 }
 
 async fn default_live_record(tx: &mut Tx<'_>, doc_type: &str, doc_id: Identifier) -> Result<Value> {

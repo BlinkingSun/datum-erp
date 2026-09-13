@@ -92,6 +92,9 @@ pub enum Error {
     /// Release startup guard (Required edge + `NoSignatures`).
     #[error("startup: {0}")]
     Startup(String),
+    /// Bound machine has no esign projection (D-2b-3).
+    #[error("no esign projection registered for {0}")]
+    MissingProjection(String),
 }
 
 impl From<sqlx::Error> for Error {

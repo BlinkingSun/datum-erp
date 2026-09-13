@@ -11,7 +11,7 @@ use datum_core::{
     SignatureRequirement, SignatureToken, UnitId, UnitRef, ValueAccount, ValuePosting,
 };
 use datum_db::Tx;
-use datum_esign::{InstanceTriple, LiveDoc, MintRequest, mint};
+use datum_esign::{InstanceTriple, LiveDoc, MintRequest, identity_projection, mint};
 use datum_identity::{PrincipalStatus, deactivate_principal};
 use datum_ledger::{CostMethod, rebuild, upsert_location, upsert_stock_item, verify_projection};
 use datum_statemachine::{DocRef, EdgeBuilder, Machine, Veto};
@@ -20,7 +20,7 @@ use rust_decimal::Decimal;
 use serde_json::json;
 use sqlx::query_scalar;
 
-use datum_module::{KERNEL_ORDER, Kernel, Profile, SignatureEdge};
+use datum_module::{Error, KERNEL_ORDER, Kernel, Profile, SignatureEdge};
 
 use common::{
     SIGNING_SECRET, actor_with_perms, boot_ctx, has_zz_audit, migrate_and_install, pg_code,
@@ -380,6 +380,7 @@ async fn composed_path(db: &datum_test::TestDb, profile: Profile, rebuild_projec
 
     let mut builder = Kernel::builder(db.app_pool().clone(), profile);
     builder.register_machine(e2e_machine()).unwrap();
+    builder.register_projection(DOC_TYPE, identity_projection);
     builder.register_hook("mod-inventory", DOC_TYPE, RECEIVE, move |_v, sink| {
         contribute_receipt(sink, item, stock, supplier)
     });
@@ -1389,18 +1390,28 @@ async fn live_doc_hash_covers_registered_projection() {
     ctx.actor_display = Some(principal.display_name.clone());
     ctx.reason = Some("kernel-e2e".into());
     let mut tx = Tx::begin(&write, &ctx).await.expect("consume kept-field");
+    let started = std::time::Instant::now();
     let err = kernel
         .transition(&mut tx, &mismatched, "approve", Some(&token2), &ctx)
         .await
         .expect_err("kept-field edit");
     assert!(
+        started.elapsed() < std::time::Duration::from_secs(10),
+        "HashMismatch refusal must not deadlock on audit.log_event"
+    );
+    assert!(
         matches!(
             err,
-            datum_module::Error::Statemachine(datum_statemachine::Error::Signature(
+            Error::Statemachine(datum_statemachine::Error::Signature(
                 SignatureError::HashMismatch
             ))
         ),
         "got {err:?}"
+    );
+    assert_eq!(
+        err.to_string(),
+        "signature content hash mismatch",
+        "kernel error that maps to HTTP 409 CONFLICT (D-2b-8)"
     );
     tx.rollback().await.ok();
     let live_version: i64 =
@@ -1426,6 +1437,7 @@ async fn mint_then_body_edit_is_hash_mismatch() {
     builder
         .register_machine(glue_signed_machine("glue.body.doc"))
         .unwrap();
+    builder.register_projection("glue.body.doc", identity_projection);
     let kernel = builder.build().await.expect("build");
     let write = kernel.write_pool();
     let principal = signer_with_perms(&write, &["calibration.approve"]).await;
@@ -1458,20 +1470,62 @@ async fn mint_then_body_edit_is_hash_mismatch() {
     ctx.actor_display = Some(principal.display_name.clone());
     ctx.reason = Some("kernel-e2e".into());
     let mut tx = Tx::begin(&write, &ctx).await.expect("consume");
+    let started = std::time::Instant::now();
     let err = kernel
         .transition(&mut tx, &doc, "approve", Some(&token), &ctx)
         .await
         .expect_err("body edit");
     assert!(
+        started.elapsed() < std::time::Duration::from_secs(10),
+        "HashMismatch refusal must not deadlock on audit.log_event (pool max_connections=2)"
+    );
+    assert!(
         matches!(
             err,
-            datum_module::Error::Statemachine(datum_statemachine::Error::Signature(
+            Error::Statemachine(datum_statemachine::Error::Signature(
                 SignatureError::HashMismatch
             ))
         ),
         "got {err:?}"
     );
+    assert_eq!(
+        err.to_string(),
+        "signature content hash mismatch",
+        "kernel error that maps to HTTP 409 CONFLICT (D-2b-8 / datum-server from_signature)"
+    );
+    let refusals: i64 = query_scalar(
+        r#"SELECT count(*) FROM audit.event
+            WHERE source_kind = 'app_event'
+              AND reason = 'signature content hash mismatch'"#,
+    )
+    .fetch_one(db.app_pool())
+    .await
+    .expect("refusal audit");
+    assert!(
+        refusals >= 1,
+        "D-2b-5: refusal audit lands after rollback, while the claim Tx handle is still held"
+    );
     tx.rollback().await.ok();
+    db.finish().await.expect("finish");
+}
+
+/// Extra bound machines must register a projection; first-party types may default.
+#[tokio::test]
+async fn bound_machine_without_projection_fails_build() {
+    let db = db_case!("e2e_noproj");
+    migrate_and_install(&db).await;
+    let mut builder = Kernel::builder(db.app_pool().clone(), Profile::regulated_device().unwrap());
+    builder
+        .register_machine(glue_signed_machine("glue.noproj.doc"))
+        .unwrap();
+    let err = match builder.build().await {
+        Ok(_) => panic!("missing projection must fail Kernel::build"),
+        Err(e) => e,
+    };
+    assert!(
+        matches!(err, Error::MissingProjection(ref t) if t == "glue.noproj.doc"),
+        "got {err:?}"
+    );
     db.finish().await.expect("finish");
 }
 

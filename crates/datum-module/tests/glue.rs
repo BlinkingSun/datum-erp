@@ -11,6 +11,7 @@ use datum_core::{
     SignatureMeaning, SignatureToken, UnitId, UnitRef, ValueAccount, ValuePosting,
 };
 use datum_db::Tx;
+use datum_esign::identity_projection;
 use datum_ledger::{CostMethod, upsert_location, upsert_stock_item};
 use datum_statemachine::{DocRef, EdgeBuilder, Machine, Veto};
 use datum_test::db_case;
@@ -125,6 +126,7 @@ async fn machine_registered_through_kernel_is_transitionable_after_build() {
         .unwrap();
     let mut builder = Kernel::builder(db.app_pool().clone(), Profile::plain_shop().unwrap());
     builder.register_machine(extra).unwrap();
+    builder.register_projection("extra.doc", identity_projection);
     let mut kernel = builder.build().await.expect("build");
     let write = kernel.write_pool();
     let doc = DocRef {
@@ -634,6 +636,7 @@ kind = "glue.tick"
     migrate_and_install(&db).await;
     let mut builder = Kernel::builder(db.app_pool().clone(), Profile::regulated_device().unwrap());
     builder.apply_manifest(&manifest).unwrap();
+    builder.register_projection("glue.doc", identity_projection);
     let kernel = builder.build().await.expect("build");
 
     assert!(
