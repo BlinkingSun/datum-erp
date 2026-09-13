@@ -17,6 +17,32 @@ fn sm_migrator() -> Migrator {
     migrator
 }
 
+async fn query_seam_fn_exists(pool: &sqlx::PgPool, name: &str) -> bool {
+    sql_query_scalar(
+        "SELECT EXISTS (
+            SELECT 1 FROM pg_proc p
+            JOIN pg_namespace n ON n.oid = p.pronamespace
+            WHERE n.nspname = 'sm' AND p.proname = $1
+         )",
+    )
+    .bind(name)
+    .fetch_one(pool)
+    .await
+    .expect("fn exists")
+}
+
+async fn is_security_definer(pool: &sqlx::PgPool, name: &str) -> bool {
+    sql_query_scalar(
+        "SELECT p.prosecdef FROM pg_proc p
+          JOIN pg_namespace n ON n.oid = p.pronamespace
+         WHERE n.nspname = 'sm' AND p.proname = $1",
+    )
+    .bind(name)
+    .fetch_one(pool)
+    .await
+    .expect("prosecdef")
+}
+
 #[tokio::test]
 async fn migration_is_reversible() {
     let db = db_case!("sm_rev");
@@ -36,6 +62,32 @@ async fn migration_is_reversible() {
 
     let migrator = sm_migrator();
     migrator.run(db.migrate_pool()).await.expect("up");
+    assert!(
+        query_seam_fn_exists(db.migrate_pool(), "current_state").await,
+        "0002 must create sm.current_state"
+    );
+    assert!(query_seam_fn_exists(db.migrate_pool(), "instance_exists").await);
+    assert!(query_seam_fn_exists(db.migrate_pool(), "machine_id_for").await);
+    assert!(
+        !is_security_definer(db.migrate_pool(), "current_state").await,
+        "current_state must be invoker-rights"
+    );
+    assert!(!is_security_definer(db.migrate_pool(), "instance_exists").await);
+    assert!(!is_security_definer(db.migrate_pool(), "machine_id_for").await);
+    let app_exec: bool = sql_query_scalar(
+        "SELECT has_function_privilege('datum_app', 'sm.current_state(text, uuid)', 'EXECUTE')",
+    )
+    .fetch_one(db.migrate_pool())
+    .await
+    .expect("app execute");
+    assert!(app_exec, "EXECUTE granted to datum_app");
+    let public_exec: bool = sql_query_scalar(
+        "SELECT has_function_privilege('public', 'sm.current_state(text, uuid)', 'EXECUTE')",
+    )
+    .fetch_one(db.migrate_pool())
+    .await
+    .expect("public execute");
+    assert!(!public_exec, "EXECUTE revoked from PUBLIC");
     let owner_before: String = sql_query_scalar(
         r#"SELECT r.rolname::text
            FROM pg_class c
@@ -56,8 +108,19 @@ async fn migration_is_reversible() {
         .await
         .expect("gone");
     assert!(gone, "sm.instance must be dropped");
+    assert!(
+        !query_seam_fn_exists(db.migrate_pool(), "current_state").await,
+        "0002 down must drop sm.current_state"
+    );
+    assert!(!query_seam_fn_exists(db.migrate_pool(), "instance_exists").await);
+    assert!(!query_seam_fn_exists(db.migrate_pool(), "machine_id_for").await);
 
     migrator.run(db.migrate_pool()).await.expect("up again");
+    assert!(query_seam_fn_exists(db.migrate_pool(), "current_state").await);
+    assert!(
+        !is_security_definer(db.migrate_pool(), "machine_id_for").await,
+        "machine_id_for must stay invoker-rights after re-up"
+    );
     let owner_after: String = sql_query_scalar(
         r#"SELECT r.rolname::text
            FROM pg_class c
