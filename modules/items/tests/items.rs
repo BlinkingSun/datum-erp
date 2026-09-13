@@ -28,6 +28,17 @@ async fn create_item_writes_ledger_registry() {
     let mut tx = Tx::begin(&write, &create_ctx(actor)).await.expect("begin");
     let item = create(&mut tx, &kernel, screw()).await.expect("create");
     let stock = load_stock_item(&mut tx, item.id).await.expect("registry");
+    let uom_row: (i64, i16, rust_decimal::Decimal) = tx
+        .fetch_one(
+            sqlx::query_as(
+                "SELECT stock_unit_id, stock_scale, residual_tolerance
+                   FROM uom.item_stock WHERE item_id = $1",
+            )
+            .bind(item.id.as_uuid()),
+        )
+        .await
+        .expect("uom.item_stock");
+    assert_eq!(uom_row, (EA.0, 0, rust_decimal::Decimal::ZERO));
     tx.commit().await.expect("commit");
     let loaded = get(db.app_pool(), item.id).await.expect("get");
     assert_eq!(loaded.number, "MDS-450-M4x12");
@@ -61,6 +72,54 @@ async fn item_number_charset_enforced() {
         "got {err:?}"
     );
     tx.rollback().await.expect("rollback");
+    db.finish().await.expect("finish");
+}
+
+#[tokio::test]
+async fn stock_unit_change_before_postings_updates_item_stock() {
+    let db = db_case!("items_uom_upd");
+    let kernel = boot_kernel(&db).await;
+    let write = write_pool(&db);
+    let actor = actor_with_item_perms(&write).await;
+    let mut tx = Tx::begin(&write, &create_ctx(actor)).await.expect("begin");
+    let item = create(&mut tx, &kernel, screw()).await.expect("create");
+    tx.commit().await.expect("commit");
+
+    let mut tx = Tx::begin(&write, &update_ctx(actor)).await.expect("begin2");
+    let updated = update(
+        &mut tx,
+        item.id,
+        UpdateItem {
+            version: item.version,
+            revision: None,
+            description: None,
+            kind: None,
+            stock_uom: Some(MM),
+            stock_scale: Some(2),
+            residual_tolerance: Some(rust_decimal::Decimal::new(1, 2)),
+            cost_method: None,
+            standard: None,
+        },
+    )
+    .await
+    .expect("update before postings");
+    assert_eq!(updated.stock_uom, MM);
+    let uom_row: (i64, i16, rust_decimal::Decimal) = tx
+        .fetch_one(
+            sqlx::query_as(
+                "SELECT stock_unit_id, stock_scale, residual_tolerance
+                   FROM uom.item_stock WHERE item_id = $1",
+            )
+            .bind(item.id.as_uuid()),
+        )
+        .await
+        .expect("uom.item_stock after update");
+    assert_eq!(
+        uom_row,
+        (MM.0, 2, rust_decimal::Decimal::new(1, 2)),
+        "update must pin through datum-uom, not items.item alone"
+    );
+    tx.commit().await.expect("commit2");
     db.finish().await.expect("finish");
 }
 

@@ -233,22 +233,6 @@ pub async fn seed_world(db: &datum_test::TestDb, kernel: Kernel) -> World {
     .await
     .expect("screw")
     .id;
-    tx.execute(
-        sqlx::query(
-            "INSERT INTO uom.item_stock (item_id, stock_unit_id, stock_scale, residual_tolerance)
-             VALUES ($1, $2, $3, $4), ($5, $6, $7, $8)",
-        )
-        .bind(bar.as_uuid())
-        .bind(FT.0)
-        .bind(4_i16)
-        .bind(dec("0.0100"))
-        .bind(screw.as_uuid())
-        .bind(EA.0)
-        .bind(0_i16)
-        .bind(Decimal::ZERO),
-    )
-    .await
-    .expect("uom.item_stock");
     let lot_ctx = boot_ctx();
     let lot_bar = datum_mod_lots::create_lot(
         &mut tx,

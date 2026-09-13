@@ -2,6 +2,7 @@
 
 use datum_core::{Actor, ActorKind, Identifier, ItemId, UnitId};
 use datum_db::WriteContext;
+use rust_decimal::Decimal;
 
 pub fn write_ctx(action: &str) -> WriteContext {
     let mut ctx = WriteContext::new(
@@ -149,14 +150,14 @@ pub async fn insert_item_stock(
     stock_unit: UnitId,
     scale: i16,
 ) {
-    tx.execute(
-        sqlx::query(
-            "INSERT INTO uom.item_stock (item_id, stock_unit_id, stock_scale)
-             VALUES ($1, $2, $3)",
-        )
-        .bind(item.as_uuid())
-        .bind(stock_unit.0)
-        .bind(scale),
+    datum_uom::pin_item_stock(
+        tx,
+        item,
+        datum_uom::ItemStockMeasure {
+            stock_unit,
+            stock_scale: scale,
+            residual_tolerance: Decimal::ZERO,
+        },
     )
     .await
     .expect("item_stock");

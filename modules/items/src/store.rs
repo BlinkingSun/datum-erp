@@ -6,6 +6,7 @@ use datum_db::{Pool, Tx, WriteContext};
 use datum_ledger::{cost_method_from_sql, has_postings, upsert_stock_item};
 use datum_module::Kernel;
 use datum_statemachine::DocRef;
+use datum_uom::{ItemStockMeasure, pin_item_stock, update_item_stock};
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
@@ -78,6 +79,12 @@ pub async fn create(tx: &mut Tx<'_>, kernel: &Kernel, new: NewItem) -> Result<It
     .await
     .map_err(map_number_unique)?;
     append_revision(tx, id, &new.revision).await?;
+    let measure = ItemStockMeasure {
+        stock_unit: new.stock_uom,
+        stock_scale: new.stock_scale,
+        residual_tolerance: new.residual_tolerance,
+    };
+    pin_item_stock(tx, id, measure).await?;
     upsert_stock_item(
         tx,
         id,
@@ -207,6 +214,19 @@ pub async fn update(tx: &mut Tx<'_>, id: ItemId, patch: UpdateItem) -> Result<It
     }
     if revision != current.revision {
         append_revision(tx, id, revision).await?;
+    }
+    if measure_changed {
+        update_item_stock(
+            tx,
+            id,
+            ItemStockMeasure {
+                stock_unit: stock_uom,
+                stock_scale,
+                residual_tolerance: residual,
+            },
+        )
+        .await
+        .map_err(map_uom_stock_immutable)?;
     }
     upsert_stock_item(
         tx,
@@ -369,6 +389,13 @@ fn item_from_row(row: ItemRow) -> Result<Item> {
         created_at,
         updated_at,
     })
+}
+
+fn map_uom_stock_immutable(err: datum_uom::Error) -> Error {
+    match err {
+        datum_uom::Error::StockMeasureImmutable => Error::StockMeasureImmutable,
+        other => Error::Uom(other),
+    }
 }
 
 fn map_number_unique(err: datum_db::Error) -> Error {

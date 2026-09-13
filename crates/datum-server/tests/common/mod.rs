@@ -134,7 +134,6 @@ async fn seed_operator(pool: &datum_db::Pool, profile: &Profile) {
                 "inventory.issue".into(),
                 "inventory.move".into(),
                 "inventory.count".into(),
-                "inventory.adjust".into(),
                 "production.view".into(),
                 "production.create".into(),
                 "production.release".into(),

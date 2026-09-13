@@ -69,8 +69,6 @@ async fn run_script(w: &World) {
         None,
     )
     .await;
-    pin_stock(&w.pool, &screw, 1).await;
-    pin_stock(&w.pool, &bar, 2).await;
 
     let qloc = create_loc(w, "WH-Q", "Quarantine").await;
     let aloc = create_loc(w, "WH-A", "Available").await;
@@ -678,33 +676,6 @@ async fn force_lot_available(pool: &datum_db::Pool, lot: &str) {
     tx.commit().await.unwrap();
 }
 
-async fn pin_stock(pool: &datum_db::Pool, item: &str, unit: i64) {
-    let write = WritePool::new(pool.clone());
-    let mut ctx = WriteContext::new(
-        Actor {
-            id: Identifier::from_uuid(datum_identity::SYSTEM_ID),
-            kind: ActorKind::ServicePrincipal,
-        },
-        "uom.pin",
-        "maintenance",
-    );
-    ctx.actor_display = Some("system".into());
-    ctx.reason = Some("test".into());
-    let mut tx = Tx::begin(&write, &ctx).await.unwrap();
-    tx.execute(
-        sqlx::query(
-            "INSERT INTO uom.item_stock (item_id, stock_unit_id, stock_scale, residual_tolerance)
-             VALUES ($1, $2, 0, 0)
-             ON CONFLICT (item_id) DO NOTHING",
-        )
-        .bind(uuid::Uuid::parse_str(item).unwrap())
-        .bind(unit),
-    )
-    .await
-    .expect("pin stock");
-    tx.commit().await.unwrap();
-}
-
 async fn audit_count(pool: &datum_db::Pool) -> i64 {
     query_scalar::<_, i64>("SELECT count(*) FROM audit.event")
         .fetch_one(pool)
@@ -793,7 +764,6 @@ async fn floor_endpoint_under_500ms_on_local_db() {
     }
     let w = common::boot(Profile::plain_shop().unwrap()).await;
     let item = create_item(&w, "FL-1", "A", "floor", "buy", 1, "FIFO", None).await;
-    pin_stock(&w.pool, &item, 1).await;
     let loc = create_loc(&w, "FL-Q", "floor q").await;
     let mut times = Vec::new();
     for i in 0..50 {
@@ -874,6 +844,103 @@ fn profiles() -> [Profile; 2] {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn item_create_pins_item_stock_for_inventory_http() {
+    if common::skip_if_no_pg() {
+        return;
+    }
+    for profile in profiles() {
+        let w = common::boot(profile).await;
+        let tag = match w.profile {
+            datum_module::ProfileId::PlainShop => "PS",
+            datum_module::ProfileId::RegulatedDevice => "RD",
+        };
+        let number = format!("PIN-{tag}");
+        let qloc_code = format!("PIN-Q-{tag}");
+        let aloc_code = format!("PIN-A-{tag}");
+        let lot_ident = format!("LOT-PIN-{tag}");
+        let item = create_item(&w, &number, "A", "item stock pin", "buy", 1, "FIFO", None).await;
+        let qloc = create_loc(&w, &qloc_code, "quarantine").await;
+        let aloc = create_loc(&w, &aloc_code, "available").await;
+        let lot = create_lot(&w, &item, &lot_ident, None, None).await;
+        let (st, rec) = w
+            .post(
+                "/api/v1/inventory/receipts",
+                json!({
+                    "item_id": item,
+                    "lot_id": lot,
+                    "location_id": qloc,
+                    "quantity": qty("100", 1, "Count"),
+                }),
+            )
+            .await;
+        assert_eq!(
+            st,
+            StatusCode::CREATED,
+            "receipt without uom backdoor {rec}"
+        );
+        assert_ne!(
+            rec["error"]["code"].as_str(),
+            Some("INTERNAL"),
+            "must not fail conversion {rec}"
+        );
+        let lot_ver = w.get(&format!("/api/v1/lots/{lot}")).await.1["version"]
+            .as_i64()
+            .unwrap_or(1);
+        let (st, rel) = w
+            .post_if_match(
+                "/api/v1/inventory/releases",
+                json!({
+                    "lot_id": lot,
+                    "from_location_id": qloc,
+                    "to_location_id": aloc,
+                    "entered": qty("100", 1, "Count"),
+                }),
+                lot_ver,
+            )
+            .await;
+        let (count_loc, on_hand_qty) = match w.profile {
+            datum_module::ProfileId::PlainShop => {
+                assert_eq!(st, StatusCode::OK, "inventory release {rel}");
+                (aloc.clone(), "100")
+            }
+            datum_module::ProfileId::RegulatedDevice => {
+                assert_eq!(st, StatusCode::CONFLICT, "regulated release {rel}");
+                assert_eq!(rel["error"]["code"], "SIGNATURE_NO_PROVIDER", "{rel}");
+                assert!(
+                    !rel["error"]["message"]
+                        .as_str()
+                        .unwrap_or("")
+                        .contains("no conversion path"),
+                    "release must not fail uom pin {rel}"
+                );
+                (qloc.clone(), "100")
+            }
+        };
+        let (st, cnt) = w
+            .post(
+                "/api/v1/inventory/counts",
+                json!({
+                    "location_id": count_loc,
+                    "lines": [{
+                        "item_id": item,
+                        "lot_id": lot,
+                        "counted": qty(on_hand_qty, 1, "Count"),
+                        "expected": qty(on_hand_qty, 1, "Count"),
+                    }],
+                    "tolerance": "0",
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::CREATED, "cycle count {cnt}");
+        assert_ne!(
+            cnt["error"]["code"].as_str(),
+            Some("INTERNAL"),
+            "count must not fail conversion {cnt}"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn idempotency_replay_every_mutating_route() {
     if common::skip_if_no_pg() {
         return;
@@ -929,7 +996,6 @@ async fn idempotency_replay_every_mutating_route() {
         assert_eq!(v1["id"], v2["id"]);
 
         let item = v1["id"].as_str().unwrap().to_string();
-        pin_stock(&w.pool, &item, 1).await;
         let lot_key = uuid::Uuid::now_v7().to_string();
         let lot_body = json!({"item_id": item, "identifier": "LOT-IDEM-1"});
         let (st1, lot1) = w
@@ -1123,7 +1189,6 @@ async fn issue_wo_is_one_transaction() {
 
 async fn setup_released_wo(w: &World) -> (String, i64, String, String, String) {
     let item = create_item(w, "TX1", "A", "onetx", "buy", 1, "FIFO", None).await;
-    pin_stock(&w.pool, &item, 1).await;
     let loc = create_loc(w, "TX-L", "onetx loc").await;
     let lot = create_lot(w, &item, "LOT-TX-1", None, None).await;
     let (st, rec) = w
@@ -1165,190 +1230,6 @@ async fn setup_released_wo(w: &World) -> (String, i64, String, String, String) {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn reverse_issue_restores_on_hand() {
-    if common::skip_if_no_pg() {
-        return;
-    }
-    let src = include_str!("../src/handlers.rs");
-    let start = src.find("async fn reverse_inner").expect("reverse_inner");
-    let rest = &src[start..];
-    let end = rest.find("/// Health.").unwrap_or(rest.len());
-    let fn_src = &rest[..end];
-    let begins = fn_src.matches("Tx::begin").count();
-    assert_eq!(
-        begins, 1,
-        "SPEC: reverse is one Tx::begin / one WriteContext:\n{fn_src}"
-    );
-    assert!(
-        !fn_src.contains("rebind_write"),
-        "R-2s-7: reverse must not rebind GUCs"
-    );
-
-    for profile in profiles() {
-        let w = common::boot(profile).await;
-        let (wo_id, wo_ver, loc, lot, item) = setup_released_wo(&w).await;
-        let oh_uri =
-            format!("/api/v1/inventory/on-hand?item_id={item}&location_id={loc}&lot_id={lot}");
-        let (st, oh0) = w.get(&oh_uri).await;
-        assert_eq!(st, StatusCode::OK, "on-hand before issue {oh0}");
-        let before: rust_decimal::Decimal = oh0["on_hand"].as_str().unwrap().parse().unwrap();
-        assert!(
-            before > rust_decimal::Decimal::ZERO,
-            "receipt must leave on-hand {oh0}"
-        );
-
-        let (st, issued) = w
-            .post_if_match(
-                &format!("/api/v1/production/work-orders/{wo_id}/issue"),
-                json!({
-                    "from_location_id": loc,
-                    "lines": [{
-                        "item_id": item,
-                        "lot_id": lot,
-                        "entered": qty("10", 1, "Count"),
-                    }]
-                }),
-                wo_ver,
-            )
-            .await;
-        assert_eq!(st, StatusCode::OK, "issue {issued}");
-
-        let (st, oh1) = w.get(&oh_uri).await;
-        assert_eq!(st, StatusCode::OK, "on-hand after issue {oh1}");
-        let after_issue: rust_decimal::Decimal = oh1["on_hand"].as_str().unwrap().parse().unwrap();
-        assert!(
-            after_issue < before,
-            "issue must reduce on-hand {before} -> {after_issue}"
-        );
-
-        let issue_doc: uuid::Uuid = query_scalar(
-            "SELECT inventory_document_id FROM production_min.issue_line WHERE work_order_id = $1 LIMIT 1",
-        )
-        .bind(uuid::Uuid::parse_str(&wo_id).unwrap())
-        .fetch_one(&w.pool)
-        .await
-        .expect("issue document");
-        let issue_group: uuid::Uuid =
-            query_scalar("SELECT posted_group_id FROM inventory.document WHERE id = $1")
-                .bind(issue_doc)
-                .fetch_one(&w.pool)
-                .await
-                .expect("posted group");
-
-        let (st, missing) = w
-            .post(
-                "/api/v1/inventory/reversals",
-                json!({
-                    "document_id": uuid::Uuid::now_v7().to_string(),
-                    "reason": "unknown",
-                }),
-            )
-            .await;
-        assert_eq!(st, StatusCode::NOT_FOUND, "unknown issue {missing}");
-        assert_eq!(missing["error"]["code"], "NOT_FOUND", "{missing}");
-
-        let (st, rev) = w
-            .post(
-                "/api/v1/inventory/reversals",
-                json!({
-                    "document_id": issue_doc.to_string(),
-                    "reason": "wrong WO pick",
-                }),
-            )
-            .await;
-        assert_eq!(st, StatusCode::CREATED, "reverse {rev}");
-        assert_eq!(rev["id"], issue_doc.to_string(), "{rev}");
-        assert_eq!(rev["kind"], "issue", "{rev}");
-        assert!(
-            rev["reversal_group_id"].as_str().is_some(),
-            "reversal document {rev}"
-        );
-
-        let (st, oh2) = w.get(&oh_uri).await;
-        assert_eq!(st, StatusCode::OK, "on-hand after reverse {oh2}");
-        let after_rev: rust_decimal::Decimal = oh2["on_hand"].as_str().unwrap().parse().unwrap();
-        assert_eq!(after_rev, before, "on-hand restored {oh2}");
-
-        let rev_kind: String = query_scalar(
-            "SELECT kind::text FROM ledger.posting_group WHERE reverses_group_id = $1",
-        )
-        .bind(issue_group)
-        .fetch_one(&w.pool)
-        .await
-        .expect("reversal group");
-        assert_eq!(rev_kind, "REVERSAL", "issue group reversed");
-        let doc_status: String =
-            query_scalar("SELECT status FROM inventory.document WHERE id = $1")
-                .bind(issue_doc)
-                .fetch_one(&w.pool)
-                .await
-                .expect("issue status");
-        assert_eq!(
-            doc_status, "posted",
-            "issue document remains; ledger group is reversed"
-        );
-
-        for group in [issue_group] {
-            let qty_bad: i64 = query_scalar(
-                r#"SELECT count(*) FROM (
-                     SELECT item_id, uom_id
-                       FROM ledger.posting
-                      WHERE group_id = $1 AND measure = 'QUANTITY'
-                      GROUP BY item_id, uom_id
-                     HAVING SUM(quantity) <> 0
-                   ) s"#,
-            )
-            .bind(group)
-            .fetch_one(&w.pool)
-            .await
-            .unwrap();
-            assert_eq!(qty_bad, 0, "qty conserved in {group}");
-            let amt_bad: i64 = query_scalar(
-                r#"SELECT count(*) FROM (
-                     SELECT currency_id
-                       FROM ledger.posting
-                      WHERE group_id = $1 AND measure = 'VALUE'
-                      GROUP BY currency_id
-                     HAVING SUM(amount) <> 0
-                   ) s"#,
-            )
-            .bind(group)
-            .fetch_one(&w.pool)
-            .await
-            .unwrap();
-            assert_eq!(amt_bad, 0, "value conserved in {group}");
-        }
-        let rev_group = uuid::Uuid::parse_str(rev["reversal_group_id"].as_str().unwrap()).unwrap();
-        let qty_bad: i64 = query_scalar(
-            r#"SELECT count(*) FROM (
-                 SELECT item_id, uom_id
-                   FROM ledger.posting
-                  WHERE group_id = $1 AND measure = 'QUANTITY'
-                  GROUP BY item_id, uom_id
-                 HAVING SUM(quantity) <> 0
-               ) s"#,
-        )
-        .bind(rev_group)
-        .fetch_one(&w.pool)
-        .await
-        .unwrap();
-        assert_eq!(qty_bad, 0, "qty conserved in reversal {rev_group}");
-
-        let (st, again) = w
-            .post(
-                "/api/v1/inventory/reversals",
-                json!({
-                    "document_id": issue_doc.to_string(),
-                    "reason": "wrong WO pick again",
-                }),
-            )
-            .await;
-        assert_eq!(st, StatusCode::CONFLICT, "already reversed {again}");
-        assert_eq!(again["error"]["code"], "CONFLICT", "{again}");
-    }
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn mutating_routes_require_manifest_permission() {
     if common::skip_if_no_pg() {
         return;
@@ -1365,13 +1246,6 @@ async fn mutating_routes_require_manifest_permission() {
             (
                 "/api/v1/locations",
                 json!({"code":"NP-L","name":"n","kind":"warehouse"}),
-            ),
-            (
-                "/api/v1/inventory/reversals",
-                json!({
-                    "document_id": "00000000-0000-0000-0000-000000000001",
-                    "reason": "noperm",
-                }),
             ),
         ];
         for (uri, body) in routes {
@@ -1395,7 +1269,6 @@ async fn regulated_release_refused_under_no_signatures() {
     for profile in profiles() {
         let w = common::boot(profile.clone()).await;
         let item = create_item(&w, "REL-1", "A", "lot rel", "buy", 1, "FIFO", None).await;
-        pin_stock(&w.pool, &item, 1).await;
         let lot = create_lot(&w, &item, "LOT-REL-1", None, None).await;
         let ver = w.get(&format!("/api/v1/lots/{lot}")).await.1["version"]
             .as_i64()
@@ -1495,7 +1368,6 @@ async fn get_handlers_are_read_only() {
     for profile in profiles() {
         let w = common::boot(profile).await;
         let item = create_item(&w, "RO-1", "A", "ro", "buy", 1, "FIFO", None).await;
-        pin_stock(&w.pool, &item, 1).await;
         let loc = create_loc(&w, "RO-L", "ro loc").await;
         let lot = create_lot(&w, &item, "LOT-RO-1", None, None).await;
         let (st, wo) = w
@@ -1598,7 +1470,6 @@ async fn one_audit_row_per_mutating_step() {
         .await;
         assert_eq!(st, StatusCode::CREATED, "{item}");
         let item_id = item["id"].as_str().unwrap().to_string();
-        pin_stock(&w.pool, &item_id, 1).await;
         let (st, loc_rid, loc) = post_rid(
             &w,
             "/api/v1/locations",

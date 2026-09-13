@@ -15,7 +15,7 @@ boundary helper `to_stock`. Factors may be global, item-scoped, or lot-pinned.
 - `to_stock` — convert entered qty to the item stock unit in `tx`
 - `convert` — `UnitConverter::convert` against a loaded catalog
 - `load_unit` — load a `UnitId` from `uom.unit` on a read pool
-- `ItemStockMeasure` / `update_item_stock` — write `uom.item_stock` with R5
+- `ItemStockMeasure` / `pin_item_stock` / `update_item_stock` — write `uom.item_stock` with R5
   immutability via `ledger.has_postings` on the same `tx` (equivalent to
   `datum_ledger::has_postings`; no `datum-ledger` crate dependency per CONTRACT §4)
 - `MIGRATOR` — `placeholder` + `0001_uom` + `0002_drop_uom_ledger_shim`
@@ -40,7 +40,8 @@ boundary helper `to_stock`. Factors may be global, item-scoped, or lot-pinned.
 - `convert_within_dimension_returns_converted_with_residual`
 - `effectivity_picks_the_factor_in_force` / `inverse_factor_is_inferred_exactly`
 - `repin_closes_the_open_pin` / `lot_factor_beats_item_factor_beats_global`
-- `pin_then_to_stock_in_one_tx` / `to_stock_with_and_without_lot_pin`
+- `pin_item_stock_inserts_canonical_measure` / `pin_then_to_stock_in_one_tx` /
+  `to_stock_with_and_without_lot_pin`
 - `seeded_units_have_right_dimensions` / `stock_unit_immutable_while_postings_exist`
 - `every_uom_table_is_audited` / `writes_go_through_tx`
 - `round_trip_ab_a_within_one_ulp_at_stock_scale_8` / `round_half_even_at_stock_scale`

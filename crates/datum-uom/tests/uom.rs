@@ -14,7 +14,8 @@ use proptest::prelude::*;
 use rust_decimal::Decimal;
 
 use datum_uom::{
-    MIGRATOR, apply_rounding_policy, load_catalog, pin_lot_factor, split_with_policy, to_stock,
+    MIGRATOR, apply_rounding_policy, load_catalog, pin_item_stock, pin_lot_factor,
+    split_with_policy, to_stock,
 };
 
 fn dec(s: &str) -> Decimal {
@@ -288,6 +289,31 @@ async fn lot_factor_beats_item_factor_beats_global() {
         "unscoped item must use global 1/12"
     );
 
+    tx.rollback().await.unwrap();
+    db.finish().await.unwrap();
+}
+
+#[tokio::test]
+async fn pin_item_stock_inserts_canonical_measure() {
+    let db = datum_test::db_case!("pin_item_stock");
+    common::migrate(&db).await;
+    let pool = WritePool::new(db.app_pool().clone());
+    let ctx = common::write_ctx("uom.pin_item_stock");
+    let mut tx = datum_db::Tx::begin(&pool, &ctx).await.unwrap();
+    let item = ItemId::generate();
+    pin_item_stock(
+        &mut tx,
+        item,
+        datum_uom::ItemStockMeasure {
+            stock_unit: UnitId(4),
+            stock_scale: 4,
+            residual_tolerance: Decimal::ZERO,
+        },
+    )
+    .await
+    .unwrap();
+    let catalog = load_catalog(&mut tx).await.unwrap();
+    assert_eq!(catalog.stock_for(item), Some((UnitId(4), 4)));
     tx.rollback().await.unwrap();
     db.finish().await.unwrap();
 }

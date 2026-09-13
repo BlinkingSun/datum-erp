@@ -22,18 +22,49 @@ pub struct ItemStockMeasure {
     pub residual_tolerance: Decimal,
 }
 
-/// Update an item's stock measure when the ledger reports no postings (D2 R5).
-pub async fn update_item_stock(
-    tx: &mut Tx<'_>,
-    item: ItemId,
-    measure: ItemStockMeasure,
-) -> Result<()> {
+fn validate_measure(measure: &ItemStockMeasure) -> Result<()> {
     if !(0..=8).contains(&measure.stock_scale) {
         return Err(Error::InvalidStockScale);
     }
     if measure.residual_tolerance < Decimal::ZERO {
         return Err(Error::InvalidResidualTolerance);
     }
+    Ok(())
+}
+
+/// Insert the item's canonical stock measure at create time (one row per item).
+pub async fn pin_item_stock(
+    tx: &mut Tx<'_>,
+    item: ItemId,
+    measure: ItemStockMeasure,
+) -> Result<()> {
+    validate_measure(&measure)?;
+    let n = tx
+        .execute(
+            sqlx::query(
+                "INSERT INTO uom.item_stock (
+                     item_id, stock_unit_id, stock_scale, residual_tolerance
+                 ) VALUES ($1, $2, $3, $4)",
+            )
+            .bind(item.as_uuid())
+            .bind(measure.stock_unit.0)
+            .bind(measure.stock_scale)
+            .bind(measure.residual_tolerance),
+        )
+        .await?;
+    if n.rows_affected() != 1 {
+        return Err(Error::UnknownItemStock(item));
+    }
+    Ok(())
+}
+
+/// Update an item's stock measure when the ledger reports no postings (D2 R5).
+pub async fn update_item_stock(
+    tx: &mut Tx<'_>,
+    item: ItemId,
+    measure: ItemStockMeasure,
+) -> Result<()> {
+    validate_measure(&measure)?;
 
     type Row = (i64, i16, Decimal);
     let current: Option<Row> = tx
