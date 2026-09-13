@@ -14,8 +14,6 @@ mod reads;
 mod render;
 mod store;
 
-#[cfg(feature = "test-utils")]
-pub use api::set_test_blob_root;
 pub use api::{
     archive, bump_template, log, manifestation_block, render, seed_templates,
     set_installation_profile,

@@ -39,7 +39,7 @@ same moment it records `module.configuration`. Do not infer the profile from
 | Function | Purpose |
 |----------|---------|
 | `render` | Produce `Rendered` bytes + `output_hash`; writes `render_log` |
-| `archive` | Store bytes via `datum_documents::BlobStore`; idempotent per output hash |
+| `archive` | Store bytes via caller-supplied `datum_documents::BlobStore` (same pattern as `documents::attach`); idempotent per output hash. No process-global blob root. |
 | `manifestation_block` | Snapshot manifestation rows for the record (no live identity join) |
 | `log` | List `render_log` rows for a record version |
 | `set_installation_profile` | Boot stamp for 11.50(b) gating |

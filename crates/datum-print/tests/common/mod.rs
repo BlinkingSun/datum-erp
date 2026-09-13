@@ -98,6 +98,7 @@ pub async fn open_db(base: &str, profile: &str) -> Option<datum_test::TestDb> {
     )
 }
 
+/// Unique filesystem blob store for this test. No process-global root.
 pub fn blob_store(tag: &str) -> FsBlobStore {
     let root: PathBuf = std::env::temp_dir().join(format!(
         "datum-print-blobs-{}-{}",
@@ -105,7 +106,6 @@ pub fn blob_store(tag: &str) -> FsBlobStore {
         Identifier::generate()
     ));
     std::fs::create_dir_all(&root).expect("blob root");
-    datum_print::set_test_blob_root(root.clone());
     FsBlobStore::new(root)
 }
 

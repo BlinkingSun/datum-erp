@@ -1,13 +1,8 @@
 //! Public API on the sealed [`datum_db::Tx`].
 
-#[cfg(feature = "test-utils")]
-use std::path::PathBuf;
-#[cfg(feature = "test-utils")]
-use std::sync::Mutex;
-
 use datum_core::{Identifier, RecordRef};
 use datum_db::Tx;
-use datum_documents::{BlobHash, BlobStore, FsBlobStore};
+use datum_documents::{BlobHash, BlobStore};
 use datum_esign::Manifestation;
 
 use crate::domain::{Format, RenderLogRow, Rendered, TemplateId};
@@ -15,23 +10,6 @@ use crate::error::{Error, Result};
 use crate::reads;
 use crate::render as render_util;
 use crate::store;
-
-#[cfg(feature = "test-utils")]
-static TEST_BLOB_ROOT: Mutex<Option<PathBuf>> = Mutex::new(None);
-
-/// Test-only blob root override (`test-utils` feature).
-#[cfg(feature = "test-utils")]
-pub fn set_test_blob_root(root: PathBuf) {
-    *TEST_BLOB_ROOT.lock().expect("blob root lock") = Some(root);
-}
-
-fn blob_store() -> Result<FsBlobStore> {
-    #[cfg(feature = "test-utils")]
-    if let Some(root) = TEST_BLOB_ROOT.lock().expect("blob root lock").clone() {
-        return Ok(FsBlobStore::new(root));
-    }
-    FsBlobStore::from_env().map_err(|_| Error::BlobRootMissing)
-}
 
 /// Load manifestation blocks for a record (esign snapshot columns, no identity join).
 pub async fn manifestation_block(tx: &mut Tx<'_>, record: RecordRef) -> Result<Vec<Manifestation>> {
@@ -94,7 +72,16 @@ pub async fn render(
 }
 
 /// Archive a rendition to the content-addressed blob store (immutable).
-pub async fn archive(tx: &mut Tx<'_>, rendered: &Rendered, record: RecordRef) -> Result<BlobHash> {
+///
+/// The caller supplies the [`BlobStore`] (same pattern as [`datum_documents::attach`]).
+/// Tests pass a unique [`datum_documents::FsBlobStore`] rooted in a temp directory;
+/// production passes `FsBlobStore::from_env()`. There is no process-global blob root.
+pub async fn archive(
+    tx: &mut Tx<'_>,
+    rendered: &Rendered,
+    record: RecordRef,
+    blobs: &dyn BlobStore,
+) -> Result<BlobHash> {
     if let Some(existing) = store::find_archived_blob(
         tx,
         &record.table,
@@ -106,7 +93,6 @@ pub async fn archive(tx: &mut Tx<'_>, rendered: &Rendered, record: RecordRef) ->
     {
         return Ok(existing);
     }
-    let blobs = blob_store()?;
     let hash = blobs.put(&rendered.bytes)?;
     if let Some(render_id) = store::latest_render_id(
         tx,

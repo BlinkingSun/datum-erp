@@ -345,7 +345,9 @@ async fn archive_creates_immutable_blob_and_audit_row() {
         )
         .await
         .unwrap();
-        let hash = archive(&mut tx, &rendered, rec.clone()).await.unwrap();
+        let hash = archive(&mut tx, &rendered, rec.clone(), &blobs)
+            .await
+            .unwrap();
         tx.commit().await.unwrap();
         let n: (i64,) =
             sqlx::query_as("SELECT count(*) FROM print.render_log WHERE blob_hash IS NOT NULL")
@@ -377,7 +379,7 @@ async fn archive_twice_is_noop() {
             return;
         };
         migrate(&db, profile).await;
-        blob_store("arch2");
+        let blobs = blob_store("arch2");
         let write = write_pool(&db);
         let rec = record("generic.record", Identifier::generate(), 1);
         let mut tx = Tx::begin(&write, &write_ctx("print.render")).await.unwrap();
@@ -389,8 +391,12 @@ async fn archive_twice_is_noop() {
         )
         .await
         .unwrap();
-        let h1 = archive(&mut tx, &rendered, rec.clone()).await.unwrap();
-        let h2 = archive(&mut tx, &rendered, rec.clone()).await.unwrap();
+        let h1 = archive(&mut tx, &rendered, rec.clone(), &blobs)
+            .await
+            .unwrap();
+        let h2 = archive(&mut tx, &rendered, rec.clone(), &blobs)
+            .await
+            .unwrap();
         tx.commit().await.unwrap();
         assert_eq!(h1, h2);
         db.finish().await.unwrap();
