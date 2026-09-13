@@ -337,6 +337,34 @@ pub const MOUNTED: &[Mounted] = &[
         state_transition: false,
     },
     // w3b:documents
+    Mounted {
+        method: "POST",
+        path: "/api/v1/documents",
+        operation_id: "createDocument",
+        permission: "documents.edit",
+        state_transition: false,
+    },
+    Mounted {
+        method: "GET",
+        path: "/api/v1/documents/{id}",
+        operation_id: "getDocument",
+        permission: "documents.view",
+        state_transition: false,
+    },
+    Mounted {
+        method: "POST",
+        path: "/api/v1/documents/{id}/revisions",
+        operation_id: "createDocumentRevision",
+        permission: "documents.edit",
+        state_transition: false,
+    },
+    Mounted {
+        method: "POST",
+        path: "/api/v1/documents/{id}/approve",
+        operation_id: "approveDocument",
+        permission: "documents.approve",
+        state_transition: true,
+    },
     // w3b:print
 ];
 

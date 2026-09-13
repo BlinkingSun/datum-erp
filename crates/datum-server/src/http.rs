@@ -99,6 +99,22 @@ pub fn router(state: AppState) -> Router {
             put(handlers::customfields::set).get(handlers::customfields::get_item_fields),
         )
         // w3b:documents
+        .route(
+            "/api/v1/documents",
+            post(handlers::documents::create_document),
+        )
+        .route(
+            "/api/v1/documents/{id}",
+            get(handlers::documents::get_document),
+        )
+        .route(
+            "/api/v1/documents/{id}/revisions",
+            post(handlers::documents::create_revision),
+        )
+        .route(
+            "/api/v1/documents/{id}/approve",
+            post(handlers::documents::approve_document),
+        )
         // w3b:print
         .layer(DefaultBodyLimit::max(1024 * 1024))
         .layer(axum::middleware::from_fn(limits_mw))
