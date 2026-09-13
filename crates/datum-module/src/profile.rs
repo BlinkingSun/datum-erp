@@ -379,6 +379,32 @@ impl Profile {
             .collect()
     }
 
+    /// Permissions on Required edges matching `(machine, meaning)`.
+    ///
+    /// Empty when this profile has no Required edge for that pair
+    /// (plain-shop `NoSignatures`). Duplicate keys are collapsed; two
+    /// Required edges that share a meaning on one machine both appear
+    /// (`permission_snapshot` is a set).
+    pub fn required_edge_permission(&self, machine: &str, meaning: &str) -> Vec<String> {
+        let mut seen = BTreeSet::new();
+        let mut out = Vec::new();
+        for edge in self.required_edges() {
+            if let SignatureEdge::Required {
+                module,
+                meaning: edge_meaning,
+                permission,
+                ..
+            } = edge
+                && module == machine
+                && edge_meaning == meaning
+                && seen.insert(permission.as_str())
+            {
+                out.push(permission.clone());
+            }
+        }
+        out
+    }
+
     /// Dump used by the delta test (profile id / display name omitted).
     pub fn effective_dump(&self) -> Result<BTreeMap<String, serde_json::Value>> {
         let mut map = BTreeMap::new();

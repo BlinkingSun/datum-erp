@@ -340,6 +340,70 @@ async fn create_revision_inner(
     Ok((201, payload))
 }
 
+/// POST /api/v1/documents/{id}/submit → [`datum_module::Kernel::transition`]
+/// Draft→InReview. Not a Required edge; no signature token.
+pub async fn submit_document(
+    State(state): State<AppState>,
+    headers: H,
+    Path(id): Path<String>,
+    body: Bytes,
+) -> Response {
+    let request_id = rid(&headers);
+    let state2 = state.clone();
+    let headers2 = headers.clone();
+    let rid2 = request_id.clone();
+    let raw = body.to_vec();
+    match blocking(&request_id, move || async move {
+        submit_document_inner(&state2, &headers2, &rid2, &id, &raw).await
+    }) {
+        Ok((st, v)) => json_status(st, v),
+        Err(r) => r,
+    }
+}
+
+async fn submit_document_inner(
+    state: &AppState,
+    headers: &H,
+    request_id: &str,
+    id: &str,
+    raw: &[u8],
+) -> Result<(u16, Value)> {
+    let session = extract::require_mutation(state, headers, request_id, "documents.edit").await?;
+    let key = idempotency::require_key(headers)?;
+    let hash = idempotency::body_hash(raw);
+    let expected = require_if_match(headers)?;
+    let doc_id = parse_uuid(id, "id", wrap_document_id)?;
+    let doc = datum_statemachine::DocRef {
+        doc_type: datum_documents::DOC_TYPE.into(),
+        doc_id: doc_id.0,
+    };
+    let mut ctx = state
+        .kernel()
+        .transition_context(actor(&session), &doc, "submit");
+    ctx.session_id = Some(session.id.to_string());
+    ctx.request_id = Some(request_id.to_string());
+    ctx.source_kind = "api".into();
+    ctx.reason = Some("api".into());
+    ctx.actor_display = Some(session.display_name.clone());
+    let write = fresh_write(state).await?;
+    let mut tx = Tx::begin(&write, &ctx).await?;
+    if let Some(replay) = idempotency::replay(&mut tx, key, &hash).await? {
+        tx.commit().await?;
+        return Ok(replay);
+    }
+    let version = instance_version(state, &mut tx, doc_id).await?;
+    check_version(version, expected)?;
+    state
+        .kernel()
+        .transition(&mut tx, &doc, "submit", None, &ctx)
+        .await
+        .map_err(docs_from_kernel)?;
+    let payload = load_body(state, &mut tx, doc_id).await?;
+    idempotency::remember(&mut tx, key, &hash, 200, &payload).await?;
+    tx.commit().await?;
+    Ok((200, payload))
+}
+
 /// POST /api/v1/documents/{id}/approve → [`datum_module::Kernel::transition`]
 /// with `bind_esign_header` + `required_edge_token` (lots / calibration).
 pub async fn approve_document(

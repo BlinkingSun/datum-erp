@@ -2102,8 +2102,22 @@ struct EsignIdentBody {
     secret: Option<String>,
 }
 
-fn permission_for_meaning(meaning: &str) -> datum_core::PermissionKey {
-    datum_core::PermissionKey(
+/// Permission keys to snapshot at mint, from the target record's Required
+/// edges (`machine` × `meaning`). `permission_snapshot` is a set: two
+/// Required edges that share a meaning on one machine both appear.
+///
+/// The static table is the fallback when the machine has no Required edge
+/// for the meaning (plain-shop `NoSignatures`).
+fn permission_for_meaning(
+    profile: &datum_module::Profile,
+    machine: &str,
+    meaning: &str,
+) -> Vec<datum_core::PermissionKey> {
+    let keys = profile.required_edge_permission(machine, meaning);
+    if !keys.is_empty() {
+        return keys.into_iter().map(datum_core::PermissionKey).collect();
+    }
+    vec![datum_core::PermissionKey(
         match meaning {
             "Approved" => "calibration.approve",
             "Released" => "wo.release",
@@ -2111,7 +2125,7 @@ fn permission_for_meaning(meaning: &str) -> datum_core::PermissionKey {
             other => other,
         }
         .into(),
-    )
+    )]
 }
 
 /// POST /api/v1/esign/challenges
@@ -2241,6 +2255,13 @@ async fn esign_mint_inner(
         .kernel()
         .live_record(&mut tx, &doc_type, doc_id)
         .await?;
+    // `required_edge_permission` returns a set (shared meaning → every
+    // matching key). mint takes one PermissionKey; the first matching
+    // Required-edge permission is snapshotted, plus meaning_policy's hint.
+    let permission = permission_for_meaning(&state.kernel().profile, &inst.doc_type, &meaning)
+        .into_iter()
+        .next()
+        .expect("permission_for_meaning never empty");
     let sig = datum_esign::mint(
         &mut tx,
         &datum_esign::MintRequest {
@@ -2253,7 +2274,7 @@ async fn esign_mint_inner(
             doc_type,
             projection,
             instance: inst,
-            permission: permission_for_meaning(&meaning),
+            permission,
             signed_at_zone: state
                 .kernel()
                 .profile
