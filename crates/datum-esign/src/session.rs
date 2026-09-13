@@ -1,13 +1,14 @@
 //! Continuous-session relaxation (D-2b-3). Shipped `off` in both profiles.
 
 use chrono::{DateTime, Utc};
+use datum_core::Identifier;
 use datum_identity::UserId;
 use serde::{Deserialize, Serialize};
 use sqlx::{query as sql_query, query_as as sql_query_as};
 use uuid::Uuid;
 
-use crate::Result;
 use crate::error::map_tx;
+use crate::{Error, Result};
 
 /// Sub-keys of SPEC-profiles key 4.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -90,11 +91,23 @@ fn row_to_session(row: SessionRow) -> SigningSession {
     }
 }
 
-/// Close every open signing session for `principal` with `reason`.
+/// Close every open signing session for the actor bound on `tx` with `reason`.
 ///
-/// SPEC names `close_session(tx, reason)`. The actor is not readable from
-/// [`datum_db::Tx`] (session-protocol fence), so the principal is an argument.
-pub async fn close_session(
+/// The principal is [`datum_db::Tx::setting`] `"datum.actor_id"` (the
+/// [`datum_db::WriteContext`] actor), never a parameter (D-2b-8).
+pub async fn close_session(tx: &mut datum_db::Tx<'_>, reason: &str) -> Result<u64> {
+    let raw = tx.setting("datum.actor_id").await.map_err(map_tx)?;
+    let uuid = Uuid::parse_str(&raw).map_err(|e| Error::Invariant(e.to_string()))?;
+    close_sessions_for(
+        tx,
+        UserId::from_identifier(Identifier::from_uuid(uuid)),
+        reason,
+    )
+    .await
+}
+
+/// Close every open signing session for `principal` with `reason`.
+pub(crate) async fn close_sessions_for(
     tx: &mut datum_db::Tx<'_>,
     principal: UserId,
     reason: &str,

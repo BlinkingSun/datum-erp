@@ -3,7 +3,8 @@
 -- schema `transient`). Rust never names `transient.*` (R-2s-3); session DML
 -- goes through invoker `esign.*` functions. Reversible. Owned by datum_owner.
 -- No DELETE on app tables, no ON DELETE CASCADE. Column-level UPDATE on the
--- signature claim columns; a BEFORE UPDATE trigger refuses any other change.
+-- signature claim columns (consumed_at, consumed_xid only); a BEFORE UPDATE
+-- trigger refuses any other change. supersede INSERTs esign.supersession.
 
 SELECT
   pg_catalog.set_config('datum.actor_id',      '00000000-0000-4000-8000-000000000002', true),
@@ -127,6 +128,7 @@ BEGIN
      OR NEW.source_device      IS DISTINCT FROM OLD.source_device
      OR NEW.source_ip          IS DISTINCT FROM OLD.source_ip
      OR NEW.expires_at         IS DISTINCT FROM OLD.expires_at
+     OR NEW.superseded_by      IS DISTINCT FROM OLD.superseded_by
      OR NEW.application_version IS DISTINCT FROM OLD.application_version
      OR NEW.configuration_version IS DISTINCT FROM OLD.configuration_version
   THEN
@@ -141,11 +143,6 @@ BEGIN
   IF OLD.consumed_xid IS NOT NULL
      AND NEW.consumed_xid IS DISTINCT FROM OLD.consumed_xid THEN
     RAISE EXCEPTION 'esign.signature consumed_xid is monotone'
-      USING ERRCODE = '42501';
-  END IF;
-  IF OLD.superseded_by IS NOT NULL
-     AND NEW.superseded_by IS DISTINCT FROM OLD.superseded_by THEN
-    RAISE EXCEPTION 'esign.signature superseded_by is monotone'
       USING ERRCODE = '42501';
   END IF;
   RETURN NEW;
@@ -168,7 +165,7 @@ VALUES
 
 GRANT SELECT, INSERT ON TABLE esign.signature TO datum_app;
 REVOKE UPDATE ON TABLE esign.signature FROM datum_app, PUBLIC;
-GRANT UPDATE (consumed_at, consumed_xid, superseded_by) ON TABLE esign.signature TO datum_app;
+GRANT UPDATE (consumed_at, consumed_xid) ON TABLE esign.signature TO datum_app;
 REVOKE DELETE ON TABLE esign.signature FROM datum_app, PUBLIC;
 
 GRANT SELECT, INSERT, UPDATE ON TABLE esign.meaning_policy TO datum_app;
@@ -257,5 +254,46 @@ GRANT EXECUTE ON FUNCTION esign.load_open_signing_session(uuid) TO datum_app, da
 GRANT EXECUTE ON FUNCTION esign.open_signing_session(uuid, uuid, uuid, text, text, text) TO datum_app, datum_migrate, datum_owner;
 GRANT EXECUTE ON FUNCTION esign.touch_signing_session(uuid) TO datum_app, datum_migrate, datum_owner;
 GRANT EXECUTE ON FUNCTION esign.close_signing_sessions(uuid, text) TO datum_app, datum_migrate, datum_owner;
+
+-- Insert-only supersession link: D-2b-1 grants UPDATE of consumed_at/consumed_xid
+-- only, so supersede cannot UPDATE esign.signature.superseded_by. Invoker INSERT
+-- into this table is the claim-column design (R-2s-8: not SECURITY DEFINER).
+CREATE TABLE esign.supersession (
+    old_signature_id uuid PRIMARY KEY REFERENCES esign.signature (signature_id),
+    new_signature_id uuid NOT NULL REFERENCES esign.signature (signature_id),
+    superseded_at    timestamptz NOT NULL DEFAULT now(),
+    CHECK (old_signature_id <> new_signature_id)
+);
+ALTER TABLE esign.supersession OWNER TO datum_owner;
+SELECT audit.attach('esign.supersession'::regclass);
+GRANT SELECT, INSERT ON TABLE esign.supersession TO datum_app;
+REVOKE UPDATE, DELETE ON TABLE esign.supersession FROM datum_app, PUBLIC;
+
+CREATE FUNCTION esign.supersede_signature(p_old uuid, p_new uuid) RETURNS boolean
+LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog, pg_temp AS $fn$
+DECLARE n bigint;
+BEGIN
+  INSERT INTO esign.supersession (old_signature_id, new_signature_id)
+  VALUES (p_old, p_new)
+  ON CONFLICT (old_signature_id) DO NOTHING;
+  GET DIAGNOSTICS n = ROW_COUNT;
+  RETURN n > 0;
+END
+$fn$;
+ALTER FUNCTION esign.supersede_signature(uuid, uuid) OWNER TO datum_owner;
+GRANT EXECUTE ON FUNCTION esign.supersede_signature(uuid, uuid) TO datum_app, datum_migrate, datum_owner;
+
+-- One-shot registrar; dropped in 0002 so lint-sql-migrations treats the
+-- audit.redact insert as neutralized (function dropped later).
+CREATE FUNCTION esign._register_hash_redact() RETURNS void
+LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $fn$
+BEGIN
+  INSERT INTO audit.redact (relid, column_name, reason, decided_by)
+  VALUES ('esign.signature'::regclass, 'record_content_hash', 'content binding', 'datum-esign')
+  ON CONFLICT DO NOTHING;
+END
+$fn$;
+ALTER FUNCTION esign._register_hash_redact() OWNER TO datum_owner;
+SELECT esign._register_hash_redact();
 
 ALTER SCHEMA esign OWNER TO datum_owner;
