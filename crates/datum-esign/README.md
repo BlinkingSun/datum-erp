@@ -1,0 +1,104 @@
+# datum-esign
+
+Electronic signatures (Wave 2b). Mints a signature row bound to the exact
+content of the record version it certifies, and lets a state transition consume
+it atomically through a per-transaction prepared `SignatureGate`.
+
+Composition-root wiring (`GateBinding` factory, `prepare` before
+`Engine::transition`, `datum.esign_id` on audit rows, profile TOML flip) is the
+follow-up lane `2b1-glue`. This crate publishes what that lane needs.
+
+## Schema
+
+Class `app`, schema `esign` (R-2s-1; kernel crate owns its schema):
+
+| Table | Notes |
+|---|---|
+| `esign.signature` | Insert-only. `datum_app` holds `SELECT`, `INSERT`, and `UPDATE (consumed_at, consumed_xid, superseded_by)` only. A `BEFORE UPDATE` trigger refuses any other column; `consumed_at` / `superseded_by` are monotone. No `DELETE`. |
+| `esign.meaning_policy` | Reason-text policy (`requires_reason`, `permission_hint`). |
+
+Working state is `transient.signing_session` (D-2b-3; `DELETE` allowed, not
+audited). This crate is not on the R-2s-3 exemption list, so production Rust
+never names `transient.*`: session DML goes through invoker `esign.*`
+functions.
+
+Tables are owned by `datum_owner` (NOLOGIN). App-class tables are audited by
+`zz_audit_row` from `CREATE TABLE`. Hash columns are redacted through
+`audit.redact` (registered by the migrator role in tests; production
+registration is a `datum-audit` seam — this crate cannot `INSERT INTO
+audit.redact` under lint-sql-migrations).
+
+## D-2b-5 check table
+
+| # | Check | Error | Audited? |
+|---|---|---|---|
+| 0 | provider bound | `NoProvider` | silent |
+| 1 | row `FOR UPDATE`: exists; `expires_at > now()`; signer `Active`; `token.signer` == `signer_id` | `Invalid("no such signature" \| "expired" \| "signer inactive" \| "signer mismatch")` | yes |
+| 2 | meaning (row vs required vs token) | `MeaningMismatch` | yes |
+| 3 | `(record_table, record_id, record_version)` vs live `RecordRef` | `RecordMismatch` | yes |
+| 4 | token hash vs row vs live projection | `HashMismatch` | yes |
+| 5 | `required.permission` ∈ `permission_snapshot` | `SignerNotPermitted` | yes |
+| 6 | conditional `UPDATE` row count | `Consumed` | yes |
+
+A missing token on a `Required` edge is `Invalid("missing token")` (executor).
+Audited failures are written after rollback via `esign::log_refusal` →
+`audit.log_event` as `security.esign.refusal`.
+
+`prepare` claims inside the caller's transaction. A refusal aborts that
+transaction and the rollback un-claims the row.
+
+## Manifestation wire shape (D-2b-2)
+
+```json
+{ "signature": {
+  "id": "01932c5a-…-e2", "signer_id": "01932c5a-…-0b", "printed_name": "M. Reyes",
+  "meaning": "Released", "reason": null,
+  "signed_at": "2026-03-14T15:02:11Z", "signed_at_zone": "America/New_York",
+  "signed_at_local": "2026-03-14T11:02:11-04:00",
+  "record": { "table": "sm.instance", "doc_type": "production.work_order",
+              "id": "01932c5a-…-06", "version": 3 },
+  "record_content_hash": "e3b0c442…b855",
+  "credential_kind": "signing_password", "components_used": ["code","secret"],
+  "superseded": false } }
+```
+
+`signed_at_local` is derived, not stored. Snapshots only — never a live join.
+
+## Route shapes (transport is `datum-server`)
+
+| Method | Path | Body / result |
+|---|---|---|
+| `POST` | `/api/v1/esign/challenges` | `{ components_required: ["code","secret"] \| ["secret"], signing_session_expires_at, credential_kind }` |
+| `POST` | `/api/v1/esign/signatures` | Idempotency-Key; identification `{ code, secret }`; returns the D-2b-2 body. 401 `SIGNATURE_REQUIRED` (`field = "identification.secret"`) when the principal has no signing credential. Login secret is `VALIDATION`. |
+| `GET` | `/api/v1/esign/signatures/{id}` | Manifestation |
+| `GET` | `/api/v1/esign/signatures/{id}/bundle` | Archival bundle; permission `esign.bundle.read` |
+
+Error codes (docs/10): `SIGNATURE_REQUIRED`, `SIGNATURE_NO_PROVIDER`,
+`VALIDATION`, `CONFLICT`. `Consumed` / `HashMismatch` are 409 `CONFLICT`.
+
+## Relaxation keys (SPEC-profiles key 4 sub-keys)
+
+```toml
+[signature_gate_binding]
+gate = "NoSignatures"          # or "datum-esign"
+continuous_session = "off"     # shipped off in both profiles
+idle_timeout_secs = 300
+max_window_secs = 900
+```
+
+v1 requires `["code","secret"]` on every signing. Continuation with `["secret"]`
+is accepted only when `continuous_session = "on"` and a live
+`transient.signing_session` is inside both windows.
+
+## API
+
+- `mint(tx, MintRequest) -> Signature`
+- `prepare(tx, token, doc) -> PreparedGate` (`LiveDoc.signer_status` from `load_principal`; `ReadPool` has no query surface)
+- `PreparedGate: SignatureGate`, `GateFactory`, `BoundGate`
+- `manifestation(&Pool, id)`, `archival_bundle(&Pool, id)`, `verify_bundle` (pure)
+- `supersede(tx, old, new)`, `close_session(tx, principal, reason)`, `log_refusal`
+- `register_projection(doc_type, fn)`, default `identity_projection`
+
+`record_content_hash` is SHA-256 over the canonical JSON of
+`{ projection, instance: { doc_type, doc_id, state, version } }`. The caller
+reads the `sm.instance` triple (this crate does not `SELECT sm.*`).

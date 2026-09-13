@@ -1,0 +1,265 @@
+//! Manifestation and archival bundle (D-2b-2, D-2b-8). Reads through a pool.
+
+use chrono::{DateTime, Utc};
+use datum_core::SignatureId;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use sqlx::query_as as sql_query_as;
+use uuid::Uuid;
+
+use crate::hash::{canonical_bytes, content_hash, hex};
+use crate::{Error, Result};
+
+/// D-2b-2 manifestation object (the inner `signature` member).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SignatureManifest {
+    /// Signature id.
+    pub id: String,
+    /// Signer principal id.
+    pub signer_id: String,
+    /// Printed name snapshot.
+    pub printed_name: String,
+    /// Meaning snapshot.
+    pub meaning: String,
+    /// Reason snapshot.
+    pub reason: Option<String>,
+    /// UTC instant (`…Z`).
+    pub signed_at: String,
+    /// Signer's IANA zone.
+    pub signed_at_zone: String,
+    /// Derived local stamp with offset.
+    pub signed_at_local: String,
+    /// Record reference including `doc_type`.
+    pub record: ManifestRecord,
+    /// Hex SHA-256.
+    pub record_content_hash: String,
+    /// Credential kind.
+    pub credential_kind: String,
+    /// Components used.
+    pub components_used: Vec<String>,
+    /// True when [`crate::supersede`] has linked a newer signature.
+    pub superseded: bool,
+}
+
+/// Record object inside the manifestation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ManifestRecord {
+    /// Table name.
+    pub table: String,
+    /// Display document type.
+    pub doc_type: String,
+    /// Record id.
+    pub id: String,
+    /// Record version.
+    pub version: i64,
+}
+
+/// Exact wire shape: `{ "signature": { … } }`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Manifestation {
+    /// Signature manifestation.
+    pub signature: SignatureManifest,
+}
+
+type ManifestRow = (
+    Uuid,
+    Uuid,
+    String,
+    String,
+    Option<String>,
+    DateTime<Utc>,
+    String,
+    String,
+    String,
+    Uuid,
+    i64,
+    String,
+    Vec<u8>,
+    String,
+    Vec<String>,
+    Option<Uuid>,
+);
+
+/// Read the D-2b-2 manifestation.
+///
+/// SPEC names `&ReadPool`. [`datum_db::ReadPool`] has no query surface (no
+/// `Deref`, no `fetch`); this matches [`datum_identity::load_principal`] and
+/// takes [`datum_db::Pool`].
+pub async fn manifestation(pool: &datum_db::Pool, id: SignatureId) -> Result<Manifestation> {
+    let row: Option<ManifestRow> = sql_query_as(
+        r#"SELECT
+               signature_id, signer_id, signer_printed_name, meaning, reason,
+               signed_at, signed_at_zone,
+               (
+                 to_char(timezone(signed_at_zone, signed_at), 'YYYY-MM-DD"T"HH24:MI:SS')
+                 || CASE
+                      WHEN timezone(signed_at_zone, signed_at)
+                           >= timezone('UTC', signed_at)
+                      THEN '+' ELSE '-'
+                    END
+                 || to_char(
+                      (abs(extract(epoch from (
+                         timezone(signed_at_zone, signed_at)
+                         - timezone('UTC', signed_at)
+                       )))::int / 3600),
+                      'FM00'
+                    )
+                 || ':'
+                 || to_char(
+                      ((abs(extract(epoch from (
+                         timezone(signed_at_zone, signed_at)
+                         - timezone('UTC', signed_at)
+                       )))::int % 3600) / 60),
+                      'FM00'
+                    )
+               ) AS signed_at_local,
+               record_table, record_id, record_version, doc_type,
+               record_content_hash, credential_kind, components_used, superseded_by
+          FROM esign.signature
+         WHERE signature_id = $1"#,
+    )
+    .bind(id.as_uuid())
+    .fetch_optional(pool)
+    .await?;
+    let Some(row) = row else {
+        return Err(Error::NotFound);
+    };
+    let mut hash = [0u8; 32];
+    if row.12.len() == 32 {
+        hash.copy_from_slice(&row.12);
+    }
+    Ok(Manifestation {
+        signature: SignatureManifest {
+            id: row.0.to_string(),
+            signer_id: row.1.to_string(),
+            printed_name: row.2,
+            meaning: row.3,
+            reason: row.4,
+            signed_at: row.5.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            signed_at_zone: row.6,
+            signed_at_local: row.7,
+            record: ManifestRecord {
+                table: row.8,
+                doc_type: row.11,
+                id: row.9.to_string(),
+                version: row.10,
+            },
+            record_content_hash: hex(&hash),
+            credential_kind: row.13,
+            components_used: row.14,
+            superseded: row.15.is_some(),
+        },
+    })
+}
+
+/// One seal in an archival bundle.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SealRef {
+    /// Gap-free sequence.
+    pub seq: i64,
+    /// Transaction id as text.
+    pub xid: String,
+    /// Seal hash.
+    pub hash: Vec<u8>,
+    /// Previous hash.
+    pub prev_hash: Option<Vec<u8>>,
+    /// Sealed at.
+    pub sealed_at: DateTime<Utc>,
+}
+
+/// Off-box anchor, if any.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AnchorRef {
+    /// Sink name.
+    pub sink: String,
+    /// Receipt.
+    pub receipt: Option<String>,
+}
+
+/// Archival bundle (D-2b-8).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArchivalBundle {
+    /// Manifestation.
+    pub manifestation: Manifestation,
+    /// Canonical snapshot that was hashed.
+    pub record_snapshot: Value,
+    /// Content hash.
+    pub record_content_hash: [u8; 32],
+    /// Audit event ids covering the signature row's transaction.
+    ///
+    /// Empty unless the composition root fills them: this crate cannot
+    /// `SELECT` `audit.event` (R-2s-1).
+    pub audit_event_ids: Vec<Uuid>,
+    /// Seals available through [`datum_audit::head`].
+    pub seals: Vec<SealRef>,
+    /// Anchor, if recorded.
+    pub anchor: Option<AnchorRef>,
+}
+
+/// Result of [`verify_bundle`] (pure, no database).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BundleVerification {
+    /// Snapshot hashes to `record_content_hash`.
+    pub hash_ok: bool,
+    /// Seal `prev_hash` chain is consistent (vacuously true for 0–1 seals).
+    pub chain_ok: bool,
+    /// An off-box anchor is present.
+    pub anchored: bool,
+}
+
+/// Load an archival bundle.
+pub async fn archival_bundle(pool: &datum_db::Pool, id: SignatureId) -> Result<ArchivalBundle> {
+    let manifestation = manifestation(pool, id).await?;
+    let row: Option<(Value, Vec<u8>)> = sql_query_as(
+        r#"SELECT record_snapshot, record_content_hash
+             FROM esign.signature WHERE signature_id = $1"#,
+    )
+    .bind(id.as_uuid())
+    .fetch_optional(pool)
+    .await?;
+    let Some((record_snapshot, hash_bytes)) = row else {
+        return Err(Error::NotFound);
+    };
+    let mut record_content_hash = [0u8; 32];
+    if hash_bytes.len() == 32 {
+        record_content_hash.copy_from_slice(&hash_bytes);
+    }
+    let mut seals = Vec::new();
+    if let Some(head) = datum_audit::head(pool)
+        .await
+        .map_err(|e| Error::Invariant(e.to_string()))?
+    {
+        seals.push(SealRef {
+            seq: head.seq,
+            xid: head.xid,
+            hash: head.hash,
+            prev_hash: None,
+            sealed_at: head.sealed_at,
+        });
+    }
+    Ok(ArchivalBundle {
+        manifestation,
+        record_snapshot,
+        record_content_hash,
+        audit_event_ids: Vec::new(),
+        seals,
+        anchor: None,
+    })
+}
+
+/// Verify a bundle with no database (D-2b-8).
+pub fn verify_bundle(bundle: &ArchivalBundle) -> BundleVerification {
+    let hash_ok = content_hash(&bundle.record_snapshot)
+        .ok()
+        .is_some_and(|h| h == bundle.record_content_hash)
+        && canonical_bytes(&bundle.record_snapshot).is_ok();
+    let chain_ok = bundle
+        .seals
+        .windows(2)
+        .all(|w| w[1].prev_hash.as_ref().is_some_and(|p| p == &w[0].hash));
+    BundleVerification {
+        hash_ok,
+        chain_ok: chain_ok || bundle.seals.len() <= 1,
+        anchored: bundle.anchor.is_some(),
+    }
+}
