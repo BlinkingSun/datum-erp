@@ -463,6 +463,26 @@ export it from `DATUM_MIGRATE_DATABASE_URL` for the duration of the command. Tes
 ephemeral per test: a database cloned from `DATUM_TEST_TEMPLATE` and dropped afterwards
 (D3 §11), never a shared database with a shared `audit.event`.
 
+`just db-reset`, `just db-gc`, and `just test-db` derive the standing names from
+`DATUM_TEST_TEMPLATE` (default `datum_test_template`) and `DATUM_TEST_DB` (default: the
+database path in `DATUM_DATABASE_URL`, else `datum_test`). The five roles in §8a stay
+cluster-wide; only the database names change. Unset, the defaults are identical to public
+CI and the three CI nodes.
+
+Per-worktree isolation on a shared cluster (lanes, audits, and integration gates running
+`just ci-db` concurrently) is a pair plus URLs that point at that pair:
+
+```
+DATUM_TEST_TEMPLATE=datum_tpl_gate
+DATUM_TEST_DB=datum_gate
+DATUM_DATABASE_URL=postgres://datum_app:datum@127.0.0.1:5432/datum_gate?sslmode=disable
+DATUM_MIGRATE_DATABASE_URL=postgres://datum_migrate:datum@127.0.0.1:5432/datum_gate?sslmode=disable
+DATUM_BOOTSTRAP_URL=postgres://127.0.0.1:5432/postgres?sslmode=disable
+```
+
+`just db-reset` then creates `datum_tpl_gate` / `datum_gate` and does not touch
+`datum_test_template` / `datum_test`.
+
 `SQLX_OFFLINE=true` lives in `.cargo/config.toml` and nowhere else.
 
 ### 8a. The five roles (verbatim from D3 §1.1; `harness` owns the file, every lane may apply it to a scratch database)

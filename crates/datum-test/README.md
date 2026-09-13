@@ -42,3 +42,24 @@ Frozen: case-clone protocol and the three URL names (CONTRACT §8). `bootstrap_p
 exists so module crates can call `datum_audit::install_privileged` without
 opening a superuser connection themselves (CONTRACT §5a.1). `just db-gc` reads
 the `datum.harness_created_at` comment this crate stamps.
+
+## Per-worktree isolation
+
+`TestDb::case` clones from `DATUM_TEST_TEMPLATE` (required at runtime; `just test-db`
+defaults it to `datum_test_template`). The standing template and case database that
+`just db-reset` creates are named by `DATUM_TEST_TEMPLATE` and `DATUM_TEST_DB`
+(CONTRACT §8). Roles stay cluster-wide (`datum_app` / `datum_migrate` / `datum_owner`);
+only the database names isolate concurrent worktrees on one Postgres.
+
+Example (a gate worktree sharing the Homebrew cluster with other lanes):
+
+```
+DATUM_TEST_TEMPLATE=datum_tpl_gate
+DATUM_TEST_DB=datum_gate
+DATUM_DATABASE_URL=postgres://datum_app:datum@127.0.0.1:5432/datum_gate?sslmode=disable
+DATUM_MIGRATE_DATABASE_URL=postgres://datum_migrate:datum@127.0.0.1:5432/datum_gate?sslmode=disable
+DATUM_BOOTSTRAP_URL=postgres://127.0.0.1:5432/postgres?sslmode=disable
+```
+
+Defaults stay `datum_test_template` / `datum_test` so the three CI nodes and public CI
+are unchanged.
