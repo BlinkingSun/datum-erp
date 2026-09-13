@@ -45,31 +45,10 @@ lint-sql:
     # PLAN section 6 invariant 6: no crate's src reads another crate's schema-qualified tables.
     # Allow-list: owning crate, datum-module (composition root), datum-test (harness).
     # Production src only - kernel tests may probe audit.event / seed uom.item_stock.
-    # Scan per-crate src/ (no path-separator globs): negative **/owner/** fails on Windows paths.
+    # Scan per-crate src/ *.rs and *.sql (include_str!/query_file! includes).
+    # No path-separator globs; relative paths from repo root (lintmig-portable).
     # Dynamic construction (format/quote_ident/'schema.' concat) is lint-sql-dynamic.sh.
-    fail=0; \
-    for pair in identity:datum-identity uom:datum-uom ledger:datum-ledger sm:datum-statemachine jobs:datum-jobs events:datum-events numbering:datum-numbering audit:datum-audit items:datum-mod-items locations:datum-mod-locations lots:datum-mod-lots inventory:datum-mod-inventory production_min:datum-mod-production-min genealogy:datum-mod-genealogy documents:datum-documents print:datum-print esign:datum-esign customfields:datum-customfields; do \
-      schema="${pair%%:*}"; \
-      owner="${pair##*:}"; \
-      for tree in "{{root}}/crates" "{{root}}/modules"; do \
-        if [ ! -d "$tree" ]; then continue; fi; \
-        for crate_dir in "$tree"/*; do \
-          if [ ! -d "$crate_dir" ]; then continue; fi; \
-          crate="$(basename "$crate_dir")"; \
-          case "$crate" in "$owner"|datum-module|datum-test) continue ;; esac; \
-          if [ "$crate" = "$schema" ]; then continue; fi; \
-          src_dir="$crate_dir/src"; \
-          if [ ! -d "$src_dir" ]; then continue; fi; \
-          if rg -n -i --glob '*.rs' \
-              -e "(FROM|JOIN|INTO|UPDATE|TABLE)[[:space:]]+(ONLY[[:space:]]+)?${schema}\\." \
-              "$src_dir"; then \
-            echo "lint-sql: cross-module table read of ${schema}.* outside ${owner}, datum-module, and datum-test" >&2; \
-            fail=1; \
-          fi; \
-        done; \
-      done; \
-    done; \
-    if [ "$fail" -ne 0 ]; then exit 1; fi
+    REPO_ROOT="{{root}}" bash "{{root}}/scripts/lint-sql-cross.sh"
     # R-2s-3: production src SQL must not DML-reference ledger.* / transient.*
     # outside the explicit owner exemption set (see scripts/lint-sql-r2s3.sh).
     REPO_ROOT="{{root}}" bash "{{root}}/scripts/lint-sql-r2s3.sh"
@@ -88,6 +67,8 @@ lint-sql-selftest:
     trap 'cleanup; exit 130' INT TERM; \
     mkdir -p \
       "$tmp/crates/datum-server/migrations" \
+      "$tmp/crates/datum-server/src" \
+      "$tmp/crates/datum-esign/src" \
       "$tmp/crates/datum-uom/migrations" \
       "$tmp/crates/datum-documents/migrations" \
       "$tmp/crates/datum-documents/src" \
@@ -108,6 +89,11 @@ lint-sql-selftest:
     plant_orphan="$tmp/crates/datum-server/migrations/99999999999999_lint_sql_selftest_definer_orphan.up.sql"; \
     plant_r2s3="$tmp/modules/items/src/_lint_sql_r2s3_selftest.rs"; \
     plant_r2s3_ok="$tmp/modules/lots/src/_lint_sql_r2s3_ok.rs"; \
+    plant_r2s3_sql="$tmp/crates/datum-server/src/_lint_sql_r2s3_include.sql"; \
+    plant_r2s3_sql_ok="$tmp/modules/lots/src/_lint_sql_r2s3_ok.sql"; \
+    plant_include_cross="$tmp/crates/datum-server/src/_lint_sql_include_cross.sql"; \
+    plant_include_own="$tmp/crates/datum-esign/src/_lint_sql_include_own.sql"; \
+    plant_include_exempt="$tmp/crates/datum-module/src/_lint_sql_include_exempt.sql"; \
     if ! REPO_ROOT="$tmp" bash "$root/scripts/lint-sql-migrations.sh" --selftest-hits; then \
       echo 'lint-sql-selftest: Windows-shaped hit parser/neutralization failed' >&2; \
       exit 1; \
@@ -164,19 +150,43 @@ lint-sql-selftest:
       '    let _ = "SELECT ledger.has_postings($1)";' \
       '}' \
       > "$plant_r2s3_ok"; \
+    printf '%s\n' 'SELECT 1 FROM ledger.posting WHERE false;' > "$plant_r2s3_sql"; \
+    printf '%s\n' '-- comment FROM ledger.posting must not trip the rule' > "$plant_r2s3_sql_ok"; \
     r2s3_out="$(REPO_ROOT="$tmp" bash "$root/scripts/lint-sql-r2s3.sh" 2>&1 || true)"; \
     if ! printf '%s\n' "$r2s3_out" | grep -F 'modules/items/src/_lint_sql_r2s3_selftest.rs' >/dev/null; then \
       echo 'lint-sql-selftest: expected R-2s-3 lint to report planted ledger.posting SQL' >&2; \
       printf '%s\n' "$r2s3_out" >&2; \
       exit 1; \
     fi; \
-    if printf '%s\n' "$r2s3_out" | grep -F 'modules/lots/src/_lint_sql_r2s3_ok.rs' >/dev/null; then \
+    if ! printf '%s\n' "$r2s3_out" | grep -F 'crates/datum-server/src/_lint_sql_r2s3_include.sql' >/dev/null; then \
+      echo 'lint-sql-selftest: expected R-2s-3 lint to report planted *.sql include reading ledger.*' >&2; \
+      printf '%s\n' "$r2s3_out" >&2; \
+      exit 1; \
+    fi; \
+    if printf '%s\n' "$r2s3_out" | grep -E 'modules/lots/src/_lint_sql_r2s3_ok\.rs|modules/lots/src/_lint_sql_r2s3_ok\.sql' >/dev/null; then \
       echo 'lint-sql-selftest: R-2s-3 lint false-positive on comment / type-cast / *_transient / published function' >&2; \
       printf '%s\n' "$r2s3_out" >&2; \
       exit 1; \
     fi; \
     echo 'lint-sql-selftest: planted R-2s-3 ledger.* SQL correctly rejected'; \
-    echo 'lint-sql-selftest: R-2s-3 negatives (comment, ::ledger.boundary, inventory_transient, has_postings) correctly allowed'; \
+    echo 'lint-sql-selftest: planted R-2s-3 *.sql include reading ledger.* correctly rejected'; \
+    echo 'lint-sql-selftest: R-2s-3 negatives (comment, ::ledger.boundary, inventory_transient, has_postings, SQL -- comment) correctly allowed'; \
+    printf '%s\n' 'SELECT consumed_at FROM esign.signature WHERE false;' > "$plant_include_cross"; \
+    printf '%s\n' 'SELECT consumed_at FROM esign.signature WHERE false;' > "$plant_include_own"; \
+    printf '%s\n' 'SELECT consumed_at FROM esign.signature WHERE false;' > "$plant_include_exempt"; \
+    cross_out="$(REPO_ROOT="$tmp" bash "$root/scripts/lint-sql-cross.sh" 2>&1 || true)"; \
+    if ! printf '%s\n' "$cross_out" | grep -F 'crates/datum-server/src/_lint_sql_include_cross.sql' >/dev/null; then \
+      echo 'lint-sql-selftest: expected invariant-6 lint to report planted *.sql include reading esign.*' >&2; \
+      printf '%s\n' "$cross_out" >&2; \
+      exit 1; \
+    fi; \
+    if printf '%s\n' "$cross_out" | grep -E 'crates/datum-esign/src/_lint_sql_include_own\.sql|crates/datum-module/src/_lint_sql_include_exempt\.sql' >/dev/null; then \
+      echo 'lint-sql-selftest: invariant-6 lint false-positive on owning crate or datum-module *.sql include' >&2; \
+      printf '%s\n' "$cross_out" >&2; \
+      exit 1; \
+    fi; \
+    echo 'lint-sql-selftest: planted *.sql include reading esign.* correctly rejected'; \
+    echo 'lint-sql-selftest: invariant-6 negatives (owning crate *.sql, datum-module *.sql) correctly allowed'; \
     plant_dyn_doc="$tmp/crates/datum-documents/migrations/99999999999999_lint_sql_dyn_documents.up.sql"; \
     plant_dyn_qid="$tmp/modules/items/src/_lint_sql_dyn_quote_ident.rs"; \
     plant_dyn_concat="$tmp/modules/items/src/_lint_sql_dyn_concat.rs"; \
@@ -184,6 +194,8 @@ lint-sql-selftest:
     plant_dyn_exempt="$tmp/crates/datum-module/src/_lint_sql_dyn_exempt.rs"; \
     plant_dyn_own="$tmp/crates/datum-documents/src/_lint_sql_dyn_own.rs"; \
     plant_dyn_r2s3_ex="$tmp/crates/datum-ledger/src/_lint_sql_dyn_r2s3_exempt.rs"; \
+    plant_dyn_sql_include="$tmp/crates/datum-server/src/_lint_sql_dyn_include.sql"; \
+    plant_dyn_sql_ok="$tmp/modules/lots/src/_lint_sql_dyn_ok.sql"; \
     printf '%s\n' \
       '-- lint-sql-selftest: documents live_machine_state evasion' \
       'CREATE FUNCTION documents.live_machine_state(p_doc_id uuid) RETURNS text' \
@@ -224,6 +236,12 @@ lint-sql-selftest:
     printf '%s\n' \
       'fn _lint_sql_dyn_r2s3_exempt() { let _ = "EXECUTE format('\''%I.%I'\'', '\''ledger'\'', '\''posting'\'')"; }' \
       > "$plant_dyn_r2s3_ex"; \
+    printf '%s\n' \
+      '-- lint-sql-selftest: *.sql include dynamic construction' \
+      "EXECUTE format('%I.%I', 'sm', 'instance');" \
+      > "$plant_dyn_sql_include"; \
+    printf '%s\n' "-- comment format('%I.%I', 'sm', 'instance') must not trip the rule" \
+      > "$plant_dyn_sql_ok"; \
     dyn_out="$(REPO_ROOT="$tmp" bash "$root/scripts/lint-sql-dynamic.sh" 2>&1 || true)"; \
     if ! printf '%s\n' "$dyn_out" | grep -F 'crates/datum-documents/migrations/99999999999999_lint_sql_dyn_documents.up.sql' >/dev/null; then \
       echo 'lint-sql-selftest: expected dynamic lint to report planted documents format('\''sm'\'') evasion' >&2; \
@@ -240,14 +258,20 @@ lint-sql-selftest:
       printf '%s\n' "$dyn_out" >&2; \
       exit 1; \
     fi; \
-    if printf '%s\n' "$dyn_out" | grep -E 'modules/lots/src/_lint_sql_dyn_ok.rs|crates/datum-module/src/_lint_sql_dyn_exempt.rs|crates/datum-documents/src/_lint_sql_dyn_own.rs|crates/datum-ledger/src/_lint_sql_dyn_r2s3_exempt.rs' >/dev/null; then \
-      echo 'lint-sql-selftest: dynamic lint false-positive on comment / format! / .format / exempt crate / own schema' >&2; \
+    if ! printf '%s\n' "$dyn_out" | grep -F 'crates/datum-server/src/_lint_sql_dyn_include.sql' >/dev/null; then \
+      echo 'lint-sql-selftest: expected dynamic lint to report planted *.sql include format('\''sm'\'')' >&2; \
+      printf '%s\n' "$dyn_out" >&2; \
+      exit 1; \
+    fi; \
+    if printf '%s\n' "$dyn_out" | grep -E 'modules/lots/src/_lint_sql_dyn_ok\.rs|modules/lots/src/_lint_sql_dyn_ok\.sql|crates/datum-module/src/_lint_sql_dyn_exempt.rs|crates/datum-documents/src/_lint_sql_dyn_own.rs|crates/datum-ledger/src/_lint_sql_dyn_r2s3_exempt.rs' >/dev/null; then \
+      echo 'lint-sql-selftest: dynamic lint false-positive on comment / format! / .format / exempt crate / own schema / SQL -- comment' >&2; \
       printf '%s\n' "$dyn_out" >&2; \
       exit 1; \
     fi; \
     echo 'lint-sql-selftest: planted documents EXECUTE format('\''%I.%I'\'','\''sm'\'',...) evasion correctly rejected'; \
     echo 'lint-sql-selftest: planted quote_ident and '\''schema.'\'' concatenation correctly rejected'; \
-    echo 'lint-sql-selftest: dynamic SQL negatives (comment, format!, .format, datum-module, own schema, R-2s-3 exempt) correctly allowed'
+    echo 'lint-sql-selftest: planted *.sql include format('\''sm'\'') correctly rejected'; \
+    echo 'lint-sql-selftest: dynamic SQL negatives (comment, format!, .format, datum-module, own schema, R-2s-3 exempt, SQL -- comment) correctly allowed'
 
 # All tests, including integration.
 test:
