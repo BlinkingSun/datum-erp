@@ -112,6 +112,10 @@ pub fn write_pool(db: &datum_test::TestDb) -> WritePool {
     WritePool::new(db.app_pool().clone())
 }
 
+pub fn write_pool_migrate(db: &datum_test::TestDb) -> WritePool {
+    WritePool::new(db.migrate_pool().clone())
+}
+
 pub fn read_pool_app(db: &datum_test::TestDb) -> ReadPool {
     ReadPool::new(db.app_pool().clone())
 }
