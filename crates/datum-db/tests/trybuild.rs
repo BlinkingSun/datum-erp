@@ -13,3 +13,15 @@ fn tx_has_no_public_constructor() {
     let t = trybuild::TestCases::new();
     t.compile_fail("tests/compile_fail/tx_has_no_public_constructor.rs");
 }
+
+#[test]
+fn read_pool_has_no_deref() {
+    let t = trybuild::TestCases::new();
+    t.compile_fail("tests/compile_fail/read_pool_has_no_deref.rs");
+}
+
+#[test]
+fn read_pool_has_no_execute() {
+    let t = trybuild::TestCases::new();
+    t.compile_fail("tests/compile_fail/read_pool_has_no_execute.rs");
+}

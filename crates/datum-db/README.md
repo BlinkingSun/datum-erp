@@ -10,7 +10,8 @@ legal here (D3 §11). Event-trigger attach is `datum-audit`.
 - `MIGRATOR` — embedded `placeholder` + `0001_datum_schema`
 - `DATUM_SETTINGS` — the 18 `datum.*` names `Tx::begin` binds (D3 §2.1 + inv. 17)
 - `WritePool` — write pool; no `Deref` / `as_pool` / `into_inner`
-- `ReadPool` — read pool; never `set_config`
+- `ReadPool` — read pool; never `set_config`; `fetch_one` / `fetch_optional` /
+  `fetch_all` (no `execute`); `as_pool` for kernel read APIs still taking `Pool`
 - `WriteContext` — actor and provenance built here, not from module strings
 - `SessionCtx` — `actor()` for anything the persistence layer can read
 - `app_version` — crate version plus optional `DATUM_GIT_DESCRIBE`
@@ -39,13 +40,15 @@ legal here (D3 §11). Event-trigger attach is `datum-audit`.
 - `write_without_context_aborts` / `session_level_actor_is_refused` / `refused_maps_42501`
 - `pooled_connection_cannot_leak_actor` / `after_release_resets_state`
 - `serialization_retry_reruns_on_40001` / `execute_and_fetch_helpers`
+- `read_pool_selects_under_app_and_migrate` / `read_pool_insert_fails_at_grant`
 - `failing_statement_then_commit_is_poisoned_and_persists_nothing` / `clean_tx_still_commits`
 - `fetch_optional_none_does_not_poison`
 - `migrate_runs_in_order_under_lock` / `migrate_is_idempotent` / `migrate_down_then_up`
 - `tables_not_owned_by_login_role`
 - `ddl_check_rejects_cascade` / `ddl_check_rejects_app_delete_outside_transient`
 - `log_unattributable_write_unimplemented` / `log_unattributable_write_calls_audit_log_event`
-- trybuild: `tx_has_no_deref`, `tx_has_no_public_constructor`
+- trybuild: `tx_has_no_deref`, `tx_has_no_public_constructor`,
+  `read_pool_has_no_deref`, `read_pool_has_no_execute`
 
 ## Tx::commit and poison
 
