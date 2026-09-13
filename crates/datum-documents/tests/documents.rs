@@ -8,9 +8,9 @@ use chrono::{Duration, Utc};
 use datum_core::{Identifier, NoSignatures};
 use datum_db::Tx;
 use datum_documents::{
-    BlobStore, Error, Manifest, Status, attach, create, discard_unreferenced_blob,
-    document_machine, effective_at, hash_bytes, history, link, load, new_revision, set_legal_hold,
-    transition, transition_context, verify_blob,
+    BlobHash, BlobStore, Error, FsBlobStore, Manifest, Status, attach, create,
+    discard_unreferenced_blob, document_machine, effective_at, hash_bytes, history, link, load,
+    new_revision, set_legal_hold, transition, transition_context, verify_blob,
 };
 use serde_json::json;
 use sqlx::{query, query_as, query_scalar};
@@ -29,6 +29,26 @@ where
     for profile in PROFILES {
         f(profile).await;
     }
+}
+
+fn blob_file(store: &FsBlobStore, hash: BlobHash) -> std::path::PathBuf {
+    store
+        .root()
+        .join(&hash.to_hex()[0..2])
+        .join(&hash.to_hex()[2..4])
+        .join(hash.to_hex())
+}
+
+/// Placed blobs are read-only. Windows FILE_ATTRIBUTE_READONLY also forbids
+/// delete, rename-over, and reopen-for-write until this runs.
+fn clear_readonly(path: &std::path::Path) {
+    let mut perms = std::fs::metadata(path).unwrap().permissions();
+    // Same helper as FsBlobStore discard: Windows FILE_ATTRIBUTE_READONLY
+    // forbids unlink/reopen-for-write until cleared. Clippy's unix
+    // world-writable warning does not apply to this test-only tamper path.
+    #[allow(clippy::permissions_set_readonly_false)]
+    perms.set_readonly(false);
+    std::fs::set_permissions(path, perms).unwrap();
 }
 
 /// Rebuild the version chain from independent revision rows (root first).
@@ -391,11 +411,8 @@ async fn verify_blob_detects_corruption() {
         tx.commit().await.unwrap();
         let hash = store.put(b"clean-bytes").unwrap();
         verify_blob(&store, hash).unwrap();
-        let path = store
-            .root()
-            .join(&hash.to_hex()[0..2])
-            .join(&hash.to_hex()[2..4])
-            .join(hash.to_hex());
+        let path = blob_file(&store, hash);
+        clear_readonly(&path);
         std::fs::write(&path, b"tampered").unwrap();
         let err = verify_blob(&store, hash).unwrap_err();
         assert!(matches!(err, Error::BlobCorrupt { .. }), "got {err:?}");
@@ -428,6 +445,28 @@ async fn attachment_immutable() {
             .await
             .unwrap();
         tx.commit().await.unwrap();
+
+        let hash = store.put(b"bytes").unwrap();
+        let path = blob_file(&store, hash);
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap();
+        assert_eq!(name, hash.to_hex(), "blob file name is the hash hex only");
+        assert!(
+            name.bytes().all(|b| b.is_ascii_hexdigit()),
+            "no Windows-reserved characters in blob names"
+        );
+        let again = store.put(b"bytes").unwrap();
+        assert_eq!(again, hash, "store API dedupes; it does not rewrite");
+        let reopen = std::fs::OpenOptions::new().write(true).open(&path);
+        assert!(
+            reopen.is_err(),
+            "store API refuses overwrite/modify of a placed blob"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o222, 0, "unix write bits cleared after placement");
+        }
 
         let mut tx = Tx::begin(&write, &write_ctx("documents.edit", profile))
             .await
