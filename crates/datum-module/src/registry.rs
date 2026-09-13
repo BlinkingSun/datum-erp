@@ -53,6 +53,9 @@ pub async fn install(tx: &mut Tx<'_>, manifest: &ModuleManifest, enabled: bool) 
         };
         seed_bundles(tx, &[bundle]).await?;
     }
+    if !manifest.custom_fields.fields.is_empty() {
+        datum_customfields::register_from_manifest(tx, &manifest.custom_fields).await?;
+    }
     Ok(())
 }
 

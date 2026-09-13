@@ -50,6 +50,7 @@ fn kernel_order_is_a_topological_sort_of_contract_graph() {
     assert_eq!(KERNEL_ORDER[0], "datum-db");
     assert_eq!(KERNEL_ORDER[1], "datum-audit");
     assert!(KERNEL_ORDER.contains(&"datum-esign"));
+    assert!(KERNEL_ORDER.contains(&"datum-customfields"));
     assert_eq!(*KERNEL_ORDER.last().unwrap(), "datum-statemachine");
 }
 
@@ -781,6 +782,41 @@ async fn regulated_required_set_from_registered_machine() {
         stored.signature_edges.iter().any(|e| e.is_required()),
         "manifest must list Required edges"
     );
+    db.finish().await.expect("finish");
+}
+
+#[tokio::test]
+async fn module_manifest_custom_fields_registered() {
+    let catalog = compiled_in().unwrap();
+    let cal = catalog
+        .iter()
+        .find(|m| m.id == "mod-calibration")
+        .expect("calibration");
+    assert!(
+        cal.custom_fields
+            .fields
+            .iter()
+            .any(|f| f.key == "udi_device_identifier"),
+        "compiled-in calibration manifest declares [[custom-fields]]"
+    );
+
+    let db = db_case!("mod_cf");
+    migrate_and_install(&db).await;
+    let kernel = Kernel::build(db.app_pool(), Profile::regulated_device().unwrap())
+        .await
+        .expect("build regulated");
+    let write = kernel.write_pool();
+    let mut tx = Tx::begin(&write, &boot_ctx()).await.expect("begin");
+    let defs = datum_customfields::definitions_for(&mut tx, "items.item")
+        .await
+        .expect("definitions_for");
+    assert!(
+        defs.iter().any(|d| d.key == "udi_device_identifier"
+            && d.entity == "items.item"
+            && d.owner_module == "mod-calibration"),
+        "install graph registered manifest custom fields: {defs:?}"
+    );
+    tx.commit().await.expect("commit");
     db.finish().await.expect("finish");
 }
 

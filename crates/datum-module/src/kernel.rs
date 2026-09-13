@@ -842,7 +842,6 @@ pub(crate) fn machine_from_decl(decl: &ManifestMachine) -> Result<Machine> {
 
 fn hold_wave2b_edges() {
     let _ = core::any::type_name::<datum_esign::Error>();
-    let _ = core::any::type_name::<datum_customfields::Error>();
     let _ = core::any::type_name::<datum_documents::Error>();
     let _ = core::any::type_name::<datum_print::Error>();
 }
