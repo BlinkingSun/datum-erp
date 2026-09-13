@@ -125,3 +125,9 @@ A transient-class schema (`server_transient`, `inventory_transient`, …) must n
 ## D-2b-15 — Fail-class wording for `docs/11-module-common-rules.md`
 
 **R-2b-1 one install order (2026-09-13).** `datum_module::order::CANONICAL_ORDER` is the only install order. A crate's migrations must run green **both** at their canonical position and as the last crate on a fresh database, with the `audit_attach` event trigger installed and never dropped, and must leave an **identical** set of audit-attached relations either way. A migration therefore declares `ALTER DEFAULT PRIVILEGES FOR ROLE datum_migrate IN SCHEMA <x> GRANT TRIGGER ON TABLES TO datum_owner` before its first `CREATE TABLE`, ends with an idempotent `SELECT audit.attach(…)` for every audited table, registers any exemption in `audit.exempt` before the table exists, and carries the six-GUC migration preamble if it writes an attached row. A test harness that hand-rolls a migrator list instead of calling `install_upto`, a migration that requires the trigger to be absent, and an install order that changes which relations end up audited are each **Fail-class**.
+
+## R-2b-lock — Lockfile churn is never fail-class (2026-09-13)
+
+**Ruling: a `Cargo.lock` diff is never a fail-class finding against a lane.** Audits and adjudications must not fail a lane on lockfile churn. **CONTRACT:** lanes never commit `Cargo.lock`; the integrator regenerates it once on the integrate branch (`cargo generate-lockfile`) at landing.
+
+Origin: ruled by the orchestrator 2026-09-13 01:11 after `audit-datum-documents-r2-x2` failed a rework leg partly on lockfile churn; applied to the datum-documents adjudication charter; recorded in `_team/reports/CLOSURES.md`.
