@@ -239,6 +239,12 @@ impl Error {
             | Self::Inventory(datum_mod_inventory::Error::Module(
                 datum_module::Error::Statemachine(sm),
             ))
+            | Self::Inventory(datum_mod_inventory::Error::Lots(datum_mod_lots::Error::Module(
+                datum_module::Error::Statemachine(sm),
+            )))
+            | Self::Inventory(datum_mod_inventory::Error::Lots(
+                datum_mod_lots::Error::Statemachine(sm),
+            ))
             | Self::Production(datum_mod_production_min::Error::Module(
                 datum_module::Error::Statemachine(sm),
             )) => Self::from_sm(sm).unwrap_or((

@@ -260,7 +260,7 @@ async fn run_script(w: &World) {
             );
         }
         datum_module::ProfileId::RegulatedDevice => {
-            assert_eq!(st, StatusCode::FORBIDDEN, "regulated release {rel}");
+            assert_eq!(st, StatusCode::UNAUTHORIZED, "regulated release {rel}");
             assert_eq!(rel["error"]["code"], "SIGNATURE_REQUIRED", "{rel}");
             let after = w.get(&format!("/api/v1/lots/{bar_lot}")).await.1;
             assert_eq!(after["status"], "quarantine", "nothing posted {after}");
@@ -330,7 +330,7 @@ async fn run_script(w: &World) {
                         1,
                     )
                     .await;
-                assert_eq!(st, StatusCode::FORBIDDEN, "item 7 {body}");
+                assert_eq!(st, StatusCode::UNAUTHORIZED, "item 7 {body}");
                 assert_eq!(body["error"]["code"], "SIGNATURE_REQUIRED", "{body}");
             }
             pass(
@@ -904,7 +904,7 @@ async fn item_create_pins_item_stock_for_inventory_http() {
                 (aloc.clone(), "100")
             }
             datum_module::ProfileId::RegulatedDevice => {
-                assert_eq!(st, StatusCode::FORBIDDEN, "regulated release {rel}");
+                assert_eq!(st, StatusCode::UNAUTHORIZED, "regulated release {rel}");
                 assert_eq!(rel["error"]["code"], "SIGNATURE_REQUIRED", "{rel}");
                 assert!(
                     !rel["error"]["message"]
@@ -1526,7 +1526,7 @@ async fn regulated_release_refused_under_no_signatures() {
             .await;
         match profile.id {
             datum_module::ProfileId::RegulatedDevice => {
-                assert_eq!(st, StatusCode::FORBIDDEN, "{body}");
+                assert_eq!(st, StatusCode::UNAUTHORIZED, "{body}");
                 assert_eq!(body["error"]["code"], "SIGNATURE_REQUIRED", "{body}");
                 let after = w.get(&format!("/api/v1/lots/{lot}")).await.1;
                 assert_eq!(after["status"], "quarantine", "nothing posted {after}");
