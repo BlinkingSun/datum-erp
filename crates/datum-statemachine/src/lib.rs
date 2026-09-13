@@ -44,7 +44,7 @@ pub use query::{
     machine_id_for_on,
 };
 
-/// Embedded migrator (`placeholder` + `0001_statemachine` + `0002_query_seam`).
+/// Embedded migrator (`placeholder` + `0001` + `0002_query_seam` + `0003_engine_write`).
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
 #[cfg(test)]
@@ -76,7 +76,7 @@ mod tests {
 
     #[test]
     fn migrator_has_placeholder() {
-        assert!(MIGRATOR.migrations.len() >= 3);
+        assert!(MIGRATOR.migrations.len() >= 4);
     }
 
     #[test]
