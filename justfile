@@ -74,28 +74,41 @@ lint-sql:
     REPO_ROOT="{{root}}" bash "{{root}}/scripts/lint-sql-r2s3.sh"
     REPO_ROOT="{{root}}" bash "{{root}}/scripts/lint-sql-migrations.sh"
 
-# Plant bad migrations and assert lint-sql-migrations fails (then remove them).
+# Plant bad migrations in a throwaway tree (never the real repo) and assert the lints fail.
 lint-sql-selftest:
     command -v rg >/dev/null 2>&1 || { echo 'lint-sql-selftest: ripgrep (rg) is required' >&2; exit 1; }
     root="{{root}}"; \
-    plant_cross="$root/crates/datum-server/migrations/99999999999999_lint_sql_selftest_cross.up.sql"; \
-    plant_session="$root/modules/items/migrations/99999999999999_lint_sql_selftest_session.up.sql"; \
-    plant_create="$root/crates/datum-server/migrations/99999999999998_lint_sql_selftest_definer_create.up.sql"; \
-    plant_drop="$root/crates/datum-server/migrations/99999999999999_lint_sql_selftest_definer_drop.up.sql"; \
-    plant_orphan="$root/crates/datum-server/migrations/99999999999999_lint_sql_selftest_definer_orphan.up.sql"; \
-    plant_r2s3="$root/modules/items/src/_lint_sql_r2s3_selftest.rs"; \
-    plant_r2s3_ok="$root/modules/lots/src/_lint_sql_r2s3_ok.rs"; \
-    cleanup() { rm -f "$plant_cross" "$plant_session" "$plant_create" "$plant_drop" "$plant_orphan" "$plant_r2s3" "$plant_r2s3_ok"; }; \
+    tmp="$(mktemp -d "${TMPDIR:-/tmp}/lint-sql-selftest.XXXXXX")"; \
+    cleanup() { rm -rf "$tmp"; }; \
     trap cleanup EXIT; \
-    if ! REPO_ROOT="$root" bash "$root/scripts/lint-sql-migrations.sh" --selftest-hits; then \
+    trap 'cleanup; exit 130' INT TERM; \
+    mkdir -p \
+      "$tmp/crates/datum-server/migrations" \
+      "$tmp/crates/datum-uom/migrations" \
+      "$tmp/modules/items/migrations" \
+      "$tmp/modules/items/src" \
+      "$tmp/modules/lots/src" \
+      "$tmp/modules/locations/src"; \
+    for f in "$root/crates/datum-uom/migrations/"*.up.sql; do \
+      if [ -f "$f" ]; then cp "$f" "$tmp/crates/datum-uom/migrations/"; fi; \
+    done; \
+    : > "$tmp/modules/locations/src/store.rs"; \
+    plant_cross="$tmp/crates/datum-server/migrations/99999999999999_lint_sql_selftest_cross.up.sql"; \
+    plant_session="$tmp/modules/items/migrations/99999999999999_lint_sql_selftest_session.up.sql"; \
+    plant_create="$tmp/crates/datum-server/migrations/99999999999998_lint_sql_selftest_definer_create.up.sql"; \
+    plant_drop="$tmp/crates/datum-server/migrations/99999999999999_lint_sql_selftest_definer_drop.up.sql"; \
+    plant_orphan="$tmp/crates/datum-server/migrations/99999999999999_lint_sql_selftest_definer_orphan.up.sql"; \
+    plant_r2s3="$tmp/modules/items/src/_lint_sql_r2s3_selftest.rs"; \
+    plant_r2s3_ok="$tmp/modules/lots/src/_lint_sql_r2s3_ok.rs"; \
+    if ! REPO_ROOT="$tmp" bash "$root/scripts/lint-sql-migrations.sh" --selftest-hits; then \
       echo 'lint-sql-selftest: Windows-shaped hit parser/neutralization failed' >&2; \
       exit 1; \
     fi; \
-    if ! REPO_ROOT="$root" bash "$root/scripts/lint-sql-r2s3.sh" --selftest-hits; then \
+    if ! REPO_ROOT="$tmp" bash "$root/scripts/lint-sql-r2s3.sh" --selftest-hits; then \
       echo 'lint-sql-selftest: Windows-shaped R-2s-3 hit parser failed' >&2; \
       exit 1; \
     fi; \
-    run_lint() { REPO_ROOT="$root" bash "$root/scripts/lint-sql-migrations.sh" 2>/dev/null; }; \
+    run_lint() { REPO_ROOT="$tmp" bash "$root/scripts/lint-sql-migrations.sh" 2>/dev/null; }; \
     printf '%s\n' '-- lint-sql-selftest: must be rejected (cross-schema DML)' \
       'UPDATE sm.machine SET name = name WHERE false;' > "$plant_cross"; \
     if run_lint; then \
@@ -139,7 +152,7 @@ lint-sql-selftest:
       '    let _ = "SELECT ledger.has_postings($1)";' \
       '}' \
       > "$plant_r2s3_ok"; \
-    r2s3_out="$(REPO_ROOT="$root" bash "$root/scripts/lint-sql-r2s3.sh" 2>&1 || true)"; \
+    r2s3_out="$(REPO_ROOT="$tmp" bash "$root/scripts/lint-sql-r2s3.sh" 2>&1 || true)"; \
     if ! printf '%s\n' "$r2s3_out" | grep -F 'modules/items/src/_lint_sql_r2s3_selftest.rs' >/dev/null; then \
       echo 'lint-sql-selftest: expected R-2s-3 lint to report planted ledger.posting SQL' >&2; \
       printf '%s\n' "$r2s3_out" >&2; \

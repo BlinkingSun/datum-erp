@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Migration SQL checks for just lint-sql (POSIX bash 3.2; requires rg).
-# Invoked with REPO_ROOT set to the workspace root.
+# Invoked with REPO_ROOT set to the workspace root, or to a throwaway
+# synthetic tree (just lint-sql-selftest). Read-only: never creates or
+# deletes files under REPO_ROOT.
 set -eu
 
 REPO_ROOT="${REPO_ROOT:?REPO_ROOT is required}"
@@ -347,6 +349,8 @@ EOF
 }
 
 # Parser + neutralization fixtures for Windows-shaped rg hits (just lint-sql-selftest).
+# Neutralization opens crates/datum-uom/migrations under REPO_ROOT (real tree or a copy).
+# This function does not create or delete files.
 run_hit_selftest() {
   fail=0
   win_hit='C:\ci\datum-erp\crates\datum-uom\migrations\0001.up.sql:12:FROM ledger.posting'
