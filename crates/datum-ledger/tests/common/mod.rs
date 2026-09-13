@@ -54,18 +54,87 @@ pub fn write_ctx(actor: Actor, action: &str) -> WriteContext {
     ctx
 }
 
+/// D-2b-10 order through `datum-ledger`. Glue rider flips this to
+/// `datum_module::order::install_upto(..., "datum-ledger")`.
+/// TODO(2b-migorder-glue): replace this fallback with `install_upto`.
 pub async fn migrate(db: &datum_test::TestDb) {
+    migrate_prefix_privileged(db).await;
+    datum_db::migrate::run(
+        db.migrate_pool(),
+        &[
+            ("datum-identity", &datum_identity::MIGRATOR),
+            ("datum-numbering", &datum_numbering::MIGRATOR),
+            ("datum-uom", &datum_uom::MIGRATOR),
+            ("datum-events", &datum_events::MIGRATOR),
+            ("datum-jobs", &datum_jobs::MIGRATOR),
+            ("datum-ledger", &datum_ledger::MIGRATOR),
+        ],
+    )
+    .await
+    .expect("canonical through datum-ledger");
+}
+
+/// Predecessors of `datum-ledger` in D-2b-10 order, event trigger already up.
+pub async fn migrate_predecessors(db: &datum_test::TestDb) {
+    migrate_prefix_privileged(db).await;
+    datum_db::migrate::run(
+        db.migrate_pool(),
+        &[
+            ("datum-identity", &datum_identity::MIGRATOR),
+            ("datum-numbering", &datum_numbering::MIGRATOR),
+            ("datum-uom", &datum_uom::MIGRATOR),
+            ("datum-events", &datum_events::MIGRATOR),
+            ("datum-jobs", &datum_jobs::MIGRATOR),
+        ],
+    )
+    .await
+    .expect("canonical predecessors of datum-ledger");
+}
+
+/// Apply this crate last: predecessors with the trigger down, then privileged, then ledger.
+pub async fn migrate_as_last_crate(db: &datum_test::TestDb) {
     datum_db::migrate::run(
         db.migrate_pool(),
         &[
             ("datum-db", &datum_db::MIGRATOR),
             ("datum-audit", &datum_audit::MIGRATOR),
+            ("datum-identity", &datum_identity::MIGRATOR),
+            ("datum-numbering", &datum_numbering::MIGRATOR),
             ("datum-uom", &datum_uom::MIGRATOR),
-            ("datum-ledger", &datum_ledger::MIGRATOR),
+            ("datum-events", &datum_events::MIGRATOR),
+            ("datum-jobs", &datum_jobs::MIGRATOR),
         ],
     )
     .await
-    .expect("migrate db+audit+uom+ledger");
+    .expect("predecessors with trigger down");
+    install_privileged(db).await;
+    datum_db::migrate::run(
+        db.migrate_pool(),
+        &[("datum-ledger", &datum_ledger::MIGRATOR)],
+    )
+    .await
+    .expect("datum-ledger last with audit_attach up");
+}
+
+pub async fn migrate_prefix_privileged(db: &datum_test::TestDb) {
+    datum_db::migrate::run(
+        db.migrate_pool(),
+        &[
+            ("datum-db", &datum_db::MIGRATOR),
+            ("datum-audit", &datum_audit::MIGRATOR),
+        ],
+    )
+    .await
+    .expect("migrate db+audit");
+    install_privileged(db).await;
+}
+
+pub async fn install_privileged(db: &datum_test::TestDb) {
+    let boot = db.bootstrap_pool().await.expect("bootstrap");
+    datum_audit::install_privileged(&boot)
+        .await
+        .expect("install_privileged");
+    boot.close().await;
 }
 
 pub fn write_pool(db: &datum_test::TestDb) -> WritePool {

@@ -3,7 +3,7 @@
 //! Values are stored per type in schema `customfields` — never as a JSON blob.
 //! Writes go through [`datum_db::Tx`] only (CONTRACT §5a).
 
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, unused_crate_dependencies))]
 
 use datum_audit as _;
 use datum_core::Identifier;

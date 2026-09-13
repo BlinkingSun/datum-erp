@@ -98,19 +98,7 @@ async fn reverse_migration_tested() {
 #[tokio::test]
 async fn migrate_down_then_up() {
     let db = datum_test::db_case!("led_down_up");
-    datum_db::migrate::run(
-        db.migrate_pool(),
-        &[
-            ("datum-db", &datum_db::MIGRATOR),
-            ("datum-audit", &datum_audit::MIGRATOR),
-        ],
-    )
-    .await
-    .expect("db+audit");
-    // Do not install_privileged here: `audit_attach` fires on CREATE TABLE
-    // before ALTER OWNER, and ledger's default privileges do not grant
-    // TRIGGER to datum_owner for tables created by datum_migrate. The
-    // creating migration attaches explicitly after OWNER TO datum_owner.
+    common::migrate_predecessors(&db).await;
 
     let migrator = reversible_ledger_migrator();
     migrator.run(db.migrate_pool()).await.expect("ledger up");
@@ -190,6 +178,45 @@ async fn migrate_down_then_up() {
     .expect("prosecdef after");
     assert!(!definer_after, "has_quantity_at must stay invoker-rights");
 
+    db.finish().await.unwrap();
+}
+
+async fn has_zz_audit_row(pool: &sqlx::PgPool, rel: &str) -> bool {
+    sqlx::query_scalar(
+        r#"
+        SELECT EXISTS (
+            SELECT 1 FROM pg_trigger t
+             WHERE t.tgrelid = $1::regclass
+               AND t.tgname = 'zz_audit_row'
+               AND NOT t.tgisinternal
+        )
+        "#,
+    )
+    .bind(rel)
+    .fetch_one(pool)
+    .await
+    .expect("zz_audit_row")
+}
+
+#[tokio::test]
+async fn migrates_at_canonical_position() {
+    let db = datum_test::db_case!("led_canon");
+    common::migrate(&db).await;
+    assert!(
+        has_zz_audit_row(db.migrate_pool(), "ledger.stock_item").await,
+        "ledger.stock_item must carry zz_audit_row at canonical position"
+    );
+    db.finish().await.unwrap();
+}
+
+#[tokio::test]
+async fn migrates_as_last_crate() {
+    let db = datum_test::db_case!("led_last");
+    common::migrate_as_last_crate(&db).await;
+    assert!(
+        has_zz_audit_row(db.migrate_pool(), "ledger.stock_item").await,
+        "ledger.stock_item must carry zz_audit_row as last crate with audit_attach up"
+    );
     db.finish().await.unwrap();
 }
 
