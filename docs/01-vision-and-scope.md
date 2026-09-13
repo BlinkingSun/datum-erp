@@ -17,7 +17,6 @@ Alternatives considered:
 | Name | For | Against |
 |---|---|---|
 | **Wicket** | Short, searchable, gate metaphor | Cricket association outside the US — chosen 2026-09-13 |
-| **Datum** | GD&T term, double meaning, short | Dropped 2026-09-13: an existing product already uses the name |
 | **Mandrel** | The shaft everything is built around, matches a core-plus-modules design | Less obvious meaning outside machining |
 | **Tracewright** | Traceability plus maker, unique and searchable | Invented, slightly precious |
 | **Arbor** | Machining term, suggests a tree of modules | Several existing projects use it |

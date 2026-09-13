@@ -11,7 +11,6 @@ Wicket is an open source ERP for discrete manufacturing. The wedge is a 21 CFR P
 ## 2. Status
 
 Pre-alpha. There is no release. The kernel is being built. See [docs/07-roadmap.md](docs/07-roadmap.md).
-formerly Datum ERP (renamed 2026-09-13; no releases were made under the old name).
 
 ## 3. Who it is for
 
