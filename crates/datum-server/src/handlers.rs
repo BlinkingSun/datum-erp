@@ -590,7 +590,6 @@ async fn manifestation_via_tx(tx: &mut Tx<'_>, id: SignatureId) -> Result<Value>
         Vec<u8>,
         String,
         Vec<String>,
-        Option<Uuid>,
     );
     let row: Option<ManifestRow> = tx
         .fetch_optional(sqlx::query_as(include_str!("esign_manifest.sql")).bind(id.as_uuid()))
@@ -621,7 +620,8 @@ async fn manifestation_via_tx(tx: &mut Tx<'_>, id: SignatureId) -> Result<Value>
             record_content_hash: datum_audit::sha256::hex(&hash),
             credential_kind: row.13,
             components_used: row.14,
-            superseded: row.15.is_some(),
+            superseded: false,
+            superseded_by_version: None,
         },
     };
     Ok(serde_json::to_value(body)?)

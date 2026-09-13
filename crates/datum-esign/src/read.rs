@@ -41,8 +41,11 @@ pub struct SignatureManifest {
     pub credential_kind: String,
     /// Components used.
     pub components_used: Vec<String>,
-    /// True when [`crate::supersede`] has linked a newer signature.
+    /// True when the live `sm.instance.version` is greater than `record.version`.
     pub superseded: bool,
+    /// Live instance version when [`Self::superseded`]; otherwise `null`.
+    #[serde(default)]
+    pub superseded_by_version: Option<i64>,
 }
 
 /// Record object inside the manifestation.
@@ -81,11 +84,12 @@ type ManifestRow = (
     Vec<u8>,
     String,
     Vec<String>,
-    bool,
+    Option<i64>,
 );
 
-/// D-2b-2 SELECT list + `esign.supersession` overlay. Duplicated in the
-/// record-keyed query because sqlx 0.9 `query_as` requires `'static` SQL.
+/// D-2b-2 SELECT list + live `sm.instance.version` overlay (D-2b-7).
+/// Duplicated in the record-keyed query because sqlx 0.9 `query_as`
+/// requires `'static` SQL.
 const MANIFESTATION_BY_ID_SQL: &str = r#"SELECT
                signature_id, signer_id, signer_printed_name, meaning, reason,
                signed_at, signed_at_zone,
@@ -114,10 +118,10 @@ const MANIFESTATION_BY_ID_SQL: &str = r#"SELECT
                ) AS signed_at_local,
                record_table, record_id, record_version, doc_type,
                record_content_hash, credential_kind, components_used,
-               EXISTS (
-                 SELECT 1 FROM esign.supersession x
-                  WHERE x.old_signature_id = esign.signature.signature_id
-               ) AS superseded
+               esign.live_instance_version(
+                 CASE WHEN record_table = 'sm.instance' THEN doc_type END,
+                 CASE WHEN record_table = 'sm.instance' THEN record_id END
+               ) AS live_version
           FROM esign.signature
          WHERE signature_id = $1"#;
 
@@ -149,10 +153,10 @@ const MANIFESTATION_BY_RECORD_SQL: &str = r#"SELECT
                ) AS signed_at_local,
                record_table, record_id, record_version, doc_type,
                record_content_hash, credential_kind, components_used,
-               EXISTS (
-                 SELECT 1 FROM esign.supersession x
-                  WHERE x.old_signature_id = esign.signature.signature_id
-               ) AS superseded
+               esign.live_instance_version(
+                 CASE WHEN record_table = 'sm.instance' THEN doc_type END,
+                 CASE WHEN record_table = 'sm.instance' THEN record_id END
+               ) AS live_version
           FROM esign.signature
          WHERE record_table = $1 AND record_id = $2 AND record_version = $3
          ORDER BY signed_at ASC, signature_id ASC"#;
@@ -181,7 +185,8 @@ fn row_to_manifestation(row: ManifestRow) -> Manifestation {
             record_content_hash: hex(&hash),
             credential_kind: row.13,
             components_used: row.14,
-            superseded: row.15,
+            superseded: row.15.is_some_and(|live| live > row.10),
+            superseded_by_version: row.15.filter(|live| *live > row.10),
         },
     }
 }
@@ -198,11 +203,10 @@ pub async fn manifestation(pool: &ReadPool, id: SignatureId) -> Result<Manifesta
     Ok(row_to_manifestation(row))
 }
 
-/// D-2b-2 manifestations for a record version, oldest first (supersession included).
+/// D-2b-2 manifestations for a record version, oldest first (D-2b-7 overlay).
 ///
 /// `datum-print` is the named consumer (R-2s-3): it must not SELECT
-/// `esign.signature` / `esign.supersession`. Empty when the record has no
-/// signatures.
+/// `esign.signature`. Empty when the record has no signatures.
 pub async fn manifestation_for_record(
     tx: &mut Tx<'_>,
     record: &RecordRef,

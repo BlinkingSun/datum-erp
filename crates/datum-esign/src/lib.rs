@@ -16,7 +16,7 @@ mod read;
 mod session;
 
 pub use error::{Error, Result};
-pub use gate::{BoundGate, GateFactory, LiveDoc, PreparedGate, prepare, supersede};
+pub use gate::{BoundGate, GateFactory, LiveDoc, PreparedGate, prepare};
 pub use mint::{MintRequest, Signature, log_refusal, mint};
 pub use projection::{identity_projection, project, register_projection};
 pub use read::{
@@ -29,7 +29,7 @@ pub use session::{Challenge, SessionPolicy, SigningSession, challenge, close_ses
 use datum_core::Identifier;
 use serde::{Deserialize, Serialize};
 
-/// Embedded migrator (`placeholder` + `0001_esign`).
+/// Embedded migrator (`placeholder` + `0001_esign` + redact cleanup + D-2b-1/7).
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
 /// The `sm.instance` triple hashed with the business projection (D-2b-3).
