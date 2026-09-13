@@ -112,6 +112,10 @@ pub fn router(state: AppState) -> Router {
             post(handlers::documents::create_revision),
         )
         .route(
+            "/api/v1/documents/{id}/submit",
+            post(handlers::documents::submit_document),
+        )
+        .route(
             "/api/v1/documents/{id}/approve",
             post(handlers::documents::approve_document),
         )

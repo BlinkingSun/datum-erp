@@ -8,6 +8,7 @@ use axum::http::StatusCode;
 use common::{NOPERM_PASSWORD, NOPERM_USER, PASSWORD, SIGNING_SECRET, USERNAME};
 use datum_module::Profile;
 use serde_json::json;
+use sqlx::query_scalar;
 use uuid::Uuid;
 
 fn profiles() -> [Profile; 2] {
@@ -614,6 +615,77 @@ async fn server_manifest_matches_crate_wire_after_version_bump() {
         .expect("crate manifestation");
     let crate_json = serde_json::to_value(&crate_wire).expect("crate json");
     assert_eq!(got, crate_json, "HTTP GET is the crate D-2b-2 wire");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn http_mint_snapshot_matches_target_required_edge() {
+    if common::skip_if_no_pg() {
+        return;
+    }
+    let w = common::boot(Profile::regulated_device().unwrap()).await;
+
+    let (st, doc) = w
+        .post(
+            "/api/v1/documents",
+            json!({
+                "kind": "SOP",
+                "title": "snapshot target",
+                "retention_class": "quality",
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::CREATED, "create document {doc}");
+    let doc_id = doc["id"].as_str().expect("id");
+    let doc_ver = doc["version"].as_i64().unwrap_or(1);
+    let (st, minted_doc) = w
+        .post(
+            "/api/v1/esign/signatures",
+            json!({
+                "meaning": "Approved",
+                "record": {
+                    "table": "sm.instance",
+                    "id": doc_id,
+                    "version": doc_ver
+                },
+                "identification": { "code": USERNAME, "secret": SIGNING_SECRET }
+            }),
+        )
+        .await;
+    assert_eq!(st, StatusCode::CREATED, "document mint {minted_doc}");
+    let doc_sig = minted_doc["signature"]["id"].as_str().expect("id");
+    let doc_snap: Vec<String> =
+        query_scalar("SELECT permission_snapshot FROM esign.signature WHERE signature_id = $1")
+            .bind(Uuid::parse_str(doc_sig).expect("uuid"))
+            .fetch_one(&w.pool)
+            .await
+            .expect("document snapshot");
+    assert!(
+        doc_snap.iter().any(|k| k == "documents.approve"),
+        "document mint snapshots documents.approve, got {doc_snap:?}"
+    );
+
+    let cal = w
+        .calibration_doc
+        .clone()
+        .expect("calibration.certificate spawned at boot");
+    let (st, minted_cal) = w
+        .post(
+            "/api/v1/esign/signatures",
+            mint_body(Uuid::parse_str(&cal).expect("uuid")),
+        )
+        .await;
+    assert_eq!(st, StatusCode::CREATED, "calibration mint {minted_cal}");
+    let cal_sig = minted_cal["signature"]["id"].as_str().expect("id");
+    let cal_snap: Vec<String> =
+        query_scalar("SELECT permission_snapshot FROM esign.signature WHERE signature_id = $1")
+            .bind(Uuid::parse_str(cal_sig).expect("uuid"))
+            .fetch_one(&w.pool)
+            .await
+            .expect("calibration snapshot");
+    assert!(
+        cal_snap.iter().any(|k| k == "calibration.approve"),
+        "calibration mint snapshots calibration.approve, got {cal_snap:?}"
+    );
 }
 
 #[test]

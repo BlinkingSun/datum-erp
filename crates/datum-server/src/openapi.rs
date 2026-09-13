@@ -360,6 +360,13 @@ pub const MOUNTED: &[Mounted] = &[
     },
     Mounted {
         method: "POST",
+        path: "/api/v1/documents/{id}/submit",
+        operation_id: "submitDocument",
+        permission: "documents.edit",
+        state_transition: true,
+    },
+    Mounted {
+        method: "POST",
         path: "/api/v1/documents/{id}/approve",
         operation_id: "approveDocument",
         permission: "documents.approve",
