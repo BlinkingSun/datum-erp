@@ -88,6 +88,12 @@ pub fn router(state: AppState) -> Router {
         // w3b:customfields
         // w3b:documents
         // w3b:print
+        .route(
+            "/api/v1/print/templates",
+            get(handlers::print::list_templates),
+        )
+        .route("/api/v1/print/render", post(handlers::print::render))
+        .route("/api/v1/print/archive", post(handlers::print::archive))
         .layer(DefaultBodyLimit::max(1024 * 1024))
         .layer(axum::middleware::from_fn(limits_mw))
         .layer(axum::middleware::from_fn(request_id_mw))

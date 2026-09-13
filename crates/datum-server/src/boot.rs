@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use datum_core::{Identifier, ItemId};
 use datum_db::{Pool, Tx, WritePool};
+use datum_documents::FsBlobStore;
 use datum_module::{
     ConfigurationManifest, Kernel, Profile, export_manifest, install_slice,
     startup_fails_if_required_meets_no_signatures,
@@ -30,6 +31,17 @@ pub struct App {
     pub calibration_doc: Option<Identifier>,
     /// App-role URL (fresh pools for nested block_on).
     pub database_url: String,
+}
+
+fn compose_blob_store() -> FsBlobStore {
+    match FsBlobStore::from_env() {
+        Ok(store) => store,
+        Err(_) => {
+            let root = std::env::temp_dir().join(format!("datum-blobs-{}", Uuid::now_v7()));
+            let _ = std::fs::create_dir_all(&root);
+            FsBlobStore::new(root)
+        }
+    }
 }
 
 impl App {
@@ -114,6 +126,7 @@ impl App {
                 manifest_hash: self.manifest_hash,
                 calibration_doc: self.calibration_doc,
                 database_url: self.database_url,
+                blobs: Arc::new(compose_blob_store()),
             }),
         }
     }
@@ -131,6 +144,7 @@ struct AppInner {
     manifest_hash: String,
     calibration_doc: Option<Identifier>,
     database_url: String,
+    blobs: Arc<FsBlobStore>,
 }
 
 impl AppState {
@@ -167,6 +181,11 @@ impl AppState {
     /// App-role URL.
     pub fn database_url(&self) -> &str {
         &self.inner.database_url
+    }
+
+    /// Composed [`FsBlobStore`] shared with documents attach / print archive.
+    pub fn blobs(&self) -> &FsBlobStore {
+        &self.inner.blobs
     }
 }
 
