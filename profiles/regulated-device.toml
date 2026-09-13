@@ -69,7 +69,8 @@ installed = true
 enabled = true
 
 [signature_gate_binding]
-gate = "NoSignatures"
+gate = "datum-esign"
+continuous_session = "off"
 
 [validation_manifest]
 generated = true

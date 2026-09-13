@@ -221,12 +221,12 @@ async fn gate_wrapped_transitions_under_both_profiles() {
             .transition(&mut tx, &doc, edge, Some(&token), &ctx)
             .await;
         if expect_required {
-            let err = result.expect_err("NoSignatures must refuse Required");
+            let err = result.expect_err("Required edge must refuse a dummy token");
             assert!(
                 matches!(
                     err,
                     datum_module::Error::Statemachine(datum_statemachine::Error::Signature(
-                        SignatureError::NoProvider
+                        SignatureError::Invalid(_)
                     ))
                 ),
                 "{label} typed error, got {err:?}"

@@ -1792,8 +1792,8 @@ async fn approve_cal_inner(
         tx.commit().await?;
         return Ok(replay);
     }
-    // A Required edge with no provider: present a token so the gate, not the
-    // missing-token check, is what refuses (SIGNATURE_NO_PROVIDER).
+    // A Required edge with esign bound: present a token so prepare, not the
+    // missing-token check, is what refuses (SIGNATURE_REQUIRED / Invalid).
     let token = SignatureToken {
         signature: SignatureId::from_uuid(Uuid::nil()),
         signer: session.principal.0.into_actor(),

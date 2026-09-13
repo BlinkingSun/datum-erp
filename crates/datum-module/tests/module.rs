@@ -206,6 +206,33 @@ fn startup_fails_release_required_edge_with_no_signatures() {
 }
 
 #[test]
+fn regulated_device_startup_fails_if_required_meets_no_signatures() {
+    let req = SignatureRequirement {
+        meaning: SignatureMeaning("Approved".into()),
+        permission: PermissionKey("calibration.approve".into()),
+    };
+    let m = Machine::builder("calibration.certificate")
+        .regulated(true)
+        .edge(EdgeBuilder::new("Open", "Approved", "approve", "calibration.approve").required(req))
+        .build()
+        .unwrap();
+    let mut eng = Engine::new();
+    eng.register_machine(m).unwrap();
+    let err = startup_fails_if_required_meets_no_signatures(&eng, true, true)
+        .expect_err("release + NoSignatures + Required");
+    assert!(err.to_string().contains("startup"), "got {err}");
+    startup_fails_if_required_meets_no_signatures(&eng, true, false).unwrap();
+    startup_fails_if_required_meets_no_signatures(&eng, false, true).unwrap();
+    let profile = Profile::regulated_device().unwrap();
+    assert_eq!(
+        profile.signature_gate_binding,
+        GateBinding::DatumEsign,
+        "regulated-device binds datum-esign so a live release boot is not this failure"
+    );
+    assert_eq!(profile.session_policy.continuous_session, "off");
+}
+
+#[test]
 fn hook_order_matches_statemachine_hook_order() {
     let nodes = vec![
         ModuleNode {
@@ -702,19 +729,20 @@ impl EventHandler for DummySubscriber {
 fn signature_gate_comes_from_profile_toml_gate_field() {
     let regulated = Profile::regulated_device().unwrap();
     let plain = Profile::plain_shop().unwrap();
-    assert_eq!(regulated.signature_gate_binding, GateBinding::NoSignatures);
+    assert_eq!(regulated.signature_gate_binding, GateBinding::DatumEsign);
     assert_eq!(plain.signature_gate_binding, GateBinding::NoSignatures);
+    assert_eq!(regulated.session_policy.continuous_session, "off");
+    assert_eq!(plain.session_policy.continuous_session, "off");
+    let _esign = bind_signature_gate(regulated.signature_gate_binding);
+    let _noop = bind_signature_gate(plain.signature_gate_binding);
     let (token, required, record) = sample_token();
-    for profile in [&regulated, &plain] {
-        let _factory = bind_signature_gate(profile.signature_gate_binding);
-        assert!(
-            matches!(
-                NoSignatures.verify(&token, &required, &record),
-                Err(SignatureError::NoProvider)
-            ),
-            "NoSignatures factory named by SPEC-profiles key 4 / CONTRACT §6.3"
-        );
-    }
+    assert!(
+        matches!(
+            NoSignatures.verify(&token, &required, &record),
+            Err(SignatureError::NoProvider)
+        ),
+        "NoSignatures factory named by SPEC-profiles key 4 / CONTRACT §6.3"
+    );
 }
 
 #[tokio::test]
@@ -726,7 +754,7 @@ async fn regulated_required_set_from_registered_machine() {
         .expect("build regulated");
     assert_eq!(
         kernel.profile.signature_gate_binding,
-        GateBinding::NoSignatures,
+        GateBinding::DatumEsign,
         "gate field comes from the profile TOML"
     );
     assert!(
@@ -739,17 +767,14 @@ async fn regulated_required_set_from_registered_machine() {
         ),
         "calibration.certificate.approve must be listed"
     );
-    let (token, required, record) = sample_token();
     assert!(
-        kernel.gate_is_noop(),
-        "regulated still binds NoSignatures until g2"
+        !kernel.gate_is_noop(),
+        "regulated-device binds the datum-esign factory"
     );
-    assert!(matches!(
-        NoSignatures.verify(&token, &required, &record),
-        Err(SignatureError::NoProvider)
-    ));
     startup_fails_if_required_meets_no_signatures(&kernel.engine, true, true)
         .expect_err("§6.3 startup guard must trip on the live Required set");
+    startup_fails_if_required_meets_no_signatures(&kernel.engine, false, true)
+        .expect("esign-bound release boot is allowed");
     let stored = export_manifest(db.app_pool()).await.expect("export");
     stored.verify_self().expect("hashed");
     assert!(

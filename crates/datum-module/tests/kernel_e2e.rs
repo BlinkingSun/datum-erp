@@ -604,16 +604,28 @@ async fn composed_path(db: &datum_test::TestDb, profile: Profile, rebuild_projec
     let err = kernel
         .transition(&mut tx, &sig, APPROVE, Some(&token), &appr_ctx)
         .await
-        .expect_err("Required must refuse under NoSignatures");
-    assert!(
-        matches!(
-            err,
-            datum_module::Error::Statemachine(datum_statemachine::Error::Signature(
-                SignatureError::NoProvider
-            ))
-        ),
-        "must-assert 7 typed error, got {err:?}"
-    );
+        .expect_err("Required must refuse a dummy token");
+    if kernel.gate_is_noop() {
+        assert!(
+            matches!(
+                err,
+                datum_module::Error::Statemachine(datum_statemachine::Error::Signature(
+                    SignatureError::NoProvider
+                ))
+            ),
+            "must-assert 7 typed error, got {err:?}"
+        );
+    } else {
+        assert!(
+            matches!(
+                err,
+                datum_module::Error::Statemachine(datum_statemachine::Error::Signature(
+                    SignatureError::Invalid(_)
+                ))
+            ),
+            "esign-bound dummy token is Invalid, got {err:?}"
+        );
+    }
     tx.rollback().await.ok();
     let after = ledger_snap(pool, &sig).await;
     assert_eq!(
