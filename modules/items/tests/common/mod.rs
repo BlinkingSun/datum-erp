@@ -8,14 +8,14 @@ use datum_core::{
     ValuePosting,
 };
 use datum_db::{Tx, WriteContext, WritePool};
-use datum_identity::rbac::{assign_role, seed_bundles, RoleBundle};
-use datum_identity::{create_principal, PrincipalKind};
-use datum_ledger::{upsert_location, CostMethod, GroupBuilder};
-use datum_mod_items::{Kind, NewItem, DOC_TYPE};
+use datum_identity::rbac::{RoleBundle, assign_role, seed_bundles};
+use datum_identity::{PrincipalKind, create_principal};
+use datum_ledger::{CostMethod, GroupBuilder, upsert_location};
+use datum_mod_items::{DOC_TYPE, Kind, NewItem};
 use datum_module::{Kernel, KernelBuilder, Profile};
 use datum_statemachine::DocRef;
 use rust_decimal::Decimal;
-use sqlx::{query_scalar as sql_query_scalar, PgPool};
+use sqlx::{PgPool, query_scalar as sql_query_scalar};
 
 pub const EA: UnitId = UnitId(1);
 pub const MM: UnitId = UnitId(2);

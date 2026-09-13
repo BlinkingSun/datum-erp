@@ -2,12 +2,12 @@
 
 use datum_core::{Actor, ActorKind, Identifier, ItemId, LotId};
 use datum_db::{Tx, WriteContext, WritePool};
-use datum_identity::rbac::{assign_role, seed_bundles, RoleBundle};
-use datum_identity::{create_principal, PrincipalKind, SYSTEM_ID};
+use datum_identity::rbac::{RoleBundle, assign_role, seed_bundles};
+use datum_identity::{PrincipalKind, SYSTEM_ID, create_principal};
 use datum_mod_lots::DOC_TYPE;
 use datum_module::{Kernel, Profile};
 use datum_statemachine::DocRef;
-use sqlx::{query_scalar as sql_query_scalar, PgPool};
+use sqlx::{PgPool, query_scalar as sql_query_scalar};
 
 pub async fn actor_with_lots_perms(write: &WritePool) -> Actor {
     let slug = Identifier::generate().to_string();
@@ -138,10 +138,6 @@ pub fn edge_ctx(kernel: &Kernel, actor: Actor, lot: LotId, edge: &str) -> WriteC
     ctx.actor_display = Some("M. Reyes".into());
     ctx.reason = Some("lots-test".into());
     ctx
-}
-
-pub async fn migrate_kernel(db: &datum_test::TestDb) {
-    migrate(db).await;
 }
 
 pub fn pg_code_db(err: &datum_db::Error) -> String {
