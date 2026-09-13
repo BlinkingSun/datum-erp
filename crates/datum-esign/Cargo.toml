@@ -28,6 +28,7 @@ thiserror.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+datum-module.workspace = true
 datum-statemachine.workspace = true
 datum-test.workspace = true
 proptest.workspace = true

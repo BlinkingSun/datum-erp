@@ -55,6 +55,11 @@ ON CONFLICT (nspname) DO UPDATE SET class = EXCLUDED.class;
 
 ALTER DEFAULT PRIVILEGES FOR ROLE datum_migrate IN SCHEMA server_transient
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO datum_app;
+-- D-2b-12(1): server_transient is class transient. The event trigger skip set
+-- is datum.schema_class, so this schema must never be offered GRANT TRIGGER
+-- (that grant is what made inventory_transient.idempotency acquire
+-- zz_audit_row on one order and not the other). The grant at schema `server`
+-- covers app-class tables only.
 ALTER DEFAULT PRIVILEGES FOR ROLE datum_owner IN SCHEMA server_transient
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO datum_app;
 

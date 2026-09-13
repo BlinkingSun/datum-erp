@@ -29,6 +29,7 @@ thiserror.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+datum-module.workspace = true
 datum-test.workspace = true
 proptest.workspace = true
 tokio.workspace = true

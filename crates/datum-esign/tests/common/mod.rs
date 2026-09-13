@@ -60,29 +60,11 @@ pub fn pg_code(err: &sqlx::Error) -> String {
 }
 
 pub async fn migrate_esign(db: &datum_test::TestDb) {
-    datum_db::migrate::run(
-        db.migrate_pool(),
-        &[
-            ("datum-db", &datum_db::MIGRATOR),
-            ("datum-audit", &datum_audit::MIGRATOR),
-        ],
-    )
-    .await
-    .expect("migrate db+audit");
     let boot = db.bootstrap_pool().await.expect("bootstrap pool");
-    datum_audit::install_privileged(&boot)
+    datum_module::order::install_upto(db.migrate_pool(), &boot, "datum-esign")
         .await
-        .expect("install_privileged");
+        .unwrap_or_else(|e| panic!("install_upto datum-esign: {e:#}"));
     boot.close().await;
-    datum_db::migrate::run(
-        db.migrate_pool(),
-        &[
-            ("datum-identity", &datum_identity::MIGRATOR),
-            ("datum-esign", &datum_esign::MIGRATOR),
-        ],
-    )
-    .await
-    .unwrap_or_else(|e| panic!("migrate identity+esign: {e:#}"));
     let write = WritePool::new(db.app_pool().clone());
     let mut tx = datum_db::Tx::begin(&write, &system_ctx("identity.seed"))
         .await
@@ -93,12 +75,6 @@ pub async fn migrate_esign(db: &datum_test::TestDb) {
 
 pub async fn migrate_esign_sm(db: &datum_test::TestDb) {
     migrate_esign(db).await;
-    datum_db::migrate::run(
-        db.migrate_pool(),
-        &[("datum-statemachine", &datum_statemachine::MIGRATOR)],
-    )
-    .await
-    .unwrap_or_else(|e| panic!("migrate sm: {e:#}"));
 }
 
 pub fn write_pool(db: &datum_test::TestDb) -> WritePool {
