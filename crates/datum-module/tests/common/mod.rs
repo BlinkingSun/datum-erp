@@ -5,7 +5,7 @@
 use datum_core::{Actor, ActorKind, Identifier};
 use datum_db::{Tx, WriteContext, WritePool};
 use datum_identity::rbac::{RoleBundle, assign_role, seed_bundles};
-use datum_identity::{PrincipalKind, create_principal};
+use datum_identity::{Principal, PrincipalKind, create_principal, set_signing_credential};
 use datum_statemachine::{DocRef, with_action};
 use sqlx::{PgPool, query_scalar as sql_query_scalar};
 
@@ -139,8 +139,16 @@ pub async fn actor_with_perm(
     (actor, ctx)
 }
 
+/// Signing secret used by kernel e2e mint (never the login credential).
+pub const SIGNING_SECRET: &str = "signing-secret-ok";
+
 /// Principal holding every listed permission (no bound action).
 pub async fn actor_with_perms(write: &WritePool, permissions: &[&str]) -> Actor {
+    signer_with_perms(write, permissions).await.actor()
+}
+
+/// Principal holding `permissions` and a signing credential (D-2b-3).
+pub async fn signer_with_perms(write: &WritePool, permissions: &[&str]) -> Principal {
     let slug = Identifier::generate().to_string();
     let short: String = slug
         .chars()
@@ -156,6 +164,9 @@ pub async fn actor_with_perms(write: &WritePool, permissions: &[&str]) -> Actor 
     )
     .await
     .expect("principal");
+    set_signing_credential(&mut tx, p.id, SIGNING_SECRET)
+        .await
+        .expect("signing cred");
     let roles = seed_bundles(
         &mut tx,
         &[RoleBundle {
@@ -167,10 +178,7 @@ pub async fn actor_with_perms(write: &WritePool, permissions: &[&str]) -> Actor 
     .expect("role");
     assign_role(&mut tx, p.id, roles[0]).await.expect("assign");
     tx.commit().await.expect("commit actor");
-    Actor {
-        id: p.id.0,
-        kind: ActorKind::User,
-    }
+    p
 }
 
 pub fn boot_ctx() -> WriteContext {
