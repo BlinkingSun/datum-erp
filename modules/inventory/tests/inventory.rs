@@ -4,12 +4,13 @@
 
 mod common;
 
-use datum_core::Identifier;
+use datum_core::{Identifier, LocationId};
 use datum_db::Tx;
 use datum_mod_inventory::{
     AdjustRequest, BalanceQuery, CountLine, CountRequest, DocumentStatus, IssueRequest, LineInput,
-    ReceiveRequest, ReturnRequest, ShipRequest, adjust, allocated, available, customer_return,
-    cycle_count, document_history, issue_to_wip, on_hand, receive, ship_to_customer,
+    ReceiveRequest, ReturnRequest, ShipRequest, WipIssuePlan, adjust, allocated, available,
+    customer_return, cycle_count, document_history, issue_to_wip, on_hand, receive,
+    ship_to_customer, stash_wip_issue_plan, take_wip_issue_plan,
 };
 use datum_test::db_case;
 use sqlx::query as sql_query;
@@ -551,5 +552,70 @@ async fn document_history_lists_item_and_lot() {
         .expect("history");
     assert!(!hist.is_empty());
     tx.commit().await.ok();
+    db.finish().await.expect("finish");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn wip_issue_plans_are_isolated_per_pg_txid() {
+    let db = db_case!("inv_plan_txid");
+    let kernel = boot_kernel(&db).await;
+    let w = seed_world(&db, kernel).await;
+    let pool = write_pool(&db);
+    let work_order = Identifier::generate();
+    let doc_a = Identifier::generate();
+    let doc_b = Identifier::generate();
+    let loc = LocationId::from_uuid(Identifier::generate().as_uuid());
+    let plan_a = WipIssuePlan {
+        document_id: doc_a,
+        work_order,
+        from_location: loc,
+        lines: Vec::new(),
+        residuals: Vec::new(),
+        replay_document: None,
+    };
+    let plan_b = WipIssuePlan {
+        document_id: doc_b,
+        work_order,
+        from_location: loc,
+        lines: Vec::new(),
+        residuals: Vec::new(),
+        replay_document: None,
+    };
+    let ctx_a = action_ctx(&w, "inventory.issue");
+    let ctx_b = action_ctx(&w, "inventory.issue");
+    let pool_a = pool.clone();
+    let pool_b = pool.clone();
+    let a = tokio::spawn(async move {
+        let mut tx = Tx::begin(&pool_a, &ctx_a).await.expect("begin a");
+        stash_wip_issue_plan(&mut tx, plan_a)
+            .await
+            .expect("stash a");
+        tokio::task::yield_now().await;
+        let got = take_wip_issue_plan(work_order);
+        tx.rollback().await.ok();
+        got
+    });
+    let b = tokio::spawn(async move {
+        let mut tx = Tx::begin(&pool_b, &ctx_b).await.expect("begin b");
+        stash_wip_issue_plan(&mut tx, plan_b)
+            .await
+            .expect("stash b");
+        tokio::task::yield_now().await;
+        let got = take_wip_issue_plan(work_order);
+        tx.rollback().await.ok();
+        got
+    });
+    let got_a = a.await.expect("join a");
+    let got_b = b.await.expect("join b");
+    assert_eq!(
+        got_a.expect("tx A plan").document_id,
+        doc_a,
+        "concurrent Tx A must not observe Tx B's plan"
+    );
+    assert_eq!(
+        got_b.expect("tx B plan").document_id,
+        doc_b,
+        "concurrent Tx B must not observe Tx A's plan"
+    );
     db.finish().await.expect("finish");
 }

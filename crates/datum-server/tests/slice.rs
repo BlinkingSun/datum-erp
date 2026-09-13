@@ -1091,6 +1091,42 @@ async fn issue_wo_is_one_transaction() {
             seals, 1,
             "one audit.tx_seal row for the issue request {rid}"
         );
+        let groups: i64 = query_scalar(
+            r#"SELECT count(*)::bigint
+                 FROM ledger.posting_group g
+                WHERE g.created_xid IN (
+                    SELECT DISTINCT e.xid
+                      FROM audit.event e
+                     WHERE e.request_id = $1
+                )"#,
+        )
+        .bind(uuid::Uuid::parse_str(rid).unwrap())
+        .fetch_one(&w.pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            groups, 1,
+            "issue+start posts exactly one posting_group {rid} {body}"
+        );
+        let wip_posts: i64 = query_scalar(
+            r#"SELECT count(*)::bigint
+                 FROM ledger.posting p
+                 JOIN ledger.posting_group g ON g.group_id = p.group_id
+                WHERE g.created_xid IN (
+                    SELECT DISTINCT e.xid
+                      FROM audit.event e
+                     WHERE e.request_id = $1
+                )
+                  AND p.account = 'WIP'"#,
+        )
+        .bind(uuid::Uuid::parse_str(rid).unwrap())
+        .fetch_one(&w.pool)
+        .await
+        .unwrap();
+        assert!(
+            wip_posts >= 1,
+            "production.issue hook must contribute a WIP value posting {rid} {body}"
+        );
         let lines_after_ok: i64 =
             query_scalar("SELECT count(*) FROM production_min.issue_line WHERE work_order_id = $1")
                 .bind(uuid::Uuid::parse_str(&wo_id).unwrap())
