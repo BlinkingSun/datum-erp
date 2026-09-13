@@ -39,6 +39,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/inventory/receipts", post(handlers::create_receipt))
         .route("/api/v1/inventory/releases", post(handlers::release_stock))
         .route("/api/v1/inventory/counts", post(handlers::create_count))
+        .route(
+            "/api/v1/inventory/reversals",
+            post(handlers::create_reversal),
+        )
         .route("/api/v1/inventory/on-hand", get(handlers::on_hand))
         .route("/api/v1/work-orders", post(handlers::create_wo))
         .route("/api/v1/work-orders/{id}", get(handlers::get_wo))

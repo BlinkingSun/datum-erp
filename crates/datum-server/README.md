@@ -42,6 +42,21 @@ npx openapi-typescript http://127.0.0.1:8080/api/v1/openapi.json -o src/api.d.ts
 
 The first-party UI uses that client exclusively (ADR 0009).
 
+## HTTP API (Wave 2s slice)
+
+| Method | Path | Permission |
+|---|---|---|
+| POST | `/api/v1/inventory/receipts` | `inventory.receive` |
+| POST | `/api/v1/inventory/releases` | `lots.release` |
+| POST | `/api/v1/inventory/counts` | `inventory.count` |
+| POST | `/api/v1/inventory/reversals` | `inventory.adjust` |
+| GET | `/api/v1/inventory/on-hand` | `inventory.view` |
+
+`POST /api/v1/inventory/reversals` takes `{ "document_id": "<posted issue id>", "reason": "..." }`.
+One `Tx::begin` / one `WriteContext` (R-2s-7, no GUC rebind) calls
+`datum_mod_inventory::reverse_posted_issue`. **201** is the issue document plus
+`reversal_group_id`; unknown id is **404**; an already-reversed group is **409**.
+
 ## `POST .../issue` (R-2s-7)
 
 `issue_wo` is one `Tx::begin` / one `production.issue` action: the handler

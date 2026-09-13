@@ -6,8 +6,8 @@ use std::sync::Arc;
 use datum_core::{Identifier, ItemId};
 use datum_db::{Pool, Tx, WritePool};
 use datum_module::{
-    ConfigurationManifest, Kernel, Profile, attach_kernel_audit, export_manifest, kernel_migrators,
-    migrate_prefix, migrate_wave_2s1_modules, startup_fails_if_required_meets_no_signatures,
+    ConfigurationManifest, Kernel, Profile, export_manifest, install_slice,
+    startup_fails_if_required_meets_no_signatures,
 };
 use datum_statemachine::{DocRef, Engine, Machine};
 use sqlx::PgPool;
@@ -61,44 +61,13 @@ impl App {
         bind: SocketAddr,
         database_url: String,
     ) -> Result<Self> {
-        // Same order as `install_kernel`, with Wave 2s slice migrators applied
-        // *before* `attach_kernel_audit` so `datum.schema_history` inserts are
-        // not judged by `zz_audit_row` (42501).
+        // Same order as `install_slice`: Wave 2s slice migrators run *before*
+        // audit attach so `datum.schema_history` inserts are not judged by
+        // `zz_audit_row` (42501). Slice attach set is `SLICE_AUDIT_RELS`.
         adopt_datum_db_history(migrate).await?;
-        migrate_prefix(migrate).await?;
-        datum_audit::install_privileged(bootstrap).await?;
-        datum_db::migrate::run(migrate, &[("datum-identity", &datum_identity::MIGRATOR)])
+        install_slice(migrate, bootstrap)
             .await
-            .map_err(|e| Error::Config(format!("migrate identity: {e}")))?;
-        datum_audit::uninstall_privileged(bootstrap).await?;
-        for (name, migrator) in kernel_migrators() {
-            if matches!(name, "datum-db" | "datum-audit" | "datum-identity") {
-                continue;
-            }
-            datum_db::migrate::run(migrate, &[(name, migrator)])
-                .await
-                .map_err(|e| Error::Config(format!("migrate {name}: {e}")))?;
-        }
-        migrate_wave_2s1_modules(migrate).await?;
-        migrate_slice_modules(migrate).await?;
-        attach_kernel_audit(migrate).await?;
-        for rel in [
-            "inventory.document",
-            "inventory.document_line",
-            "production_min.work_order",
-            "production_min.issue_line",
-            "production_min.completion",
-            "server.boot_record",
-        ] {
-            let exists: bool = sqlx::query_scalar("SELECT to_regclass($1::text) IS NOT NULL")
-                .bind(rel)
-                .fetch_one(migrate)
-                .await?;
-            if exists {
-                datum_audit::attach(migrate, rel).await?;
-            }
-        }
-        datum_audit::install_privileged(bootstrap).await?;
+            .map_err(|e| Error::Config(format!("install slice: {e}")))?;
 
         let kernel = build_kernel(app_pool.clone(), profile).await?;
         let write = WritePool::new(app_pool.clone());
@@ -202,22 +171,11 @@ impl AppState {
 }
 
 /// Run inventory / production / genealogy / server migrators after the kernel.
+/// Delegates to [`datum_module::migrate_slice_modules`] (same migrator set).
 pub async fn migrate_slice_modules(pool: &PgPool) -> Result<()> {
-    let crates: &[(&str, &sqlx::migrate::Migrator)] = &[
-        ("datum-mod-inventory", &datum_mod_inventory::MIGRATOR),
-        (
-            "datum-mod-production-min",
-            &datum_mod_production_min::MIGRATOR,
-        ),
-        ("datum-mod-genealogy", &datum_mod_genealogy::MIGRATOR),
-        ("datum-server", &crate::MIGRATOR),
-    ];
-    for (name, migrator) in crates {
-        datum_db::migrate::run(pool, &[(*name, *migrator)])
-            .await
-            .map_err(|e| Error::Config(format!("migrate {name}: {e}")))?;
-    }
-    Ok(())
+    datum_module::migrate_slice_modules(pool)
+        .await
+        .map_err(|e| Error::Config(format!("migrate slice: {e}")))
 }
 
 /// `sqlx migrate run` records in `_sqlx_migrations`, not `datum.schema_history`.

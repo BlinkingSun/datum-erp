@@ -17,16 +17,16 @@ use datum_test::db_case;
 
 use datum_module::{
     CONTRACT_KERNEL_EDGES, ConfigurationManifest, DELTA_ALLOWED, GateBinding, KERNEL_AUDIT_RELS,
-    KERNEL_ORDER, Kernel, Profile, ProfileId, bind_signature_gate, compiled_in, delta_keys,
-    disable, edges_from_registry, enable, export_manifest, install, is_topological_sort,
-    list_installed, load_kernel_defaults, module_nodes, posting_sink,
+    KERNEL_ORDER, Kernel, Profile, ProfileId, SLICE_AUDIT_RELS, bind_signature_gate, compiled_in,
+    delta_keys, disable, edges_from_registry, enable, export_manifest, install,
+    is_topological_sort, list_installed, load_kernel_defaults, module_nodes, posting_sink,
     profile_does_not_rewrite_edges, startup_fails_if_required_meets_no_signatures,
     topological_order, verify,
 };
 
 use common::{
-    has_zz_audit, migrate_and_install, module_enabled, module_hash, pg_code, table_count,
-    toy_manifest, toy_manifest_regulated, write_pool,
+    has_zz_audit, migrate_and_install, migrate_and_install_slice, module_enabled, module_hash,
+    pg_code, table_count, toy_manifest, toy_manifest_regulated, write_pool,
 };
 
 fn boot_ctx() -> WriteContext {
@@ -356,7 +356,7 @@ async fn audit_trigger_matrix() {
         ("regulated-device", Profile::regulated_device().unwrap()),
     ] {
         let db = db_case!(&format!("atm_{}", &label[..5]));
-        migrate_and_install(&db).await;
+        migrate_and_install_slice(&db).await;
         let kernel = Kernel::build(db.app_pool(), profile).await.expect(label);
         let _ = kernel;
 
@@ -382,18 +382,59 @@ async fn audit_trigger_matrix() {
         .await
         .expect("catalog app-class tables");
 
-        let listed: BTreeSet<&str> = KERNEL_AUDIT_RELS.iter().copied().collect();
+        let listed: BTreeSet<&str> = KERNEL_AUDIT_RELS
+            .iter()
+            .chain(SLICE_AUDIT_RELS.iter())
+            .copied()
+            .collect();
         let found: BTreeSet<&str> = discovered.iter().map(String::as_str).collect();
         assert_eq!(
             found, listed,
-            "{label}: catalog app-class tables must equal KERNEL_AUDIT_RELS"
+            "{label}: catalog app-class tables must equal KERNEL_AUDIT_RELS ∪ SLICE_AUDIT_RELS"
         );
+
+        for rel in listed {
+            let (schema, table) = rel.split_once('.').expect("schema.table");
+            assert!(
+                has_zz_audit(db.migrate_pool(), schema, table).await,
+                "{label}: listed {rel} missing zz_audit_row"
+            );
+        }
+
+        let slice_rels: Vec<String> = sqlx::query_scalar(
+            r#"
+            SELECT n.nspname::text || '.' || c.relname::text
+              FROM pg_class c
+              JOIN pg_namespace n ON n.oid = c.relnamespace
+             WHERE n.nspname IN (
+                     'inventory', 'production_min', 'server',
+                     'items', 'locations', 'lots'
+                   )
+               AND c.relkind IN ('r', 'p')
+               AND NOT c.relispartition
+             ORDER BY 1
+            "#,
+        )
+        .fetch_all(db.migrate_pool())
+        .await
+        .expect("slice-schema tables");
+        assert!(
+            !slice_rels.is_empty(),
+            "{label}: slice schemas must exist after install_slice"
+        );
+        for rel in &slice_rels {
+            let (schema, table) = rel.split_once('.').expect("schema.table");
+            assert!(
+                has_zz_audit(db.migrate_pool(), schema, table).await,
+                "{label}: {rel} missing zz_audit_row"
+            );
+        }
 
         for rel in &discovered {
             let (schema, table) = rel.split_once('.').expect("schema.table");
             assert!(
                 has_zz_audit(db.migrate_pool(), schema, table).await,
-                "{label}: {rel} missing zz_audit_row"
+                "{label}: app table {rel} missing zz_audit_row"
             );
         }
         db.finish().await.expect("finish");

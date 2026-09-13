@@ -13,6 +13,15 @@ pub static ITEMS_MIGRATOR: Migrator = sqlx::migrate!("../../modules/items/migrat
 pub static LOCATIONS_MIGRATOR: Migrator = sqlx::migrate!("../../modules/locations/migrations");
 /// `datum-mod-lots` embedded migrator.
 pub static LOTS_MIGRATOR: Migrator = sqlx::migrate!("../../modules/lots/migrations");
+/// `datum-mod-inventory` embedded migrator.
+pub static INVENTORY_MIGRATOR: Migrator = sqlx::migrate!("../../modules/inventory/migrations");
+/// `datum-mod-production-min` embedded migrator.
+pub static PRODUCTION_MIN_MIGRATOR: Migrator =
+    sqlx::migrate!("../../modules/production_min/migrations");
+/// `datum-mod-genealogy` embedded migrator.
+pub static GENEALOGY_MIGRATOR: Migrator = sqlx::migrate!("../../modules/genealogy/migrations");
+/// `datum-server` embedded migrator (`server.boot_record`).
+pub static SERVER_MIGRATOR: Migrator = sqlx::migrate!("../datum-server/migrations");
 
 pub const ITEMS_MANIFEST: &str = include_str!("../../../modules/items/module.toml");
 pub const LOCATIONS_MANIFEST: &str = include_str!("../../../modules/locations/module.toml");
@@ -91,6 +100,24 @@ pub async fn migrate_wave_2s1_modules(pool: &datum_db::Pool) -> Result<()> {
     if crates.is_empty() {
         return Ok(());
     }
+    datum_db::migrate::run(pool, &crates).await?;
+    Ok(())
+}
+
+/// `(crate, migrator)` pairs for the Wave 2s slice (inventory, production,
+/// genealogy, server). Order matches `datum-server` boot.
+pub fn slice_migrators() -> Vec<(&'static str, &'static Migrator)> {
+    vec![
+        ("datum-mod-inventory", &INVENTORY_MIGRATOR),
+        ("datum-mod-production-min", &PRODUCTION_MIN_MIGRATOR),
+        ("datum-mod-genealogy", &GENEALOGY_MIGRATOR),
+        ("datum-server", &SERVER_MIGRATOR),
+    ]
+}
+
+/// Run Wave 2s slice SQL migrations (after Wave 2s.1, before audit attach).
+pub async fn migrate_slice_modules(pool: &datum_db::Pool) -> Result<()> {
+    let crates = slice_migrators();
     datum_db::migrate::run(pool, &crates).await?;
     Ok(())
 }

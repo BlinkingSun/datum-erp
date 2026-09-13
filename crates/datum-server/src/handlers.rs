@@ -10,7 +10,7 @@ use datum_core::{
 use datum_db::{Tx, WritePool};
 use datum_identity::{PasswordProvider, Provider};
 use datum_ledger::CostMethod;
-use datum_mod_inventory::{BalanceQuery, LineInput, ReceiveRequest, ReleaseRequest};
+use datum_mod_inventory::{BalanceQuery, DocumentKind, LineInput, ReceiveRequest, ReleaseRequest};
 use datum_mod_items::{Kind, NewItem};
 use datum_mod_locations::{CreateLocation, LocationKind};
 use datum_mod_lots::{CreateLotBody, LotStatus, PackageLevel, SetStatusBody};
@@ -1911,6 +1911,87 @@ async fn count_inner(
     idempotency::remember(&mut tx, key, &hash, 201, &body).await?;
     tx.commit().await?;
     Ok((201, body))
+}
+
+#[derive(Deserialize)]
+pub struct ReversalBody {
+    document_id: String,
+    reason: String,
+}
+
+/// POST /api/v1/inventory/reversals
+///
+/// One `Tx::begin` / one `WriteContext` (R-2s-7): `reverse_posted_issue` posts
+/// the ledger `REVERSAL` inside the request transaction; the GUC is never rebound.
+pub async fn create_reversal(State(state): State<AppState>, headers: H, body: Bytes) -> Response {
+    let request_id = rid(&headers);
+    let state2 = state.clone();
+    let headers2 = headers.clone();
+    let rid2 = request_id.clone();
+    let raw = body.to_vec();
+    match blocking(&request_id, move || async move {
+        reverse_inner(&state2, &headers2, &rid2, &raw).await
+    }) {
+        Ok((st, v)) => json_status(st, v),
+        Err(r) => r,
+    }
+}
+
+async fn reverse_inner(
+    state: &AppState,
+    headers: &H,
+    request_id: &str,
+    raw: &[u8],
+) -> Result<(u16, Value)> {
+    let body: ReversalBody = parse_json(raw)?;
+    if body.reason.trim().is_empty() {
+        return Err(Error::validation("reason is required", Some("reason")));
+    }
+    let session = extract::require_mutation(state, headers, request_id, "inventory.adjust").await?;
+    let key = idempotency::require_key(headers)?;
+    let hash = idempotency::body_hash(raw);
+    let issue_id = parse_uuid(&body.document_id, "document_id", Identifier::from_uuid)?;
+    let doc_ref = datum_statemachine::DocRef {
+        doc_type: datum_mod_inventory::DOC_TYPE.into(),
+        doc_id: issue_id,
+    };
+    let mut ctx =
+        state
+            .kernel()
+            .transition_context(session.principal.0.into_actor(), &doc_ref, "void");
+    ctx.session_id = Some(session.id.to_string());
+    ctx.request_id = Some(request_id.to_string());
+    ctx.source_kind = "api".into();
+    ctx.reason = Some(body.reason.clone());
+    ctx.actor_display = Some(session.display_name.clone());
+    let write = fresh_write(state).await?;
+    let mut tx = Tx::begin(&write, &ctx).await?;
+    if let Some(replay) = idempotency::replay(&mut tx, key, &hash).await? {
+        tx.commit().await?;
+        return Ok(replay);
+    }
+    let current = datum_mod_inventory::load_document(&mut tx, issue_id).await?;
+    if current.kind != DocumentKind::Issue {
+        return Err(Error::conflict(
+            "only issue documents can be reversed",
+            Some("document_id"),
+        ));
+    }
+    if current.posted_group_id.is_none() {
+        return Err(Error::conflict(
+            "document is not posted",
+            Some("document_id"),
+        ));
+    }
+    let reversal_group =
+        datum_mod_inventory::reverse_posted_issue(&mut tx, state.kernel(), &ctx, issue_id).await?;
+    let posted = datum_mod_inventory::load_document(&mut tx, issue_id).await?;
+    let mut payload = serde_json::to_value(datum_mod_inventory::DocumentBody::from(&posted))?;
+    payload["reversal_group_id"] = json!(reversal_group.to_string());
+    payload["reason"] = json!(body.reason);
+    idempotency::remember(&mut tx, key, &hash, 201, &payload).await?;
+    tx.commit().await?;
+    Ok((201, payload))
 }
 
 /// Health.

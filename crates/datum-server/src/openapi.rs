@@ -175,6 +175,13 @@ pub const MOUNTED: &[Mounted] = &[
         state_transition: false,
     },
     Mounted {
+        method: "POST",
+        path: "/api/v1/inventory/reversals",
+        operation_id: "reverseIssue",
+        permission: "inventory.adjust",
+        state_transition: false,
+    },
+    Mounted {
         method: "GET",
         path: "/api/v1/inventory/on-hand",
         operation_id: "getOnHand",
@@ -329,6 +336,7 @@ fn insert(
             "400": { "description": "validation" },
             "401": { "description": "unauthenticated" },
             "403": { "description": "forbidden" },
+            "404": { "description": "not found" },
             "409": { "description": "conflict" }
         }
     });

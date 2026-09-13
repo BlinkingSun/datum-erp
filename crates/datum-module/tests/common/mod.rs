@@ -9,13 +9,21 @@ use datum_identity::{PrincipalKind, create_principal};
 use datum_statemachine::{DocRef, with_action};
 use sqlx::{PgPool, query_scalar as sql_query_scalar};
 
-use datum_module::install_kernel;
+use datum_module::{install_kernel, install_slice};
 
 pub async fn migrate_and_install(db: &datum_test::TestDb) {
     let boot = db.bootstrap_pool().await.expect("bootstrap pool");
     install_kernel(db.migrate_pool(), &boot)
         .await
         .unwrap_or_else(|e| panic!("install_kernel: {e:#}"));
+    boot.close().await;
+}
+
+pub async fn migrate_and_install_slice(db: &datum_test::TestDb) {
+    let boot = db.bootstrap_pool().await.expect("bootstrap pool");
+    install_slice(db.migrate_pool(), &boot)
+        .await
+        .unwrap_or_else(|e| panic!("install_slice: {e:#}"));
     boot.close().await;
 }
 

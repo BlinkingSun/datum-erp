@@ -189,6 +189,12 @@ impl Error {
                 None,
                 self.to_string(),
             ),
+            Self::Inventory(datum_mod_inventory::Error::Ledger(
+                datum_ledger::Error::AlreadyReversed,
+            ))
+            | Self::Ledger(datum_ledger::Error::AlreadyReversed) => {
+                ("CONFLICT", StatusCode::CONFLICT, None, self.to_string())
+            }
             Self::Items(datum_mod_items::Error::VersionConflict)
             | Self::Inventory(datum_mod_inventory::Error::VersionConflict)
             | Self::Production(datum_mod_production_min::Error::VersionConflict) => (

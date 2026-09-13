@@ -29,9 +29,11 @@ pub use config::{
 };
 pub use error::{Error, Result};
 pub use install_graph::{
-    ITEMS_MIGRATOR, LOCATIONS_MIGRATOR, LOTS_MIGRATOR, ModuleInstallSpec, WAVE_2S1_AUDIT_RELS,
-    lots_release_is_required, manifest_machines_owned_by_register, migrate_wave_2s1_modules,
-    spec_by_id, wave_2s1_migrators, wave_2s1_order, wave_2s1_specs,
+    GENEALOGY_MIGRATOR, INVENTORY_MIGRATOR, ITEMS_MIGRATOR, LOCATIONS_MIGRATOR, LOTS_MIGRATOR,
+    ModuleInstallSpec, PRODUCTION_MIN_MIGRATOR, SERVER_MIGRATOR, WAVE_2S1_AUDIT_RELS,
+    lots_release_is_required, manifest_machines_owned_by_register, migrate_slice_modules,
+    migrate_wave_2s1_modules, slice_migrators, spec_by_id, wave_2s1_migrators, wave_2s1_order,
+    wave_2s1_specs,
 };
 pub use kernel::{
     Kernel, KernelBuilder, ModuleJob, ModuleRoute, bind_signature_gate, edges_from_registry,
@@ -43,8 +45,9 @@ pub use manifest::{
 };
 pub use order::{
     CONTRACT_KERNEL_EDGES, KERNEL_AUDIT_RELS, KERNEL_ORDER, MIGRATE_PREFIX, ModuleNode,
-    attach_kernel_audit, install_kernel, is_topological_sort, kernel_crates, kernel_migrators,
-    migrate_prefix, migrate_suffix, run_migrations, topological_order,
+    SLICE_AUDIT_RELS, attach_kernel_audit, attach_slice_audit, install_kernel, install_slice,
+    is_topological_sort, kernel_crates, kernel_migrators, migrate_prefix, migrate_suffix,
+    run_migrations, topological_order,
 };
 pub use profile::{
     DELTA_ALLOWED, GateBinding, Profile, ProfileId, ProfileModule, SignatureEdge, delta_keys,
@@ -100,6 +103,17 @@ mod tests {
         for (name, listed) in crates.iter().zip(KERNEL_ORDER) {
             assert_eq!(name.0, *listed);
         }
+    }
+
+    #[test]
+    fn slice_audit_rels_are_disjoint_from_kernel() {
+        for rel in SLICE_AUDIT_RELS {
+            assert!(
+                !KERNEL_AUDIT_RELS.contains(rel),
+                "{rel} belongs in SLICE_AUDIT_RELS only"
+            );
+        }
+        assert!(!SLICE_AUDIT_RELS.is_empty());
     }
 
     proptest! {

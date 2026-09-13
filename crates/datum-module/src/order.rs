@@ -150,10 +150,32 @@ pub const KERNEL_AUDIT_RELS: &[&str] = &[
     "lots.status_history",
 ];
 
+/// App-class tables owned by the Wave 2s slice (inventory / production_min /
+/// server). The event trigger misses these because slice migrators run after
+/// privileged install is dropped. Single source of truth for `datum-server`
+/// boot and [`install_slice`].
+pub const SLICE_AUDIT_RELS: &[&str] = &[
+    "inventory.document",
+    "inventory.document_line",
+    "production_min.work_order",
+    "production_min.issue_line",
+    "production_min.completion",
+    "server.boot_record",
+];
+
 /// Attach `datum.schema_history` and every other app-class table that missed
 /// the event trigger (`datum` schema, or tables created before privileged).
 pub async fn attach_kernel_audit(pool: &datum_db::Pool) -> Result<()> {
-    for rel in KERNEL_AUDIT_RELS {
+    attach_listed_audit(pool, KERNEL_AUDIT_RELS).await
+}
+
+/// Attach every Wave 2s slice app-class table in [`SLICE_AUDIT_RELS`].
+pub async fn attach_slice_audit(pool: &datum_db::Pool) -> Result<()> {
+    attach_listed_audit(pool, SLICE_AUDIT_RELS).await
+}
+
+async fn attach_listed_audit(pool: &datum_db::Pool, rels: &[&str]) -> Result<()> {
+    for rel in rels {
         let exists: bool = sqlx::query_scalar("SELECT to_regclass($1::text) IS NOT NULL")
             .bind(rel)
             .fetch_one(pool)
@@ -173,6 +195,21 @@ pub async fn attach_kernel_audit(pool: &datum_db::Pool) -> Result<()> {
 /// grant; attaching after `ALTER TABLE ... OWNER TO datum_owner` is the
 /// composition-path attach, same as before this residual.
 pub async fn install_kernel(migrate: &datum_db::Pool, bootstrap: &datum_db::Pool) -> Result<()> {
+    install_kernel_inner(migrate, bootstrap, false).await
+}
+
+/// Kernel + Wave 2s.1 + slice migrators, then attach [`KERNEL_AUDIT_RELS`] and
+/// [`SLICE_AUDIT_RELS`]. Slice DDL runs *before* attach so `datum.schema_history`
+/// inserts are not judged by `zz_audit_row`.
+pub async fn install_slice(migrate: &datum_db::Pool, bootstrap: &datum_db::Pool) -> Result<()> {
+    install_kernel_inner(migrate, bootstrap, true).await
+}
+
+async fn install_kernel_inner(
+    migrate: &datum_db::Pool,
+    bootstrap: &datum_db::Pool,
+    slice: bool,
+) -> Result<()> {
     migrate_prefix(migrate).await?;
     datum_audit::install_privileged(bootstrap).await?;
     datum_db::migrate::run(migrate, &[("datum-identity", &datum_identity::MIGRATOR)])
@@ -191,7 +228,13 @@ pub async fn install_kernel(migrate: &datum_db::Pool, bootstrap: &datum_db::Pool
             .map_err(|e| Error::Manifest(format!("migrate {name}: {e}")))?;
     }
     crate::install_graph::migrate_wave_2s1_modules(migrate).await?;
+    if slice {
+        crate::install_graph::migrate_slice_modules(migrate).await?;
+    }
     attach_kernel_audit(migrate).await?;
+    if slice {
+        attach_slice_audit(migrate).await?;
+    }
     datum_audit::install_privileged(bootstrap).await?;
     Ok(())
 }
