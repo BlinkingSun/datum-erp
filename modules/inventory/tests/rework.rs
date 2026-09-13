@@ -4,19 +4,19 @@
 
 mod common;
 
-use datum_core::Identifier;
-use datum_db::Tx;
-use datum_mod_inventory::{
+use sqlx::query_scalar as sql_query_scalar;
+use wicket_core::Identifier;
+use wicket_db::Tx;
+use wicket_mod_inventory::{
     ADJUSTED, AdjustRequest, BalanceQuery, CountLine, CountRequest, DOC_TYPE, IssueRequest,
     LineInput, MoveRequest, RECEIPT_POSTED, ReceiveRequest, ReleaseRequest, ReturnRequest,
     ShipRequest, adjust, available, customer_return, cycle_count, error_code, http_status,
     issue_to_wip, move_stock, on_hand, receive, release_from_quarantine, reverse_posted_issue,
     ship_to_customer, void_document,
 };
-use datum_module::Profile;
-use datum_statemachine::DocRef;
-use datum_test::db_case;
-use sqlx::query_scalar as sql_query_scalar;
+use wicket_module::Profile;
+use wicket_statemachine::DocRef;
+use wicket_test::db_case;
 
 use common::{
     World, action_ctx, boot_kernel, boot_kernel_with, consumption_count, dec, group_kind, line,
@@ -24,7 +24,7 @@ use common::{
     seed_world, usd, write_pool,
 };
 
-async fn seed_fg_screws(w: &World, pool: &datum_db::WritePool) {
+async fn seed_fg_screws(w: &World, pool: &wicket_db::WritePool) {
     let ctx = action_ctx(w, "inventory.receive");
     let mut tx = Tx::begin(pool, &ctx).await.expect("begin");
     receive(
@@ -45,9 +45,9 @@ async fn seed_fg_screws(w: &World, pool: &datum_db::WritePool) {
     tx.commit().await.expect("commit");
 }
 
-fn assert_idempotency_conflict(err: datum_mod_inventory::Error) {
+fn assert_idempotency_conflict(err: wicket_mod_inventory::Error) {
     assert!(
-        matches!(err, datum_mod_inventory::Error::IdempotencyConflict),
+        matches!(err, wicket_mod_inventory::Error::IdempotencyConflict),
         "got {err}"
     );
     assert_eq!(error_code(&err), "IDEMPOTENCY_CONFLICT");
@@ -67,7 +67,7 @@ async fn lot_less_move_without_line_amount_posts_from_cost_layers() {
         &mut tx,
         &w.kernel,
         &ctx,
-        datum_mod_inventory::MoveRequest {
+        wicket_mod_inventory::MoveRequest {
             from_location: w.fg,
             to_location: w.available,
             reference: Some("lot-less-move".into()),
@@ -88,7 +88,7 @@ async fn lot_less_move_without_line_amount_posts_from_cost_layers() {
     .await
     .expect("move");
     tx.commit().await.expect("commit");
-    assert_eq!(doc.status, datum_mod_inventory::DocumentStatus::Posted);
+    assert_eq!(doc.status, wicket_mod_inventory::DocumentStatus::Posted);
     let group = doc.posted_group_id.expect("group");
     assert_eq!(group_kind(db.app_pool(), group.as_uuid()).await, "MOVEMENT");
     db.finish().await.expect("finish");
@@ -515,7 +515,7 @@ async fn idempotency_customer_return_conflict() {
     let w = seed_world(&db, kernel).await;
     let pool = write_pool(&db);
     seed_fg_screws(&w, &pool).await;
-    let order = datum_core::Identifier::generate();
+    let order = wicket_core::Identifier::generate();
     let ctx = action_ctx(&w, "inventory.issue");
     let mut tx = Tx::begin(&pool, &ctx).await.expect("begin");
     ship_to_customer(
@@ -578,7 +578,7 @@ async fn idempotency_ship_conflict() {
     let pool = write_pool(&db);
     seed_fg_screws(&w, &pool).await;
     let key = uuid::Uuid::now_v7();
-    let order = datum_core::Identifier::generate();
+    let order = wicket_core::Identifier::generate();
     let ctx = action_ctx(&w, "inventory.issue");
     let mut tx = Tx::begin(&pool, &ctx).await.expect("begin");
     ship_to_customer(
@@ -677,7 +677,7 @@ async fn issue_refuses_quarantined_lot_with_typed_error() {
     )
     .await
     .expect_err("quarantine");
-    assert!(matches!(err, datum_mod_inventory::Error::LotNotIssuable));
+    assert!(matches!(err, wicket_mod_inventory::Error::LotNotIssuable));
     db.finish().await.expect("finish");
 }
 
@@ -725,7 +725,7 @@ async fn issue_reversal_restores_consumption() {
         common::reason_code(db.app_pool(), residual)
             .await
             .as_deref(),
-        Some(datum_ledger::UOM_CONVERSION_RESIDUAL)
+        Some(wicket_ledger::UOM_CONVERSION_RESIDUAL)
     );
     let tag: String =
         sql_query_scalar("SELECT source_kind FROM ledger.posting_group WHERE group_id = $1")
@@ -860,7 +860,7 @@ async fn void_document_updates_status_and_is_audited() {
         .await
         .expect("void");
     tx.commit().await.expect("commit");
-    assert_eq!(voided.status, datum_mod_inventory::DocumentStatus::Voided);
+    assert_eq!(voided.status, wicket_mod_inventory::DocumentStatus::Voided);
     let n: i64 = sql_query_scalar(
         "SELECT count(*) FROM audit.event WHERE table_name = 'document' AND op = 'UPDATE'",
     )
@@ -947,7 +947,7 @@ async fn adjust_publishes_adjusted_event() {
     db.finish().await.expect("finish");
 }
 
-async fn assert_config_version_on_profile(db: &datum_test::TestDb, profile: Profile) {
+async fn assert_config_version_on_profile(db: &wicket_test::TestDb, profile: Profile) {
     let spec = profile.spec_version.clone();
     let kernel = boot_kernel_with(db, profile).await;
     assert_eq!(kernel.profile.spec_version, spec);

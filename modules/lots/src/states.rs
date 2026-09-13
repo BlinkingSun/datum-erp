@@ -1,12 +1,12 @@
 //! Lot status machine. Edges are declared in `module.toml` and registered through
-//! [`datum_module::KernelBuilder`]. This module never posts; the inventory module
+//! [`wicket_module::KernelBuilder`]. This module never posts; the inventory module
 //! posts the quarantine/available movement.
 
-use datum_core::{
+use wicket_core::{
     Identifier, LotId, PermissionKey, SerialId, SignatureMeaning, SignatureRequirement,
 };
-use datum_module::Profile;
-use datum_statemachine::{DocRef, EdgeBuilder, Machine};
+use wicket_module::Profile;
+use wicket_statemachine::{DocRef, EdgeBuilder, Machine};
 
 use crate::domain::LotStatus;
 use crate::error::Result;
@@ -24,7 +24,7 @@ pub const STATES: &[LotStatus] = &[
 
 /// Build the lot machine. Under regulated-device, `release` is a Required edge.
 pub fn lot_machine(profile: &Profile) -> Result<Machine> {
-    let regulated = profile.id == datum_module::ProfileId::RegulatedDevice;
+    let regulated = profile.id == wicket_module::ProfileId::RegulatedDevice;
     let mut b = Machine::builder(DOC_TYPE).regulated(regulated);
     for s in STATES {
         b = b.state(s.as_str());

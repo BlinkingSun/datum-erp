@@ -4,16 +4,16 @@
 
 mod common;
 
-use datum_core::{ItemId, LotId};
-use datum_db::Tx;
-use datum_mod_lots::{
+use wicket_core::{ItemId, LotId};
+use wicket_db::Tx;
+use wicket_mod_lots::{
     CreateLot, CreateLotBody, Expiry, ExpiryPrecision, ExpiryWire, LotStatus, PackageLevel,
     StatusTarget, UdiTarget, attach_udi, create_lot, create_package, create_serials,
     list_serials as list_serials_http, package_hierarchy, resolve, set_status, trace_keys,
     validate_identifier,
 };
-use datum_module::{Kernel, Profile};
-use datum_test::db_case;
+use wicket_module::{Kernel, Profile};
+use wicket_test::db_case;
 
 #[tokio::test]
 async fn lot_number_charset_and_length_enforced() {
@@ -40,7 +40,7 @@ async fn lot_number_charset_and_length_enforced() {
     )
     .await
     .unwrap_err();
-    assert!(matches!(err, datum_mod_lots::Error::InvalidIdentifier(_)));
+    assert!(matches!(err, wicket_mod_lots::Error::InvalidIdentifier(_)));
 
     let err = create_lot(
         &mut tx,
@@ -54,7 +54,7 @@ async fn lot_number_charset_and_length_enforced() {
     )
     .await
     .unwrap_err();
-    assert!(matches!(err, datum_mod_lots::Error::Numbering(_)));
+    assert!(matches!(err, wicket_mod_lots::Error::Numbering(_)));
 
     let err = create_lot(
         &mut tx,
@@ -68,7 +68,7 @@ async fn lot_number_charset_and_length_enforced() {
     )
     .await
     .unwrap_err();
-    assert!(matches!(err, datum_mod_lots::Error::Numbering(_)));
+    assert!(matches!(err, wicket_mod_lots::Error::Numbering(_)));
 
     let err = create_lot(
         &mut tx,
@@ -82,7 +82,7 @@ async fn lot_number_charset_and_length_enforced() {
     )
     .await
     .unwrap_err();
-    assert!(matches!(err, datum_mod_lots::Error::Numbering(_)));
+    assert!(matches!(err, wicket_mod_lots::Error::Numbering(_)));
 
     tx.rollback().await.unwrap();
 
@@ -157,7 +157,7 @@ async fn supplier_lot_is_a_cross_reference_not_the_id() {
     let id = resolve(&mut tx, "LOT-BAR-24-4412").await.unwrap();
     assert_eq!(id, lot.id);
     let err = resolve(&mut tx, "ATI-HEAT-XYZ").await.unwrap_err();
-    assert!(matches!(err, datum_mod_lots::Error::UnknownNumber(_)));
+    assert!(matches!(err, wicket_mod_lots::Error::UnknownNumber(_)));
     tx.commit().await.unwrap();
     db.finish().await.unwrap();
 }
@@ -251,7 +251,7 @@ async fn expiry_month_precision_survives_round_trip() {
     assert_eq!(lot.expiry.unwrap().date.to_string(), "2026-09-01");
     assert_eq!(lot.expiry.unwrap().precision, ExpiryPrecision::Month);
 
-    let body = datum_mod_lots::LotBody::from(lot.clone());
+    let body = wicket_mod_lots::LotBody::from(lot.clone());
     assert_eq!(body.expiry.as_ref().unwrap().value, "2026-09");
     assert_eq!(
         body.expiry.as_ref().unwrap().precision,
@@ -439,9 +439,9 @@ async fn udi_attachment_columns_are_nullable_and_settable() {
     )
     .await
     .unwrap();
-    let lot = datum_mod_lots::load_lot(&mut tx, lot.id).await.unwrap();
+    let lot = wicket_mod_lots::load_lot(&mut tx, lot.id).await.unwrap();
     assert_eq!(lot.udi_device_identifier.as_deref(), Some("00850027865010"));
-    let serial = datum_mod_lots::load_serial(&mut tx, serials[0].id)
+    let serial = wicket_mod_lots::load_serial(&mut tx, serials[0].id)
         .await
         .unwrap();
     assert_eq!(
@@ -453,7 +453,7 @@ async fn udi_attachment_columns_are_nullable_and_settable() {
 }
 
 #[tokio::test]
-async fn every_lots_table_is_audited_and_owned_by_datum_owner() {
+async fn every_lots_table_is_audited_and_owned_by_wicket_owner() {
     let db = db_case!("lots_audited");
     common::migrate(&db).await;
     for table in ["lot", "serial", "package", "status_history"] {
@@ -463,7 +463,7 @@ async fn every_lots_table_is_audited_and_owned_by_datum_owner() {
         );
         assert_eq!(
             common::table_owner(db.migrate_pool(), "lots", table).await,
-            "datum_owner",
+            "wicket_owner",
             "{table} owner"
         );
     }
@@ -546,7 +546,7 @@ async fn module_registers_through_kernel_extension_points() {
     let db = db_case!("lots_kernel");
     common::migrate_kernel(&db).await;
     let mut builder = Kernel::builder(db.app_pool().clone(), Profile::plain_shop().unwrap());
-    datum_mod_lots::register(&mut builder, &Profile::plain_shop().unwrap()).unwrap();
+    wicket_mod_lots::register(&mut builder, &Profile::plain_shop().unwrap()).unwrap();
     let kernel = builder.build().await.expect("kernel build");
     assert!(
         kernel
@@ -566,7 +566,7 @@ async fn http_create_renders_month_expiry() {
     let write = common::write_pool(&db);
     let ctx = common::write_ctx("lots.edit");
     let mut tx = Tx::begin(&write, &ctx).await.unwrap();
-    let body = datum_mod_lots::create_lot_http(
+    let body = wicket_mod_lots::create_lot_http(
         &mut tx,
         &kernel,
         &ctx,
@@ -617,7 +617,7 @@ async fn expiry_day_precision_survives_round_trip() {
     .await
     .unwrap();
     assert_eq!(lot.expiry.unwrap().date.to_string(), "2029-03-18");
-    let body = datum_mod_lots::LotBody::from(lot);
+    let body = wicket_mod_lots::LotBody::from(lot);
     assert_eq!(body.expiry.as_ref().unwrap().value, "2029-03-18");
     assert_eq!(
         body.expiry.as_ref().unwrap().precision,

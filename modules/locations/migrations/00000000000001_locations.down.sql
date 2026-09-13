@@ -3,6 +3,6 @@
 DROP TABLE IF EXISTS locations.location;
 DROP TABLE IF EXISTS locations.site;
 
-DELETE FROM datum.schema_class WHERE nspname = 'locations';
+DELETE FROM wicket.schema_class WHERE nspname = 'locations';
 
 DROP SCHEMA IF EXISTS locations;

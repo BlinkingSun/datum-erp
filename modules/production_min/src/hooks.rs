@@ -1,12 +1,12 @@
 //! Start (`production.issue`) registers a hook that contributes inventory issue
 //! postings on the transition's bound [`PostingSink`] (R-2s-7).
 //!
-//! The plan itself is Tx-scoped in `datum-mod-inventory` (keyed by
+//! The plan itself is Tx-scoped in `wicket-mod-inventory` (keyed by
 //! `pg_current_xact_id`), not a process-global map.
 
-use datum_mod_inventory::{contribute_wip_issue, take_wip_issue_plan};
-use datum_module::KernelBuilder;
-use datum_statemachine::Veto;
+use wicket_mod_inventory::{contribute_wip_issue, take_wip_issue_plan};
+use wicket_module::KernelBuilder;
+use wicket_statemachine::Veto;
 
 use crate::domain::DOC_TYPE;
 use crate::error::Result;

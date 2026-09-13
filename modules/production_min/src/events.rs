@@ -1,9 +1,9 @@
 //! Typed events. Subscriptions are declared in `module.toml` and registered
 //! through `KernelBuilder::apply_manifest` / `events.subscribe`.
 
-use datum_core::{Identifier, LotId};
-use datum_events::{Event, EventSchema, Field};
 use serde_json::json;
+use wicket_core::{Identifier, LotId};
+use wicket_events::{Event, EventSchema, Field};
 
 use crate::error::Result;
 
@@ -14,12 +14,12 @@ pub const COMPLETED: &str = "production.completed";
 
 /// Register payload contracts on the process-global schema registry.
 pub fn register_schemas() -> Result<()> {
-    datum_events::schema::register(EventSchema {
+    wicket_events::schema::register(EventSchema {
         name: WORK_ORDER_RELEASED.into(),
         version: 1,
         fields: vec![Field::required("work_order_id"), Field::required("number")],
     })?;
-    datum_events::schema::register(EventSchema {
+    wicket_events::schema::register(EventSchema {
         name: COMPLETED.into(),
         version: 1,
         fields: vec![

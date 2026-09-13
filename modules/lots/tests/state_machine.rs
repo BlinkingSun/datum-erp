@@ -4,20 +4,20 @@
 
 mod common;
 
-use datum_core::{PermissionKey, SignatureMeaning, SignatureRequirement};
-use datum_db::Tx;
-use datum_mod_lots::{
+use wicket_core::{PermissionKey, SignatureMeaning, SignatureRequirement};
+use wicket_db::Tx;
+use wicket_mod_lots::{
     CreateLot, DOC_TYPE, Error, Lot, LotStatus, StatusTarget, create_lot, load_lot, manifest,
     register_schemas, set_status,
 };
-use datum_module::{Kernel, Profile};
-use datum_statemachine::{EdgeBuilder, Engine, Machine};
+use wicket_module::{Kernel, Profile};
+use wicket_statemachine::{EdgeBuilder, Engine, Machine};
 
 use crate::common::{
     actor_with_lots_perms, boot_kernel, edge_ctx, sm_instance_count, write_ctx, write_pool,
 };
 
-async fn lot_in_quarantine(db: &datum_test::TestDb, kernel: &Kernel) -> Lot {
+async fn lot_in_quarantine(db: &wicket_test::TestDb, kernel: &Kernel) -> Lot {
     let write = write_pool(db);
     let ctx = write_ctx("lots.edit");
     let mut tx = Tx::begin(&write, &ctx).await.unwrap();
@@ -26,7 +26,7 @@ async fn lot_in_quarantine(db: &datum_test::TestDb, kernel: &Kernel) -> Lot {
         kernel,
         &ctx,
         CreateLot {
-            item: datum_core::ItemId::generate(),
+            item: wicket_core::ItemId::generate(),
             number: Some("LOT-BAR-24-4412".into()),
             status: LotStatus::Quarantine,
             ..CreateLot::default()
@@ -39,7 +39,7 @@ async fn lot_in_quarantine(db: &datum_test::TestDb, kernel: &Kernel) -> Lot {
 }
 
 async fn transition(
-    db: &datum_test::TestDb,
+    db: &wicket_test::TestDb,
     kernel: &Kernel,
     lot: Lot,
     edge: &str,
@@ -70,7 +70,7 @@ async fn transition(
 
 #[tokio::test]
 async fn lot_spawn_on_create_registers_sm_instance() {
-    let db = datum_test::db_case!("sm_spawn");
+    let db = wicket_test::db_case!("sm_spawn");
     let kernel = boot_kernel(&db).await;
     let lot = lot_in_quarantine(&db, &kernel).await;
     assert_eq!(
@@ -83,7 +83,7 @@ async fn lot_spawn_on_create_registers_sm_instance() {
 
 #[tokio::test]
 async fn lot_edge_release_quarantine_to_available() {
-    let db = datum_test::db_case!("sm_release");
+    let db = wicket_test::db_case!("sm_release");
     let kernel = boot_kernel(&db).await;
     let lot = lot_in_quarantine(&db, &kernel).await;
     let out = transition(&db, &kernel, lot, "release", LotStatus::Available).await;
@@ -93,7 +93,7 @@ async fn lot_edge_release_quarantine_to_available() {
 
 #[tokio::test]
 async fn lot_edge_hold_available_to_hold() {
-    let db = datum_test::db_case!("sm_hold");
+    let db = wicket_test::db_case!("sm_hold");
     let kernel = boot_kernel(&db).await;
     let lot = lot_in_quarantine(&db, &kernel).await;
     let lot = transition(&db, &kernel, lot, "release", LotStatus::Available).await;
@@ -104,7 +104,7 @@ async fn lot_edge_hold_available_to_hold() {
 
 #[tokio::test]
 async fn lot_edge_unhold_hold_to_available() {
-    let db = datum_test::db_case!("sm_unhold");
+    let db = wicket_test::db_case!("sm_unhold");
     let kernel = boot_kernel(&db).await;
     let lot = lot_in_quarantine(&db, &kernel).await;
     let lot = transition(&db, &kernel, lot, "release", LotStatus::Available).await;
@@ -116,7 +116,7 @@ async fn lot_edge_unhold_hold_to_available() {
 
 #[tokio::test]
 async fn lot_edge_reject_from_quarantine() {
-    let db = datum_test::db_case!("sm_rej_q");
+    let db = wicket_test::db_case!("sm_rej_q");
     let kernel = boot_kernel(&db).await;
     let lot = lot_in_quarantine(&db, &kernel).await;
     let out = transition(
@@ -133,7 +133,7 @@ async fn lot_edge_reject_from_quarantine() {
 
 #[tokio::test]
 async fn lot_edge_reject_from_available() {
-    let db = datum_test::db_case!("sm_rej_a");
+    let db = wicket_test::db_case!("sm_rej_a");
     let kernel = boot_kernel(&db).await;
     let lot = lot_in_quarantine(&db, &kernel).await;
     let lot = transition(&db, &kernel, lot, "release", LotStatus::Available).await;
@@ -144,7 +144,7 @@ async fn lot_edge_reject_from_available() {
 
 #[tokio::test]
 async fn lot_edge_reject_from_hold() {
-    let db = datum_test::db_case!("sm_rej_h");
+    let db = wicket_test::db_case!("sm_rej_h");
     let kernel = boot_kernel(&db).await;
     let lot = lot_in_quarantine(&db, &kernel).await;
     let lot = transition(&db, &kernel, lot, "release", LotStatus::Available).await;
@@ -156,7 +156,7 @@ async fn lot_edge_reject_from_hold() {
 
 #[tokio::test]
 async fn lot_illegal_jump_quarantine_to_hold_is_refused() {
-    let db = datum_test::db_case!("sm_bad_jump");
+    let db = wicket_test::db_case!("sm_bad_jump");
     let kernel = boot_kernel(&db).await;
     let lot = lot_in_quarantine(&db, &kernel).await;
     let write = write_pool(&db);
@@ -175,7 +175,7 @@ async fn lot_illegal_jump_quarantine_to_hold_is_refused() {
     .unwrap_err();
     assert!(
         matches!(err, Error::InvalidTransition { .. })
-            || matches!(err, Error::Module(datum_module::Error::Statemachine(_))),
+            || matches!(err, Error::Module(wicket_module::Error::Statemachine(_))),
         "got {err:?}"
     );
     tx.rollback().await.unwrap();
@@ -191,7 +191,7 @@ async fn lot_illegal_jump_quarantine_to_hold_is_refused() {
 
 #[tokio::test]
 async fn lot_release_plain_profile_not_required_under_no_signatures() {
-    let db = datum_test::db_case!("sm_plain_rel");
+    let db = wicket_test::db_case!("sm_plain_rel");
     let kernel = boot_kernel(&db).await;
     assert!(
         kernel.profile.required_edges().is_empty(),
@@ -204,7 +204,7 @@ async fn lot_release_plain_profile_not_required_under_no_signatures() {
 
 #[tokio::test]
 async fn lot_release_regulated_profile_refuses_under_no_signatures() {
-    let db = datum_test::db_case!("sm_reg_rel");
+    let db = wicket_test::db_case!("sm_reg_rel");
     common::migrate_kernel(&db).await;
     let req = SignatureRequirement {
         meaning: SignatureMeaning("Released".into()),
@@ -245,11 +245,11 @@ async fn lot_release_regulated_profile_refuses_under_no_signatures() {
     eng.freeze().unwrap();
     let profile = Profile::regulated_device()
         .unwrap()
-        .with_registry_edges(datum_module::edges_from_registry(&eng));
+        .with_registry_edges(wicket_module::edges_from_registry(&eng));
     assert!(
         profile.required_edges().iter().any(|e| matches!(
             e,
-            datum_module::SignatureEdge::Required { edge, .. } if edge == "release"
+            wicket_module::SignatureEdge::Required { edge, .. } if edge == "release"
         )),
         "regulated profile lists Required release"
     );
@@ -308,7 +308,7 @@ async fn lot_release_regulated_profile_refuses_under_no_signatures() {
         &kernel,
         &ctx,
         CreateLot {
-            item: datum_core::ItemId::generate(),
+            item: wicket_core::ItemId::generate(),
             number: Some("LOT-BAR-24-4412".into()),
             status: LotStatus::Quarantine,
             ..CreateLot::default()
@@ -340,13 +340,13 @@ async fn lot_release_regulated_profile_refuses_under_no_signatures() {
     assert!(
         matches!(
             err,
-            Error::Module(datum_module::Error::Statemachine(
-                datum_statemachine::Error::Signature(datum_core::SignatureError::NoProvider)
+            Error::Module(wicket_module::Error::Statemachine(
+                wicket_statemachine::Error::Signature(wicket_core::SignatureError::NoProvider)
             ))
         ) || matches!(
             err,
-            Error::Module(datum_module::Error::Statemachine(
-                datum_statemachine::Error::Signature(datum_core::SignatureError::Invalid(_))
+            Error::Module(wicket_module::Error::Statemachine(
+                wicket_statemachine::Error::Signature(wicket_core::SignatureError::Invalid(_))
             ))
         ),
         "typed signature refusal under NoSignatures, got {err:?}"

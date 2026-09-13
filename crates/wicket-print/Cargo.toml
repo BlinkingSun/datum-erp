@@ -1,0 +1,38 @@
+[package]
+name = "wicket-print"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Deterministic record rendering and archival print (HTML/PDF)."
+build = "build.rs"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+test-utils = []
+
+[dependencies]
+wicket-core.workspace = true
+wicket-db.workspace = true
+wicket-audit.workspace = true
+wicket-documents.workspace = true
+wicket-esign.workspace = true
+pdf-writer.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+wicket-test.workspace = true
+wicket-identity.workspace = true
+wicket-statemachine.workspace = true
+wicket-numbering.workspace = true
+tokio.workspace = true
+proptest.workspace = true
+

@@ -1,6 +1,6 @@
 //! Crate error type.
 
-use datum_core::ItemId;
+use wicket_core::ItemId;
 
 /// Crate result alias.
 pub type Result<T> = core::result::Result<T, Error>;
@@ -14,25 +14,25 @@ pub enum Error {
     Unimplemented,
     /// Core error.
     #[error(transparent)]
-    Core(#[from] datum_core::Error),
+    Core(#[from] wicket_core::Error),
     /// Database error.
     #[error(transparent)]
-    Db(#[from] datum_db::Error),
+    Db(#[from] wicket_db::Error),
     /// Ledger registry or posting error.
     #[error(transparent)]
-    Ledger(#[from] datum_ledger::Error),
+    Ledger(#[from] wicket_ledger::Error),
     /// Unit catalog error.
     #[error(transparent)]
-    Uom(#[from] datum_uom::Error),
+    Uom(#[from] wicket_uom::Error),
     /// Event publish / schema error.
     #[error(transparent)]
-    Events(#[from] datum_events::Error),
+    Events(#[from] wicket_events::Error),
     /// State-machine error.
     #[error(transparent)]
-    Statemachine(#[from] datum_statemachine::Error),
+    Statemachine(#[from] wicket_statemachine::Error),
     /// Composition-root error.
     #[error(transparent)]
-    Module(#[from] datum_module::Error),
+    Module(#[from] wicket_module::Error),
     /// JSON error.
     #[error(transparent)]
     Json(#[from] serde_json::Error),

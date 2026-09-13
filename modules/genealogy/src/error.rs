@@ -12,34 +12,34 @@ pub enum Error {
     Unimplemented,
     /// Core error.
     #[error(transparent)]
-    Core(#[from] datum_core::Error),
+    Core(#[from] wicket_core::Error),
     /// Database error.
     #[error(transparent)]
-    Db(#[from] datum_db::Error),
+    Db(#[from] wicket_db::Error),
     /// Ledger trace API.
     #[error(transparent)]
-    Ledger(#[from] datum_ledger::Error),
+    Ledger(#[from] wicket_ledger::Error),
     /// Event subscribe / publish.
     #[error(transparent)]
-    Events(#[from] datum_events::Error),
+    Events(#[from] wicket_events::Error),
     /// Background jobs.
     #[error(transparent)]
-    Jobs(#[from] datum_jobs::Error),
+    Jobs(#[from] wicket_jobs::Error),
     /// Composition root.
     #[error(transparent)]
-    Module(#[from] datum_module::Error),
+    Module(#[from] wicket_module::Error),
     /// Inventory published interface.
     #[error(transparent)]
-    Inventory(#[from] datum_mod_inventory::Error),
+    Inventory(#[from] wicket_mod_inventory::Error),
     /// Items published interface.
     #[error(transparent)]
-    Items(#[from] datum_mod_items::Error),
+    Items(#[from] wicket_mod_items::Error),
     /// Locations published interface.
     #[error(transparent)]
-    Locations(#[from] datum_mod_locations::Error),
+    Locations(#[from] wicket_mod_locations::Error),
     /// Lots published interface.
     #[error(transparent)]
-    Lots(#[from] datum_mod_lots::Error),
+    Lots(#[from] wicket_mod_lots::Error),
     /// JSON / serde failure.
     #[error(transparent)]
     Json(#[from] serde_json::Error),

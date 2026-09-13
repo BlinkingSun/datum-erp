@@ -1,0 +1,48 @@
+[package]
+name = "wicket-module"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Composition root: wires PostingSink and SignatureGate."
+build = "build.rs"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+test-utils = []
+
+[dependencies]
+wicket-audit.workspace = true
+wicket-core.workspace = true
+wicket-customfields.workspace = true
+wicket-db.workspace = true
+wicket-documents.workspace = true
+wicket-esign.workspace = true
+wicket-events.workspace = true
+wicket-identity.workspace = true
+wicket-jobs.workspace = true
+wicket-ledger.workspace = true
+wicket-numbering.workspace = true
+wicket-print.workspace = true
+wicket-statemachine.workspace = true
+wicket-uom.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+wicket-mod-items = { path = "../../modules/items" }
+wicket-mod-locations = { path = "../../modules/locations" }
+wicket-mod-lots = { path = "../../modules/lots" }
+wicket-ledger.workspace = true
+wicket-test.workspace = true
+tokio.workspace = true
+proptest.workspace = true
+rust_decimal.workspace = true
+serde_json.workspace = true
+chrono.workspace = true

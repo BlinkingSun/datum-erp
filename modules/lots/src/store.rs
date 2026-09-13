@@ -1,14 +1,14 @@
-//! Persistence. Every mutation runs inside [`datum_db::Tx`].
+//! Persistence. Every mutation runs inside [`wicket_db::Tx`].
 
 use chrono::{DateTime, NaiveDate, Utc};
-use datum_core::{
+use rust_decimal::Decimal;
+use uuid::Uuid;
+use wicket_core::{
     Actor, AnyQuantity, DimensionKind, Identifier, ItemId, LotId, RecordRef, SerialId, SignatureId,
     SignatureMeaning, SignatureToken, UnitId,
 };
-use datum_db::{Tx, WriteContext};
-use datum_module::Kernel;
-use rust_decimal::Decimal;
-use uuid::Uuid;
+use wicket_db::{Tx, WriteContext};
+use wicket_module::Kernel;
 
 use crate::domain::{
     CreateLot, DEFAULT_LOT_TEMPLATE, DEFAULT_SERIAL_TEMPLATE, Expiry, ExpiryPrecision, Lot,
@@ -36,7 +36,7 @@ pub async fn create_lot(
         }
         None => {
             let template = spec.template.as_deref().unwrap_or(DEFAULT_LOT_TEMPLATE);
-            datum_numbering::lot::generate(tx, template).await?
+            wicket_numbering::lot::generate(tx, template).await?
         }
     };
     let (app_version, config_version) = stamps(tx).await?;
@@ -72,7 +72,7 @@ pub async fn create_lot(
         .spawn(tx, &doc_ref_lot(id), LotStatus::Quarantine.as_str())
         .await?;
     let event = events::lot_created(id, spec.item, &number)?;
-    datum_events::publish(tx, event).await?;
+    wicket_events::publish(tx, event).await?;
     if spec.status != LotStatus::Quarantine {
         let _ = (kernel, ctx);
         return Err(Error::InvalidTransition {
@@ -96,7 +96,7 @@ pub async fn create_serials(
     let (app_version, config_version) = stamps(tx).await?;
     let mut out = Vec::with_capacity(n as usize);
     for _ in 0..n {
-        let number = datum_numbering::serial::generate(tx, template).await?;
+        let number = wicket_numbering::serial::generate(tx, template).await?;
         let id = SerialId::generate();
         tx.execute(
             sqlx::query(
@@ -128,19 +128,19 @@ pub async fn create_serials(
     if !out.is_empty() {
         let ids: Vec<SerialId> = out.iter().map(|s| s.id).collect();
         let event = events::serials_created(lot, &ids)?;
-        datum_events::publish(tx, event).await?;
+        wicket_events::publish(tx, event).await?;
     }
     Ok(out)
 }
 
-/// Token bound on this `Tx` as `datum.esign_id` (D-2b-1 / HTTP `X-Datum-Signature`).
+/// Token bound on this `Tx` as `wicket.esign_id` (D-2b-1 / HTTP `X-Wicket-Signature`).
 /// Empty GUC is `None` so a Required edge reports `Invalid("missing token")`.
 async fn bound_edge_token(
     tx: &mut Tx<'_>,
     kernel: &Kernel,
     actor: Actor,
 ) -> Result<Option<SignatureToken>> {
-    let raw = tx.setting("datum.esign_id").await?;
+    let raw = tx.setting("wicket.esign_id").await?;
     if raw.is_empty() {
         return Ok(None);
     }
@@ -237,7 +237,7 @@ pub async fn set_status(
             )
             .await?;
             let event = events::status_changed(Some(id), None, Some(from), status, reason)?;
-            datum_events::publish(tx, event).await?;
+            wicket_events::publish(tx, event).await?;
             Ok(StatusHistory {
                 id: hid,
                 lot: Some(id),
@@ -275,7 +275,7 @@ pub async fn set_status(
             )
             .await?;
             let event = events::status_changed(None, Some(id), Some(from), status, reason)?;
-            datum_events::publish(tx, event).await?;
+            wicket_events::publish(tx, event).await?;
             Ok(StatusHistory {
                 id: hid,
                 lot: None,
@@ -773,7 +773,7 @@ fn parse_dimension(s: &str) -> Result<DimensionKind> {
         "Time" => Ok(DimensionKind::Time),
         "Volume" => Ok(DimensionKind::Volume),
         "Area" => Ok(DimensionKind::Area),
-        other => Err(Error::Core(datum_core::Error::Invariant(format!(
+        other => Err(Error::Core(wicket_core::Error::Invariant(format!(
             "unknown dimension {other}"
         )))),
     }

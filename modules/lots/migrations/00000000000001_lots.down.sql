@@ -7,4 +7,4 @@ DROP TABLE IF EXISTS lots.lot;
 
 DROP SCHEMA IF EXISTS lots;
 
-DELETE FROM datum.schema_class WHERE nspname = 'lots';
+DELETE FROM wicket.schema_class WHERE nspname = 'lots';

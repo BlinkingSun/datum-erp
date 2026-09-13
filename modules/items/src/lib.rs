@@ -1,17 +1,17 @@
 //! Part master module (`items`).
 //!
-//! Writes go through [`datum_db::Tx`]. SQL uses `sqlx::query` / `query_as` /
+//! Writes go through [`wicket_db::Tx`]. SQL uses `sqlx::query` / `query_as` /
 //! `query_scalar` (CONTRACT §5a as amended). Session-protocol helpers stay
-//! confined to `datum-db` / `datum-audit` / `datum-test`.
+//! confined to `wicket-db` / `wicket-audit` / `wicket-test`.
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 #[cfg(test)]
-use datum_audit as _;
-#[cfg(test)]
-use datum_identity as _;
-#[cfg(test)]
 use tokio as _;
+#[cfg(test)]
+use wicket_audit as _;
+#[cfg(test)]
+use wicket_identity as _;
 
 pub mod api;
 pub mod domain;
@@ -27,7 +27,7 @@ pub use error::{Error, Result};
 pub use states::item_machine;
 pub use store::{create, get, list, obsolete, release, update};
 
-use datum_module::{KernelBuilder, ModuleManifest, Profile};
+use wicket_module::{KernelBuilder, ModuleManifest, Profile};
 
 /// Embedded migrator (`placeholder` + `0001_items` + `0002_drop_item_has_postings` + `0003_revision_history_stamps`).
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
@@ -38,8 +38,8 @@ pub fn manifest() -> Result<ModuleManifest> {
 }
 
 /// Run this crate's migrations on `pool` (after kernel migrators).
-pub async fn migrate(pool: &datum_db::Pool) -> Result<()> {
-    datum_db::migrate::run(pool, &[("datum-mod-items", &MIGRATOR)])
+pub async fn migrate(pool: &wicket_db::Pool) -> Result<()> {
+    wicket_db::migrate::run(pool, &[("wicket-mod-items", &MIGRATOR)])
         .await
         .map_err(Error::from)
 }
@@ -47,7 +47,7 @@ pub async fn migrate(pool: &datum_db::Pool) -> Result<()> {
 /// Register routes, events, and the item state machine on `builder`.
 ///
 /// Machines are registered through [`KernelBuilder::register_machine`] with an
-/// explicit [`datum_statemachine::SignatureDeclaration::NotRequired`] reason
+/// explicit [`wicket_statemachine::SignatureDeclaration::NotRequired`] reason
 /// (the composition-root TOML converter does not preserve `reason` on
 /// non-required edges).
 pub fn register(builder: &mut KernelBuilder, _profile: &Profile) -> Result<()> {
@@ -88,7 +88,7 @@ mod tests {
 
     #[test]
     fn postgres_helper_is_callable() {
-        let _ = datum_test::postgres_available();
+        let _ = wicket_test::postgres_available();
     }
 
     #[test]
@@ -146,7 +146,7 @@ mod tests {
         assert_eq!(m.edges.len(), 2);
         for e in &m.edges {
             match &e.signature {
-                datum_statemachine::SignatureDeclaration::NotRequired { reason } => {
+                wicket_statemachine::SignatureDeclaration::NotRequired { reason } => {
                     assert_eq!(*reason, crate::domain::NOT_REQUIRED_REASON);
                 }
                 other => panic!("expected NotRequired, got {other:?}"),

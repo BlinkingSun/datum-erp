@@ -2,33 +2,33 @@
 -- PostgreSQL schema `lots` is schema-class `app` (records with history: no DELETE).
 -- Reversible. Audited via audit.attach. No ON DELETE CASCADE.
 --
--- Schema is created by datum_migrate so CREATE TABLE can succeed; default
--- privileges grant TRIGGER to datum_owner so audit.attach_new_tables (SECURITY
--- DEFINER, owner datum_owner) can attach at CREATE TABLE time. Tables are then
--- ALTER OWNER TO datum_owner (NOLOGIN).
+-- Schema is created by wicket_migrate so CREATE TABLE can succeed; default
+-- privileges grant TRIGGER to wicket_owner so audit.attach_new_tables (SECURITY
+-- DEFINER, owner wicket_owner) can attach at CREATE TABLE time. Tables are then
+-- ALTER OWNER TO wicket_owner (NOLOGIN).
 
 SELECT
-  pg_catalog.set_config('datum.actor_id',      '00000000-0000-4000-8000-000000000002', true),
-  pg_catalog.set_config('datum.actor_kind',    'migration', true),
-  pg_catalog.set_config('datum.actor_display', 'migration', true),
-  pg_catalog.set_config('datum.txid',          pg_catalog.pg_current_xact_id()::text, true),
-  pg_catalog.set_config('datum.action',        'lots.migrate', true),
-  pg_catalog.set_config('datum.source_kind',   'migration', true);
+  pg_catalog.set_config('wicket.actor_id',      '00000000-0000-4000-8000-000000000002', true),
+  pg_catalog.set_config('wicket.actor_kind',    'migration', true),
+  pg_catalog.set_config('wicket.actor_display', 'migration', true),
+  pg_catalog.set_config('wicket.txid',          pg_catalog.pg_current_xact_id()::text, true),
+  pg_catalog.set_config('wicket.action',        'lots.migrate', true),
+  pg_catalog.set_config('wicket.source_kind',   'migration', true);
 
-CREATE SCHEMA IF NOT EXISTS lots AUTHORIZATION datum_migrate;
+CREATE SCHEMA IF NOT EXISTS lots AUTHORIZATION wicket_migrate;
 
 REVOKE ALL ON SCHEMA lots FROM PUBLIC;
-GRANT USAGE ON SCHEMA lots TO datum_app;
-GRANT USAGE, CREATE ON SCHEMA lots TO datum_migrate, datum_owner;
+GRANT USAGE ON SCHEMA lots TO wicket_app;
+GRANT USAGE, CREATE ON SCHEMA lots TO wicket_migrate, wicket_owner;
 
-ALTER DEFAULT PRIVILEGES FOR ROLE datum_migrate IN SCHEMA lots
-  GRANT SELECT, INSERT, UPDATE ON TABLES TO datum_app;
-ALTER DEFAULT PRIVILEGES FOR ROLE datum_migrate IN SCHEMA lots
-  GRANT TRIGGER ON TABLES TO datum_owner;
-ALTER DEFAULT PRIVILEGES FOR ROLE datum_owner IN SCHEMA lots
-  GRANT SELECT, INSERT, UPDATE ON TABLES TO datum_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE wicket_migrate IN SCHEMA lots
+  GRANT SELECT, INSERT, UPDATE ON TABLES TO wicket_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE wicket_migrate IN SCHEMA lots
+  GRANT TRIGGER ON TABLES TO wicket_owner;
+ALTER DEFAULT PRIVILEGES FOR ROLE wicket_owner IN SCHEMA lots
+  GRANT SELECT, INSERT, UPDATE ON TABLES TO wicket_app;
 
-INSERT INTO datum.schema_class (nspname, class) VALUES ('lots', 'app')
+INSERT INTO wicket.schema_class (nspname, class) VALUES ('lots', 'app')
 ON CONFLICT (nspname) DO UPDATE SET class = EXCLUDED.class;
 
 CREATE TABLE lots.lot (
@@ -69,7 +69,7 @@ CREATE TABLE lots.lot (
       )
     )
 );
-ALTER TABLE lots.lot OWNER TO datum_owner;
+ALTER TABLE lots.lot OWNER TO wicket_owner;
 CREATE UNIQUE INDEX lot_number_unique ON lots.lot (number);
 
 CREATE TABLE lots.serial (
@@ -86,7 +86,7 @@ CREATE TABLE lots.serial (
   CONSTRAINT serial_status_known
     CHECK (status IN ('quarantine', 'available', 'hold', 'rejected'))
 );
-ALTER TABLE lots.serial OWNER TO datum_owner;
+ALTER TABLE lots.serial OWNER TO wicket_owner;
 CREATE UNIQUE INDEX serial_lot_number_unique ON lots.serial (lot_id, number);
 
 CREATE TABLE lots.package (
@@ -107,7 +107,7 @@ CREATE TABLE lots.package (
   CONSTRAINT package_quantity_non_negative
     CHECK (contained_amount >= 0)
 );
-ALTER TABLE lots.package OWNER TO datum_owner;
+ALTER TABLE lots.package OWNER TO wicket_owner;
 CREATE INDEX package_lot_idx ON lots.package (lot_id);
 CREATE INDEX package_parent_idx ON lots.package (parent_id);
 
@@ -129,18 +129,18 @@ CREATE TABLE lots.status_history (
   CONSTRAINT status_history_to_known
     CHECK (to_status IN ('quarantine', 'available', 'hold', 'rejected'))
 );
-ALTER TABLE lots.status_history OWNER TO datum_owner;
+ALTER TABLE lots.status_history OWNER TO wicket_owner;
 
 SELECT audit.attach('lots.lot'::regclass);
 SELECT audit.attach('lots.serial'::regclass);
 SELECT audit.attach('lots.package'::regclass);
 SELECT audit.attach('lots.status_history'::regclass);
 
-GRANT SELECT, INSERT, UPDATE ON lots.lot TO datum_app;
-GRANT SELECT, INSERT, UPDATE ON lots.serial TO datum_app;
-GRANT SELECT, INSERT, UPDATE ON lots.package TO datum_app;
-GRANT SELECT, INSERT ON lots.status_history TO datum_app;
+GRANT SELECT, INSERT, UPDATE ON lots.lot TO wicket_app;
+GRANT SELECT, INSERT, UPDATE ON lots.serial TO wicket_app;
+GRANT SELECT, INSERT, UPDATE ON lots.package TO wicket_app;
+GRANT SELECT, INSERT ON lots.status_history TO wicket_app;
 
 REVOKE DELETE ON lots.lot, lots.serial, lots.package, lots.status_history
-  FROM PUBLIC, datum_app;
-REVOKE UPDATE ON lots.status_history FROM PUBLIC, datum_app;
+  FROM PUBLIC, wicket_app;
+REVOKE UPDATE ON lots.status_history FROM PUBLIC, wicket_app;

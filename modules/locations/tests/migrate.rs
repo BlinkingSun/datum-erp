@@ -1,4 +1,4 @@
-//! Reversible migration tests for `datum-mod-locations`.
+//! Reversible migration tests for `wicket-mod-locations`.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -6,11 +6,11 @@
     missing_docs
 )]
 
-use datum_mod_locations::MIGRATOR;
-use datum_module::{migrate_prefix, migrate_suffix};
-use datum_test::db_case;
 use sqlx::migrate::Migrator;
 use sqlx::query_scalar;
+use wicket_mod_locations::MIGRATOR;
+use wicket_module::{migrate_prefix, migrate_suffix};
+use wicket_test::db_case;
 
 fn locations_migrator() -> Migrator {
     let mut migrator = Migrator::with_migrations(MIGRATOR.iter().cloned().collect());
@@ -18,11 +18,11 @@ fn locations_migrator() -> Migrator {
     migrator
 }
 
-async fn install_kernel_trigger_up(db: &datum_test::TestDb) {
+async fn install_kernel_trigger_up(db: &wicket_test::TestDb) {
     migrate_prefix(db.migrate_pool()).await.expect("prefix");
     migrate_suffix(db.migrate_pool()).await.expect("suffix");
     let boot = db.bootstrap_pool().await.expect("bootstrap");
-    datum_audit::install_privileged(&boot)
+    wicket_audit::install_privileged(&boot)
         .await
         .expect("privileged");
     boot.close().await;

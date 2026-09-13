@@ -1,5 +1,5 @@
 [package]
-name = "datum-mod-items"
+name = "wicket-mod-items"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -16,13 +16,13 @@ default = []
 
 [dependencies]
 chrono.workspace = true
-datum-core.workspace = true
-datum-db.workspace = true
-datum-events.workspace = true
-datum-ledger.workspace = true
-datum-module = { path = "../../crates/datum-module", default-features = false }
-datum-statemachine.workspace = true
-datum-uom.workspace = true
+wicket-core.workspace = true
+wicket-db.workspace = true
+wicket-events.workspace = true
+wicket-ledger.workspace = true
+wicket-module = { path = "../../crates/wicket-module", default-features = false }
+wicket-statemachine.workspace = true
+wicket-uom.workspace = true
 rust_decimal.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -31,8 +31,8 @@ thiserror.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
-datum-audit.workspace = true
-datum-identity.workspace = true
-datum-test.workspace = true
+wicket-audit.workspace = true
+wicket-identity.workspace = true
+wicket-test.workspace = true
 proptest.workspace = true
 tokio.workspace = true

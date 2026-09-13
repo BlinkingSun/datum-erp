@@ -9,16 +9,16 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-use datum_core::{
+use rust_decimal::Decimal;
+use tokio::task::Id;
+use wicket_core::{
     AnyQuantity, CostElement, Identifier, ItemId, LocationId, LotId, Money, PostingError,
     PostingIntent, PostingSink, QuantityPosting, ValueAccount, ValuePosting,
 };
-use datum_db::Tx;
-use datum_ledger::load_open_layers;
-use datum_mod_lots::{LotStatus, load_lot};
-use datum_module::Kernel;
-use rust_decimal::Decimal;
-use tokio::task::Id;
+use wicket_db::Tx;
+use wicket_ledger::load_open_layers;
+use wicket_mod_lots::{LotStatus, load_lot};
+use wicket_module::Kernel;
 
 use crate::domain::{Document, DocumentKind, IssueRequest};
 use crate::error::{Error, Result};
@@ -59,7 +59,7 @@ pub struct PlannedIssueLine {
 /// Explicit consumption edge resolved at plan time.
 #[derive(Debug, Clone)]
 pub struct PlannedConsumption {
-    pub(crate) posting_id: datum_core::PostingId,
+    pub(crate) posting_id: wicket_core::PostingId,
     pub(crate) quantity: AnyQuantity,
     pub(crate) amount: Money,
 }
@@ -83,7 +83,7 @@ pub async fn plan_wip_issue(
             replay_document: Some(doc),
         });
     }
-    let wip = datum_mod_locations::ensure_wip(tx, req.work_order).await?;
+    let wip = wicket_mod_locations::ensure_wip(tx, req.work_order).await?;
     let mut planned = Vec::new();
     let mut residuals = Vec::new();
     for mut line in req.lines.clone() {
@@ -182,12 +182,14 @@ fn contribute_planned_issue_line(
         }))?;
     }
     for edge in &line.consumptions {
-        sink.contribute(PostingIntent::Consumption(datum_core::ConsumptionPosting {
-            consuming: out,
-            consumed_posting_id: edge.posting_id,
-            quantity: edge.quantity,
-            amount: edge.amount,
-        }))?;
+        sink.contribute(PostingIntent::Consumption(
+            wicket_core::ConsumptionPosting {
+                consuming: out,
+                consumed_posting_id: edge.posting_id,
+                quantity: edge.quantity,
+                amount: edge.amount,
+            },
+        ))?;
     }
     Ok(())
 }
@@ -196,9 +198,9 @@ fn quantity_posting(
     item: ItemId,
     quantity: AnyQuantity,
     location: LocationId,
-    boundary: Option<datum_core::Boundary>,
+    boundary: Option<wicket_core::Boundary>,
     lot: Option<LotId>,
-    serial: Option<datum_core::SerialId>,
+    serial: Option<wicket_core::SerialId>,
     entered: Option<AnyQuantity>,
 ) -> QuantityPosting {
     QuantityPosting {
@@ -224,7 +226,7 @@ fn signed_qty(base: AnyQuantity, sign: i32) -> AnyQuantity {
 pub async fn finish_wip_issue(
     tx: &mut Tx<'_>,
     kernel: &Kernel,
-    ctx: &datum_db::WriteContext,
+    ctx: &wicket_db::WriteContext,
     plan: &WipIssuePlan,
     movement_group: Identifier,
 ) -> Result<Document> {
@@ -284,12 +286,12 @@ async fn plan_issue_line(
             let qty_abs = p.canonical.amount.abs();
             let amt = if let Some(given) = p.amount {
                 Money::new(given.amount().abs(), given.currency())
-                    .map_err(datum_core::Error::from)?
+                    .map_err(wicket_core::Error::from)?
             } else if layer.remaining_qty.is_zero() {
                 Money::zero(layer.currency)
             } else {
                 let share = layer.remaining_amt * qty_abs / layer.remaining_qty;
-                Money::new(share, layer.currency).map_err(datum_core::Error::from)?
+                Money::new(share, layer.currency).map_err(wicket_core::Error::from)?
             };
             consumptions.push(PlannedConsumption {
                 posting_id: layer.posting_id,
@@ -400,7 +402,7 @@ pub fn clear_wip_issue_plan(work_order: Identifier) {
 #[cfg(test)]
 mod isolation_tests {
     use super::*;
-    use datum_core::Identifier;
+    use wicket_core::Identifier;
 
     fn dummy_plan(work_order: Identifier, document_id: Identifier) -> WipIssuePlan {
         WipIssuePlan {

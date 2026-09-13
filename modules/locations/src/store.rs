@@ -1,10 +1,10 @@
 //! Persistence for `locations.*` (sole writer).
 
-use datum_core::{Boundary, Identifier, LocationId};
-use datum_db::Tx;
-use datum_events::Event;
-use datum_ledger::{has_quantity_at, upsert_location};
 use serde_json::json;
+use wicket_core::{Boundary, Identifier, LocationId};
+use wicket_db::Tx;
+use wicket_events::Event;
+use wicket_ledger::{has_quantity_at, upsert_location};
 
 use crate::domain::{
     BOUNDARY_VARIANTS, CreateLocation, ListFilter, Location, LocationKind, LocationStatus,
@@ -34,7 +34,7 @@ fn row_to_location(row: LocationRow) -> Result<Location> {
         .ok_or_else(|| Error::Validation(format!("unknown status {status}")))?;
     let boundary_class = match boundary {
         None => None,
-        Some(label) => Some(datum_ledger::boundary_from_sql(&label)?),
+        Some(label) => Some(wicket_ledger::boundary_from_sql(&label)?),
     };
     Ok(Location {
         id: LocationId::from_uuid(id),
@@ -123,7 +123,7 @@ pub async fn seed_install(tx: &mut Tx<'_>) -> Result<()> {
             .bind(code)
             .bind(name)
             .bind(site.as_uuid())
-            .bind(datum_ledger::boundary_sql(boundary)?),
+            .bind(wicket_ledger::boundary_sql(boundary)?),
         )
         .await?;
         let id = location_id_by_code(tx, code).await?;
@@ -354,7 +354,7 @@ pub async fn deactivate(tx: &mut Tx<'_>, id: LocationId, version: i64) -> Result
         .version(1)
         .payload(json!({ "location_id": id.as_uuid().to_string() }))
         .build()?;
-    datum_events::publish(tx, event).await?;
+    wicket_events::publish(tx, event).await?;
     get(tx, id).await
 }
 

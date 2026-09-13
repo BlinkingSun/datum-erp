@@ -1,0 +1,35 @@
+[package]
+name = "wicket-jobs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Durable background job queue and workers."
+build = "build.rs"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+test-utils = []
+
+[dependencies]
+wicket-core.workspace = true
+wicket-db.workspace = true
+wicket-events.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+chrono.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+wicket-audit.workspace = true
+wicket-test.workspace = true
+tokio.workspace = true
+proptest.workspace = true
+

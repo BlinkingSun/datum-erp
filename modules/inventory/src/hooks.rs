@@ -2,7 +2,7 @@
 //! never inside a hook (SPEC-common kernel seams). Posting intents are
 //! contributed by the caller through one `GroupBuilder` per transaction.
 
-use datum_module::KernelBuilder;
+use wicket_module::KernelBuilder;
 
 use crate::error::Result;
 

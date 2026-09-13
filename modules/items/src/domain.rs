@@ -1,10 +1,10 @@
 //! Item entity and rules. No I/O.
 
 use chrono::{DateTime, Utc};
-use datum_core::{ItemId, Money, UnitId};
-use datum_ledger::CostMethod;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use wicket_core::{ItemId, Money, UnitId};
+use wicket_ledger::CostMethod;
 
 use crate::error::{Error, Result};
 
@@ -116,7 +116,7 @@ pub struct NewItem {
     pub stock_scale: i16,
     /// Dust bound.
     pub residual_tolerance: Decimal,
-    /// Cost method written through `datum_ledger::registry`.
+    /// Cost method written through `wicket_ledger::registry`.
     pub cost_method: CostMethod,
     /// Required iff [`CostMethod::Standard`].
     pub standard: Option<Money>,
@@ -228,11 +228,11 @@ pub struct Item {
 
 /// Map a [`CostMethod`] to the ledger SQL label.
 pub fn cost_method_sql(method: CostMethod) -> &'static str {
-    datum_ledger::cost_method_sql(method)
+    wicket_ledger::cost_method_sql(method)
 }
 
 /// Parse a ledger SQL cost-method label.
 pub fn cost_method_from_sql(label: &str) -> Result<CostMethod> {
-    datum_ledger::cost_method_from_sql(label)
+    wicket_ledger::cost_method_from_sql(label)
         .ok_or_else(|| Error::Manifest(format!("unknown cost_method {label}")))
 }

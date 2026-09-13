@@ -1,10 +1,10 @@
 //! Typed events. Subscriptions are declared in `module.toml` and registered
 //! through `KernelBuilder::apply_manifest` / `events.subscribe`.
 
-use datum_core::{Identifier, ItemId, LocationId, LotId};
-use datum_events::{Event, EventSchema, Field};
 use rust_decimal::Decimal;
 use serde_json::json;
+use wicket_core::{Identifier, ItemId, LocationId, LotId};
+use wicket_events::{Event, EventSchema, Field};
 
 use crate::error::Result;
 
@@ -18,9 +18,9 @@ pub const ISSUED: &str = "inventory.issued";
 pub const ADJUSTED: &str = "inventory.adjusted";
 
 /// Register `inventory.issued.v1`. Kernel-owned inventory contracts live in
-/// [`datum_events::SchemaRegistry::standard`] (R-2s-4).
+/// [`wicket_events::SchemaRegistry::standard`] (R-2s-4).
 pub fn register_schemas() -> Result<()> {
-    datum_events::schema::register(EventSchema {
+    wicket_events::schema::register(EventSchema {
         name: ISSUED.into(),
         version: 1,
         fields: vec![
@@ -68,7 +68,7 @@ pub fn receipt_posted(
             "uom": uom,
             "posting_group_id": posting_group_id.to_string(),
         }))
-        .build_with(&datum_events::SchemaRegistry::standard())
+        .build_with(&wicket_events::SchemaRegistry::standard())
         .map_err(Into::into)
 }
 
@@ -114,15 +114,15 @@ pub fn adjusted(
             "qty": qty.to_string(),
             "reason_code": reason_code,
         }))
-        .build_with(&datum_events::SchemaRegistry::standard())
+        .build_with(&wicket_events::SchemaRegistry::standard())
         .map_err(Into::into)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use datum_core::{Identifier, ItemId, LocationId};
-    use datum_events::SchemaRegistry;
+    use wicket_core::{Identifier, ItemId, LocationId};
+    use wicket_events::SchemaRegistry;
 
     #[test]
     fn receipt_posted_builds_from_standard_registry_without_module_register() {

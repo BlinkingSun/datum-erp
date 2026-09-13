@@ -1,13 +1,13 @@
 //! Inventory document state machine. Edges are declared in `module.toml`
-//! and registered through [`datum_module::KernelBuilder`] with explicit
-//! [`datum_statemachine::SignatureDeclaration::NotRequired`] reasons.
+//! and registered through [`wicket_module::KernelBuilder`] with explicit
+//! [`wicket_statemachine::SignatureDeclaration::NotRequired`] reasons.
 
-use datum_statemachine::{EdgeBuilder, Machine};
+use wicket_statemachine::{EdgeBuilder, Machine};
 
 use crate::domain::{DOC_TYPE, NOT_REQUIRED_REASON};
 use crate::error::Result;
 
-/// Machine declared through `datum-statemachine` with `NotRequired` on every edge.
+/// Machine declared through `wicket-statemachine` with `NotRequired` on every edge.
 pub fn document_machine() -> Result<Machine> {
     Ok(Machine::builder(DOC_TYPE)
         .regulated(false)

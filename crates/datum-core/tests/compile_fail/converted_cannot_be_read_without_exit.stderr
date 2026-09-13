@@ -1,5 +1,0 @@
-error[E0616]: field `value` of struct `datum_core::Converted` is private
- --> tests/compile_fail/converted_cannot_be_read_without_exit.rs:7:23
-  |
-7 |     let _ = converted.value;
-  |                       ^^^^^ private field

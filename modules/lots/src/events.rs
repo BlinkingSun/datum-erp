@@ -3,9 +3,9 @@
 //! Subscriptions are declared in `module.toml` and registered through
 //! `KernelBuilder::apply_manifest` / `events.subscribe`, never by a constant here.
 
-use datum_core::{Identifier, ItemId, LotId, SerialId};
-use datum_events::{Event, EventSchema, Field};
 use serde_json::json;
+use wicket_core::{Identifier, ItemId, LotId, SerialId};
+use wicket_events::{Event, EventSchema, Field};
 
 use crate::domain::LotStatus;
 use crate::error::Result;
@@ -19,7 +19,7 @@ pub const SERIALS_CREATED: &str = "lots.serials_created";
 
 /// Register payload contracts on the process-global schema registry.
 pub fn register_schemas() -> Result<()> {
-    datum_events::schema::register(EventSchema {
+    wicket_events::schema::register(EventSchema {
         name: LOT_CREATED.into(),
         version: 1,
         fields: vec![
@@ -28,7 +28,7 @@ pub fn register_schemas() -> Result<()> {
             Field::required("number"),
         ],
     })?;
-    datum_events::schema::register(EventSchema {
+    wicket_events::schema::register(EventSchema {
         name: STATUS_CHANGED.into(),
         version: 1,
         fields: vec![
@@ -39,7 +39,7 @@ pub fn register_schemas() -> Result<()> {
             Field::optional("from"),
         ],
     })?;
-    datum_events::schema::register(EventSchema {
+    wicket_events::schema::register(EventSchema {
         name: SERIALS_CREATED.into(),
         version: 1,
         fields: vec![

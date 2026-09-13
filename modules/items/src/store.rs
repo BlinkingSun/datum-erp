@@ -1,14 +1,14 @@
 //! Persistence. The only code that touches `items.*` tables.
 
 use chrono::{DateTime, Utc};
-use datum_core::{Identifier, ItemId, UnitId};
-use datum_db::{Pool, Tx, WriteContext};
-use datum_ledger::{cost_method_from_sql, has_postings, upsert_stock_item};
-use datum_module::Kernel;
-use datum_statemachine::DocRef;
-use datum_uom::{ItemStockMeasure, pin_item_stock, update_item_stock};
 use rust_decimal::Decimal;
 use uuid::Uuid;
+use wicket_core::{Identifier, ItemId, UnitId};
+use wicket_db::{Pool, Tx, WriteContext};
+use wicket_ledger::{cost_method_from_sql, has_postings, upsert_stock_item};
+use wicket_module::Kernel;
+use wicket_statemachine::DocRef;
+use wicket_uom::{ItemStockMeasure, pin_item_stock, update_item_stock};
 
 use crate::DOC_TYPE;
 use crate::domain::{
@@ -339,8 +339,8 @@ async fn append_revision(tx: &mut Tx<'_>, item: ItemId, revision: &str) -> Resul
 }
 
 async fn stamps(tx: &mut Tx<'_>) -> Result<(String, String)> {
-    let app = datum_db::app_version();
-    let cfg = tx.setting("datum.config_version").await?;
+    let app = wicket_db::app_version();
+    let cfg = tx.setting("wicket.config_version").await?;
     Ok((app, cfg))
 }
 
@@ -391,15 +391,15 @@ fn item_from_row(row: ItemRow) -> Result<Item> {
     })
 }
 
-fn map_uom_stock_immutable(err: datum_uom::Error) -> Error {
+fn map_uom_stock_immutable(err: wicket_uom::Error) -> Error {
     match err {
-        datum_uom::Error::StockMeasureImmutable => Error::StockMeasureImmutable,
+        wicket_uom::Error::StockMeasureImmutable => Error::StockMeasureImmutable,
         other => Error::Uom(other),
     }
 }
 
-fn map_number_unique(err: datum_db::Error) -> Error {
-    if let datum_db::Error::Sqlx(sql) = &err
+fn map_number_unique(err: wicket_db::Error) -> Error {
+    if let wicket_db::Error::Sqlx(sql) = &err
         && sql.as_database_error().and_then(|d| d.constraint()) == Some("item_number_unique")
     {
         return Error::DuplicateNumber;

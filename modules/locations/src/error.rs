@@ -9,19 +9,19 @@ pub enum Error {
     Unimplemented,
     /// Core invariant.
     #[error(transparent)]
-    Core(#[from] datum_core::Error),
+    Core(#[from] wicket_core::Error),
     /// Database layer.
     #[error(transparent)]
-    Db(#[from] datum_db::Error),
+    Db(#[from] wicket_db::Error),
     /// Ledger registry / balance.
     #[error(transparent)]
-    Ledger(#[from] datum_ledger::Error),
+    Ledger(#[from] wicket_ledger::Error),
     /// Events outbox.
     #[error(transparent)]
-    Events(#[from] datum_events::Error),
+    Events(#[from] wicket_events::Error),
     /// Composition root.
     #[error(transparent)]
-    Module(#[from] datum_module::Error),
+    Module(#[from] wicket_module::Error),
     /// Validation / business rule.
     #[error("validation: {0}")]
     Validation(String),

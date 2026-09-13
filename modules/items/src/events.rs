@@ -1,8 +1,8 @@
 //! Typed events this module emits.
 
-use datum_core::{Identifier, ItemId};
-use datum_events::{Event, EventSchema, Field, SchemaRegistry};
 use serde_json::json;
+use wicket_core::{Identifier, ItemId};
+use wicket_events::{Event, EventSchema, Field, SchemaRegistry};
 
 use crate::domain::Item;
 use crate::error::Result;
@@ -34,7 +34,7 @@ pub fn register_event_schemas() -> Result<()> {
         ],
     })?;
     for schema in extra.iter() {
-        datum_events::schema::register(schema.clone())?;
+        wicket_events::schema::register(schema.clone())?;
     }
     Ok(())
 }

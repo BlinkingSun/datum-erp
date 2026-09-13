@@ -167,7 +167,7 @@ pub fn openapi_document() -> Value {
         let method = route.method.to_ascii_lowercase();
         path_item[method] = json!({
             "operationId": route.operation_id,
-            "x-datum-permission": route.permission,
+            "x-wicket-permission": route.permission,
             "responses": {
                 "200": { "description": "ok" },
                 "201": { "description": "created" },
@@ -190,7 +190,7 @@ pub fn openapi_document() -> Value {
             }
         });
         if route.operation_id == "releaseItem" {
-            path_item["post"]["x-datum-signature"] = json!({
+            path_item["post"]["x-wicket-signature"] = json!({
                 "required": false,
                 "reason": crate::domain::NOT_REQUIRED_REASON
             });
@@ -199,7 +199,7 @@ pub fn openapi_document() -> Value {
     json!({
         "openapi": "3.0.3",
         "info": {
-            "title": "Datum items API",
+            "title": "Wicket items API",
             "version": "0.1.0"
         },
         "paths": paths,

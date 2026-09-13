@@ -2,7 +2,7 @@
 //!
 //! Create, release, issue material, complete, and receive the finished lot.
 //! Not the Phase 3 `production` module; a surface that module later subsumes.
-//! Writes go through [`datum_db::Tx`]. Lots and serials are kernel entities.
+//! Writes go through [`wicket_db::Tx`]. Lots and serials are kernel entities.
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 #![cfg_attr(test, allow(unused_crate_dependencies))]
@@ -31,8 +31,8 @@ pub use store::{
     complete, create, issue_material, list, load, load_completion, load_issue_lines, release, start,
 };
 
-use datum_db::Tx;
-use datum_module::{KernelBuilder, ModuleManifest, Profile};
+use wicket_db::Tx;
+use wicket_module::{KernelBuilder, ModuleManifest, Profile};
 
 /// Embedded migrator (`placeholder` + `0001_production_min`).
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
@@ -54,8 +54,8 @@ pub fn register(builder: &mut KernelBuilder, _profile: &Profile) -> Result<()> {
 }
 
 pub(crate) async fn stamps(tx: &mut Tx<'_>) -> Result<(String, String)> {
-    let app = datum_db::app_version();
-    let cfg = tx.setting("datum.config_version").await?;
+    let app = wicket_db::app_version();
+    let cfg = tx.setting("wicket.config_version").await?;
     Ok((app, cfg))
 }
 
@@ -78,7 +78,7 @@ mod tests {
 
     #[test]
     fn postgres_helper_is_callable() {
-        let _ = datum_test::postgres_available();
+        let _ = wicket_test::postgres_available();
     }
 
     #[test]
@@ -115,7 +115,7 @@ mod tests {
         assert_eq!(m.edges.len(), 5);
         for e in &m.edges {
             match &e.signature {
-                datum_statemachine::SignatureDeclaration::NotRequired { reason } => {
+                wicket_statemachine::SignatureDeclaration::NotRequired { reason } => {
                     assert_eq!(*reason, NOT_REQUIRED_REASON);
                 }
                 other => panic!("expected NotRequired, got {other:?}"),

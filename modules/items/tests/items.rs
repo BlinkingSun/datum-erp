@@ -4,15 +4,15 @@
 
 mod common;
 
-use datum_core::ItemId;
-use datum_db::Tx;
-use datum_ledger::{has_postings, load_stock_item};
-use datum_mod_items::domain::number_is_valid;
-use datum_mod_items::{
+use sqlx::query as sql_query;
+use wicket_core::ItemId;
+use wicket_db::Tx;
+use wicket_ledger::{has_postings, load_stock_item};
+use wicket_mod_items::domain::number_is_valid;
+use wicket_mod_items::{
     Kind, ListFilter, Status, UpdateItem, create, get, list, obsolete, release, update,
 };
-use datum_test::db_case;
-use sqlx::query as sql_query;
+use wicket_test::db_case;
 
 use common::{
     EA, MM, actor_with_item_perms, bar, boot_kernel, count_audit_action, create_ctx, edge_ctx,
@@ -68,7 +68,7 @@ async fn item_number_charset_enforced() {
     let mut tx = Tx::begin(&write, &create_ctx(actor)).await.expect("begin");
     let err = create(&mut tx, &kernel, bad).await.expect_err("charset");
     assert!(
-        matches!(err, datum_mod_items::Error::InvalidNumber),
+        matches!(err, wicket_mod_items::Error::InvalidNumber),
         "got {err:?}"
     );
     tx.rollback().await.expect("rollback");
@@ -117,7 +117,7 @@ async fn stock_unit_change_before_postings_updates_item_stock() {
     assert_eq!(
         uom_row,
         (MM.0, 2, rust_decimal::Decimal::new(1, 2)),
-        "update must pin through datum-uom, not items.item alone"
+        "update must pin through wicket-uom, not items.item alone"
     );
     tx.commit().await.expect("commit2");
     db.finish().await.expect("finish");
@@ -134,7 +134,7 @@ async fn stock_unit_immutable_after_first_posting() {
     post_one_receipt(&mut tx, item.id).await;
     assert!(
         has_postings(&mut tx, item.id).await.expect("ledger seam"),
-        "D2 R5 refusal is gated on datum_ledger::has_postings"
+        "D2 R5 refusal is gated on wicket_ledger::has_postings"
     );
     tx.commit().await.expect("commit");
 
@@ -157,7 +157,7 @@ async fn stock_unit_immutable_after_first_posting() {
     .await
     .expect_err("immutable");
     assert!(
-        matches!(err, datum_mod_items::Error::StockMeasureImmutable),
+        matches!(err, wicket_mod_items::Error::StockMeasureImmutable),
         "got {err:?}"
     );
     tx.rollback().await.expect("rollback");
@@ -229,7 +229,7 @@ async fn obsolete_item_cannot_be_released_again() {
     assert!(
         matches!(
             err,
-            datum_mod_items::Error::InvalidTransition { ref edge, ref status }
+            wicket_mod_items::Error::InvalidTransition { ref edge, ref status }
                 if edge == "release" && status == "obsolete"
         ),
         "got {err:?}"
@@ -267,7 +267,7 @@ async fn optimistic_version_conflict_is_typed() {
     .await
     .expect_err("conflict");
     assert!(
-        matches!(err, datum_mod_items::Error::VersionConflict),
+        matches!(err, wicket_mod_items::Error::VersionConflict),
         "got {err:?}"
     );
     tx.rollback().await.expect("rollback");
@@ -329,7 +329,7 @@ async fn list_paginates_stably() {
 }
 
 #[tokio::test]
-async fn every_items_table_is_audited_and_owned_by_datum_owner() {
+async fn every_items_table_is_audited_and_owned_by_wicket_owner() {
     let db = db_case!("items_own");
     boot_kernel(&db).await;
     for table in ["item", "item_revision_history"] {
@@ -339,7 +339,7 @@ async fn every_items_table_is_audited_and_owned_by_datum_owner() {
         );
         assert_eq!(
             table_owner(db.migrate_pool(), "items", table).await,
-            "datum_owner",
+            "wicket_owner",
             "items.{table} owner"
         );
     }
@@ -402,7 +402,7 @@ async fn revision_history_carries_version_stamps() {
         !row.0.is_empty(),
         "application_version must be stamped on the revision row"
     );
-    assert_eq!(row.0, datum_db::app_version());
+    assert_eq!(row.0, wicket_db::app_version());
     assert!(
         !row.1.is_empty(),
         "configuration_version must be stamped on the revision row"
@@ -423,11 +423,11 @@ async fn duplicate_number_is_conflict() {
         .await
         .expect_err("duplicate");
     assert!(
-        matches!(err, datum_mod_items::Error::DuplicateNumber),
+        matches!(err, wicket_mod_items::Error::DuplicateNumber),
         "got {err:?}"
     );
     assert_eq!(err.code(), "CONFLICT", "docs/10 uniqueness is 409 CONFLICT");
-    assert_eq!(datum_mod_items::error_code(&err), "CONFLICT");
+    assert_eq!(wicket_mod_items::error_code(&err), "CONFLICT");
     tx.rollback().await.expect("rollback");
     db.finish().await.expect("finish");
 }

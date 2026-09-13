@@ -2,7 +2,7 @@
 
 Intended use: receipts, issues, moves, adjustments, and cycle counts over the
 kernel ledger. On-hand, allocated, and available are rebuildable projections
-(`datum_ledger::balance_at`). Lots and serials are kernel lot entities, never
+(`wicket_ledger::balance_at`). Lots and serials are kernel lot entities, never
 text columns (PLAN §3). Quarantine is not available until released (PLAN §3
 item 4). Conversion happens once at the boundary (D2 R2); quantity residual
 lives in the balance and is flushed as `ADJUSTMENT` / `UOM_CONVERSION_RESIDUAL`
@@ -24,6 +24,6 @@ never a ledger invariant.
 | `no_balance_column_exists_in_module_schema` | PLAN §6 invariant 1 |
 | `on_hand_equals_ledger_fold_after_every_document` | PLAN §3 item 9 |
 | `posting_without_actor_aborts_and_leaves_no_document` | PLAN §3 item 6; invariant 5 |
-| `every_inventory_table_is_audited_and_owned_by_datum_owner` | PLAN §3 item 13; invariants 3, 16 |
+| `every_inventory_table_is_audited_and_owned_by_wicket_owner` | PLAN §3 item 13; invariants 3, 16 |
 | `writes_go_through_tx` | CONTRACT §5a |
 | `reversible_migration_drops_inventory_schema` | PLAN §6 invariant 8 |

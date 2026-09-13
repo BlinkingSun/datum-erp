@@ -1,10 +1,10 @@
 //! Genealogy query types. No I/O.
 
-use datum_core::{
-    AnyQuantity, CurrencyId, Identifier, ItemId, LocationId, LotId, PostingId, SerialId,
-};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use wicket_core::{
+    AnyQuantity, CurrencyId, Identifier, ItemId, LocationId, LotId, PostingId, SerialId,
+};
 
 /// Default posting-count threshold before a trace is enqueued as a job.
 ///
@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 pub const DEFAULT_INLINE_MAX_POSTINGS: u32 = 32;
 
 /// Environment key for [`DEFAULT_INLINE_MAX_POSTINGS`].
-pub const INLINE_MAX_ENV: &str = "DATUM_GENEALOGY_INLINE_MAX";
+pub const INLINE_MAX_ENV: &str = "WICKET_GENEALOGY_INLINE_MAX";
 
 /// Trace direction (SPEC query API).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -87,7 +87,7 @@ pub struct TreeNode {
     pub location: Option<LocationId>,
     /// Stock quantity on the node (ledger `Node::quantity`).
     pub quantity: AnyQuantity,
-    /// Edge amount into this node (wire shape of [`datum_core::Money`]).
+    /// Edge amount into this node (wire shape of [`wicket_core::Money`]).
     #[serde(with = "rust_decimal::serde::str")]
     pub amount: Decimal,
     /// Currency of [`Self::amount`].

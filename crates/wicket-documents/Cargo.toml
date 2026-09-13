@@ -1,0 +1,35 @@
+[package]
+name = "wicket-documents"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Controlled documents: masters, revisions, content-addressed blobs, approval machine."
+build = "build.rs"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+
+[dependencies]
+chrono.workspace = true
+wicket-audit.workspace = true
+wicket-core.workspace = true
+wicket-db.workspace = true
+wicket-identity.workspace = true
+wicket-numbering.workspace = true
+wicket-statemachine.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+wicket-module.workspace = true
+wicket-test.workspace = true
+proptest.workspace = true
+tokio.workspace = true

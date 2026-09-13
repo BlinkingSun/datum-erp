@@ -1,13 +1,13 @@
 #![allow(dead_code)]
 
-use datum_core::{Actor, ActorKind, Identifier, ItemId, LotId};
-use datum_db::{Tx, WriteContext, WritePool};
-use datum_identity::rbac::{RoleBundle, assign_role, seed_bundles};
-use datum_identity::{PrincipalKind, SYSTEM_ID, create_principal};
-use datum_mod_lots::DOC_TYPE;
-use datum_module::{Kernel, Profile};
-use datum_statemachine::DocRef;
 use sqlx::{PgPool, query_scalar as sql_query_scalar};
+use wicket_core::{Actor, ActorKind, Identifier, ItemId, LotId};
+use wicket_db::{Tx, WriteContext, WritePool};
+use wicket_identity::rbac::{RoleBundle, assign_role, seed_bundles};
+use wicket_identity::{PrincipalKind, SYSTEM_ID, create_principal};
+use wicket_mod_lots::DOC_TYPE;
+use wicket_module::{Kernel, Profile};
+use wicket_statemachine::DocRef;
 
 pub async fn actor_with_lots_perms(write: &WritePool) -> Actor {
     let slug = Identifier::generate().to_string();
@@ -62,7 +62,7 @@ pub fn write_ctx(action: &str) -> WriteContext {
     ctx
 }
 
-pub fn write_pool(db: &datum_test::TestDb) -> WritePool {
+pub fn write_pool(db: &wicket_test::TestDb) -> WritePool {
     WritePool::new(db.app_pool().clone())
 }
 
@@ -73,22 +73,22 @@ pub fn item_rm_ti_bar() -> ItemId {
 /// D-2b-13: one published order. `install_upto` is not on this tree yet
 /// (glue lane); fall back to kernel prefix/suffix then `wave_2s1_migrators`
 /// / `slice_migrators`, with `audit_attach` up before this crate's DDL.
-pub async fn install_through(db: &datum_test::TestDb, crate_name: &str) {
-    datum_module::migrate_prefix(db.migrate_pool())
+pub async fn install_through(db: &wicket_test::TestDb, crate_name: &str) {
+    wicket_module::migrate_prefix(db.migrate_pool())
         .await
         .expect("migrate prefix");
-    datum_module::migrate_suffix(db.migrate_pool())
+    wicket_module::migrate_suffix(db.migrate_pool())
         .await
         .unwrap_or_else(|e| panic!("migrate suffix: {e:#}"));
     let boot = db.bootstrap_pool().await.expect("bootstrap pool");
-    datum_audit::install_privileged(&boot)
+    wicket_audit::install_privileged(&boot)
         .await
         .expect("install_privileged");
     boot.close().await;
 
     let mut found = false;
-    for (name, migrator) in datum_module::wave_2s1_migrators().expect("wave_2s1") {
-        datum_db::migrate::run(db.migrate_pool(), &[(name, migrator)])
+    for (name, migrator) in wicket_module::wave_2s1_migrators().expect("wave_2s1") {
+        wicket_db::migrate::run(db.migrate_pool(), &[(name, migrator)])
             .await
             .unwrap_or_else(|e| panic!("migrate {name}: {e:#}"));
         if name == crate_name {
@@ -97,8 +97,8 @@ pub async fn install_through(db: &datum_test::TestDb, crate_name: &str) {
         }
     }
     if !found {
-        for (name, migrator) in datum_module::slice_migrators() {
-            datum_db::migrate::run(db.migrate_pool(), &[(name, migrator)])
+        for (name, migrator) in wicket_module::slice_migrators() {
+            wicket_db::migrate::run(db.migrate_pool(), &[(name, migrator)])
                 .await
                 .unwrap_or_else(|e| panic!("migrate {name}: {e:#}"));
             if name == crate_name {
@@ -108,24 +108,25 @@ pub async fn install_through(db: &datum_test::TestDb, crate_name: &str) {
         }
     }
     assert!(found, "{crate_name} not in published wave_2s1/slice order");
-    datum_module::attach_kernel_audit(db.migrate_pool())
+    wicket_module::attach_kernel_audit(db.migrate_pool())
         .await
         .expect("attach_kernel_audit");
 }
 
-pub async fn migrate(db: &datum_test::TestDb) {
-    install_through(db, "datum-mod-lots").await;
-    datum_mod_lots::register_schemas().expect("event schemas");
+pub async fn migrate(db: &wicket_test::TestDb) {
+    install_through(db, "wicket-mod-lots").await;
+    wicket_mod_lots::register_schemas().expect("event schemas");
 }
 
-pub async fn migrate_kernel(db: &datum_test::TestDb) {
+pub async fn migrate_kernel(db: &wicket_test::TestDb) {
     migrate(db).await;
 }
 
-pub async fn boot_kernel(db: &datum_test::TestDb) -> Kernel {
+pub async fn boot_kernel(db: &wicket_test::TestDb) -> Kernel {
     migrate_kernel(db).await;
     let mut builder = Kernel::builder(db.app_pool().clone(), Profile::plain_shop().unwrap());
-    datum_mod_lots::register(&mut builder, &Profile::plain_shop().unwrap()).expect("register lots");
+    wicket_mod_lots::register(&mut builder, &Profile::plain_shop().unwrap())
+        .expect("register lots");
     builder.build().await.expect("kernel build")
 }
 
@@ -140,9 +141,9 @@ pub fn edge_ctx(kernel: &Kernel, actor: Actor, lot: LotId, edge: &str) -> WriteC
     ctx
 }
 
-pub fn pg_code_db(err: &datum_db::Error) -> String {
+pub fn pg_code_db(err: &wicket_db::Error) -> String {
     match err {
-        datum_db::Error::Sqlx(e) => e
+        wicket_db::Error::Sqlx(e) => e
             .as_database_error()
             .and_then(|d| d.code().map(|c| c.into_owned()))
             .unwrap_or_else(|| format!("{e}")),
@@ -156,9 +157,9 @@ pub fn pg_code(err: &sqlx::Error) -> String {
         .unwrap_or_else(|| format!("{err}"))
 }
 
-pub fn lots_pg_code(err: &datum_mod_lots::Error) -> String {
+pub fn lots_pg_code(err: &wicket_mod_lots::Error) -> String {
     match err {
-        datum_mod_lots::Error::Db(e) => pg_code_db(e),
+        wicket_mod_lots::Error::Db(e) => pg_code_db(e),
         other => other.to_string(),
     }
 }
@@ -238,10 +239,10 @@ pub async fn history_stamps(pool: &PgPool, lot: LotId) -> (String, String) {
     .expect("history stamps")
 }
 
-pub fn qty_ea(n: i64) -> datum_core::AnyQuantity {
-    datum_core::AnyQuantity {
+pub fn qty_ea(n: i64) -> wicket_core::AnyQuantity {
+    wicket_core::AnyQuantity {
         amount: rust_decimal::Decimal::from(n),
-        unit: datum_core::UnitId(1),
-        dimension: datum_core::DimensionKind::Count,
+        unit: wicket_core::UnitId(1),
+        dimension: wicket_core::DimensionKind::Count,
     }
 }

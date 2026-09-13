@@ -4,16 +4,16 @@
 
 mod common;
 
-use datum_core::PostingError;
-use datum_db::Tx;
-use datum_ledger::{TraceStart, trace_forward};
-use datum_mod_production_min::{
+use sqlx::query as sql_query;
+use sqlx::query_scalar as sql_query_scalar;
+use wicket_core::PostingError;
+use wicket_db::Tx;
+use wicket_ledger::{TraceStart, trace_forward};
+use wicket_mod_production_min::{
     CompleteRequest, CreateWorkOrder, FinishedLotTemplate, IssueMaterialRequest, StartRequest,
     Status, complete, create, load, load_completion, start,
 };
-use datum_test::db_case;
-use sqlx::query as sql_query;
-use sqlx::query_scalar as sql_query_scalar;
+use wicket_test::db_case;
 
 use common::{
     action_ctx, boot_kernel, complete_wo, create_wo, edge_ctx, has_zz_audit, issue_and_start, line,
@@ -69,7 +69,7 @@ async fn release_creates_wip_location_once() {
     let wip = released.wip_location.expect("wip");
     let ctx = action_ctx(w.actor, "locations.edit");
     let mut tx = Tx::begin(&pool, &ctx).await.expect("begin");
-    let again = datum_mod_locations::ensure_wip(&mut tx, wo.id)
+    let again = wicket_mod_locations::ensure_wip(&mut tx, wo.id)
         .await
         .expect("ensure");
     tx.commit().await.ok();
@@ -240,7 +240,7 @@ async fn complete_without_issued_material_is_lineage_required_error() {
     assert!(
         matches!(
             err,
-            datum_mod_production_min::Error::Ledger(datum_ledger::Error::Posting(
+            wicket_mod_production_min::Error::Ledger(wicket_ledger::Error::Posting(
                 PostingError::LineageRequired(_)
             ))
         ),
@@ -264,12 +264,12 @@ async fn complete_creates_finished_lot_with_kernel_identifier() {
     let c = complete_wo(&w, &pool, wo.id).await;
     let ctx = action_ctx(w.actor, "lots.view");
     let mut tx = Tx::begin(&pool, &ctx).await.expect("begin");
-    let lot = datum_mod_lots::load_lot(&mut tx, c.finished_lot)
+    let lot = wicket_mod_lots::load_lot(&mut tx, c.finished_lot)
         .await
         .expect("lot");
     tx.commit().await.ok();
     assert_eq!(lot.number, "LOT-WO-1847");
-    datum_numbering::lot::validate(&lot.number).expect("kernel identifier");
+    wicket_numbering::lot::validate(&lot.number).expect("kernel identifier");
     db.finish().await.expect("finish");
 }
 
@@ -339,7 +339,7 @@ async fn abort_mid_completion_leaves_no_group_no_lot_no_transition() {
 }
 
 #[tokio::test]
-async fn every_production_table_is_audited_and_owned_by_datum_owner() {
+async fn every_production_table_is_audited_and_owned_by_wicket_owner() {
     let db = db_case!("prod_audit");
     boot_kernel(&db).await;
     for table in ["work_order", "completion", "issue_line"] {
@@ -349,7 +349,7 @@ async fn every_production_table_is_audited_and_owned_by_datum_owner() {
         );
         assert_eq!(
             table_owner(db.migrate_pool(), "production_min", table).await,
-            "datum_owner",
+            "wicket_owner",
             "production_min.{table} owner"
         );
     }
@@ -398,7 +398,7 @@ fn trailing_int(s: &str) -> i64 {
     digits.parse().expect("digits")
 }
 
-fn tree_has_lot(nodes: &[datum_ledger::Node], lot: datum_core::LotId) -> bool {
+fn tree_has_lot(nodes: &[wicket_ledger::Node], lot: wicket_core::LotId) -> bool {
     nodes
         .iter()
         .any(|n| n.lot == Some(lot) || tree_has_lot(&n.children, lot))
