@@ -50,6 +50,19 @@ impl Format {
     }
 }
 
+/// Latest effective template row (list seam; no body).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TemplateSummary {
+    /// Template id (`document_revision`, `generic_record`, `work_order_traveler`).
+    pub template_id: String,
+    /// Integer version of the latest effective row.
+    pub version: i32,
+    /// Semantic version stamped on that row.
+    pub semantic_version: String,
+    /// SHA-256 of the template body, lowercase hex.
+    pub body_hash: String,
+}
+
 /// A finished rendition (bytes + stamped versions).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rendered {

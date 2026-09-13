@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use datum_core::{Actor, ActorKind, Identifier};
-use datum_db::{WriteContext, WritePool};
+use datum_db::{ReadPool, WriteContext, WritePool};
 use datum_documents::{FsBlobStore, document_machine};
 use datum_identity::seed_builtins;
 use datum_print::{seed_templates, set_installation_profile};
@@ -82,6 +82,10 @@ pub fn write_ctx(action: &str) -> WriteContext {
 
 pub fn write_pool(db: &datum_test::TestDb) -> WritePool {
     WritePool::new(db.app_pool().clone())
+}
+
+pub fn read_pool(db: &datum_test::TestDb) -> ReadPool {
+    ReadPool::new(db.app_pool().clone())
 }
 
 pub async fn open_db(base: &str, profile: &str) -> Option<datum_test::TestDb> {

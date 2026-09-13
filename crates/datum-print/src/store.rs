@@ -66,9 +66,7 @@ pub(crate) async fn insert_template_version(
 }
 
 pub(crate) async fn set_install_profile(tx: &mut Tx<'_>, profile_id: &str) -> Result<()> {
-    if profile_id != "plain-shop" && profile_id != "regulated-device" {
-        return Err(Error::UnknownProfile(profile_id.to_owned()));
-    }
+    require_known_profile(profile_id)?;
     tx.execute(
         query(
             r#"INSERT INTO print.install (singleton, profile_id)
@@ -275,4 +273,35 @@ pub(crate) async fn list_render_log(
 
 pub(crate) fn digest(bytes: &[u8]) -> [u8; 32] {
     datum_audit::sha256::digest(bytes)
+}
+
+/// Latest effective version per `template_id` (no body). Ordered by id.
+pub(crate) const LIST_TEMPLATES_SQL: &str = r#"
+SELECT template_id, version, semantic_version, body_hash
+  FROM (
+    SELECT DISTINCT ON (template_id)
+           template_id, version, semantic_version, body_hash
+      FROM print.template
+     WHERE effective_until IS NULL OR effective_until > pg_catalog.now()
+     ORDER BY template_id ASC, version DESC
+  ) latest
+ ORDER BY template_id ASC
+"#;
+
+pub(crate) type TemplateListRow = (String, i32, String, Vec<u8>);
+
+pub(crate) fn row_to_summary(row: TemplateListRow) -> crate::domain::TemplateSummary {
+    crate::domain::TemplateSummary {
+        template_id: row.0,
+        version: row.1,
+        semantic_version: row.2,
+        body_hash: datum_audit::sha256::hex(&row.3),
+    }
+}
+
+pub(crate) fn require_known_profile(profile: &str) -> Result<()> {
+    if profile != "plain-shop" && profile != "regulated-device" {
+        return Err(Error::UnknownProfile(profile.to_owned()));
+    }
+    Ok(())
 }

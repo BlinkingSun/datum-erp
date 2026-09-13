@@ -15,10 +15,10 @@ mod render;
 mod store;
 
 pub use api::{
-    archive, bump_template, log, manifestation_block, render, seed_templates,
-    set_installation_profile,
+    archive, bump_template, list_templates, list_templates_on, log, manifestation_block, render,
+    seed_templates, set_installation_profile,
 };
-pub use domain::{Format, RenderLogRow, Rendered, TemplateId};
+pub use domain::{Format, RenderLogRow, Rendered, TemplateId, TemplateSummary};
 pub use error::{Error, Result};
 
 /// Embedded migrator (`placeholder` + `0001_print`).
