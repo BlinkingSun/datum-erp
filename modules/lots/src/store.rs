@@ -1,7 +1,10 @@
 //! Persistence. Every mutation runs inside [`datum_db::Tx`].
 
 use chrono::{DateTime, NaiveDate, Utc};
-use datum_core::{Actor, AnyQuantity, DimensionKind, Identifier, ItemId, LotId, SerialId, UnitId};
+use datum_core::{
+    Actor, AnyQuantity, DimensionKind, Identifier, ItemId, LotId, RecordRef, SerialId, SignatureId,
+    SignatureMeaning, SignatureToken, UnitId,
+};
 use datum_db::{Tx, WriteContext};
 use datum_module::Kernel;
 use rust_decimal::Decimal;
@@ -130,6 +133,40 @@ pub async fn create_serials(
     Ok(out)
 }
 
+/// Token bound on this `Tx` as `datum.esign_id` (D-2b-1 / HTTP `X-Datum-Signature`).
+/// Empty GUC is `None` so a Required edge reports `Invalid("missing token")`.
+async fn bound_edge_token(
+    tx: &mut Tx<'_>,
+    kernel: &Kernel,
+    actor: Actor,
+) -> Result<Option<SignatureToken>> {
+    let raw = tx.setting("datum.esign_id").await?;
+    if raw.is_empty() {
+        return Ok(None);
+    }
+    let Ok(id) = Uuid::parse_str(&raw) else {
+        return Ok(None);
+    };
+    if id.is_nil() {
+        return Ok(None);
+    }
+    let sid = SignatureId::from_uuid(id);
+    Ok(Some(match kernel.load_signature_token(tx, sid).await? {
+        Some(tok) => tok,
+        None => SignatureToken {
+            signature: sid,
+            signer: actor,
+            meaning: SignatureMeaning(String::new()),
+            record: RecordRef {
+                table: "sm.instance".into(),
+                id: Identifier::from_uuid(Uuid::nil()),
+                version: 0,
+            },
+            record_content_hash: [0; 32],
+        },
+    }))
+}
+
 /// Record a status change through the registered lot state machine. The caller
 /// posts the inventory movement; this module never posts.
 pub async fn set_status(
@@ -164,7 +201,10 @@ pub async fn set_status(
     if ctx.config_version.is_none() {
         ctx.config_version = Some(kernel.profile.spec_version.clone());
     }
-    kernel.transition(tx, &doc, edge, None, &ctx).await?;
+    let token = bound_edge_token(tx, kernel, actor).await?;
+    kernel
+        .transition(tx, &doc, edge, token.as_ref(), &ctx)
+        .await?;
 
     let (app_version, config_version) = stamps(tx).await?;
     let hid = Identifier::generate();

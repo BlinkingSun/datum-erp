@@ -5,9 +5,10 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use datum_core::{
-    Identifier, ItemId, LocationId, LotId, RecordRef, SignatureId, SignatureMeaning, SignatureToken,
+    Identifier, ItemId, LocationId, LotId, RecordRef, SignatureError, SignatureId,
+    SignatureMeaning, SignatureToken,
 };
-use datum_db::{ReadPool, Tx, WritePool};
+use datum_db::{ReadPool, Tx, WriteContext, WritePool};
 use datum_identity::{PasswordProvider, Provider};
 use datum_ledger::CostMethod;
 use datum_mod_inventory::{BalanceQuery, DocumentKind, LineInput, ReceiveRequest, ReleaseRequest};
@@ -506,8 +507,38 @@ fn dummy_signature_token(
     }
 }
 
-/// Bound-edge token: `X-Datum-Signature` when present, else a dummy so prepare
-/// (not the missing-token check) refuses under regulated-device.
+/// Stamp `WriteContext.esign_id` from `X-Datum-Signature` before `Tx::begin`
+/// (D-2b-1). Never a nil UUID (D-2b-5 missing-token).
+fn bind_esign_header(ctx: &mut WriteContext, headers: &H) {
+    if let Some(raw) = headers
+        .get("x-datum-signature")
+        .and_then(|v| v.to_str().ok())
+        && let Ok(id) = Uuid::parse_str(raw)
+        && !id.is_nil()
+    {
+        ctx.esign_id = Some(id.to_string());
+    }
+}
+
+async fn signature_row_consumed(tx: &mut Tx<'_>, id: SignatureId) -> Result<bool> {
+    let row: Option<(Option<chrono::DateTime<chrono::Utc>>,)> = tx
+        .fetch_optional(sqlx::query_as(include_str!("esign_consumed.sql")).bind(id.as_uuid()))
+        .await?;
+    Ok(matches!(row, Some((Some(_),))))
+}
+
+fn consumed_conflict() -> Error {
+    Error::http(
+        "CONFLICT",
+        SignatureError::Consumed.to_string(),
+        None,
+        StatusCode::CONFLICT,
+    )
+}
+
+/// Bound-edge token: `X-Datum-Signature` when present, else `None` so the
+/// executor reports `Invalid("missing token")` (D-2b-5). A consumed row is
+/// 409 before the state-machine edge runs.
 async fn required_edge_token(
     state: &AppState,
     tx: &mut Tx<'_>,
@@ -516,27 +547,30 @@ async fn required_edge_token(
     meaning: &str,
     record_id: Identifier,
     version: i64,
-) -> Result<SignatureToken> {
-    if let Some(raw) = headers
+) -> Result<Option<SignatureToken>> {
+    let Some(raw) = headers
         .get("x-datum-signature")
         .and_then(|v| v.to_str().ok())
-        && let Ok(id) = Uuid::parse_str(raw)
-    {
-        let sid = SignatureId::from_uuid(id);
-        if let Some(tok) = state.kernel().load_signature_token(tx, sid).await? {
-            return Ok(tok);
-        }
-        return Ok(dummy_signature_token(
-            actor, meaning, record_id, version, sid,
-        ));
+        .filter(|s| !s.is_empty())
+    else {
+        return Ok(None);
+    };
+    let Ok(id) = Uuid::parse_str(raw) else {
+        return Ok(None);
+    };
+    if id.is_nil() {
+        return Ok(None);
     }
-    Ok(dummy_signature_token(
-        actor,
-        meaning,
-        record_id,
-        version,
-        SignatureId::from_uuid(Uuid::nil()),
-    ))
+    let sid = SignatureId::from_uuid(id);
+    if signature_row_consumed(tx, sid).await? {
+        return Err(consumed_conflict());
+    }
+    if let Some(tok) = state.kernel().load_signature_token(tx, sid).await? {
+        return Ok(Some(tok));
+    }
+    Ok(Some(dummy_signature_token(
+        actor, meaning, record_id, version, sid,
+    )))
 }
 
 async fn manifestation_via_tx(tx: &mut Tx<'_>, id: SignatureId) -> Result<Value> {
@@ -843,6 +877,7 @@ async fn set_status_inner(
     ctx.source_kind = "api".into();
     ctx.reason = Some("api".into());
     ctx.actor_display = Some(session.display_name.clone());
+    bind_esign_header(&mut ctx, headers);
     let write = fresh_write(state).await?;
     let mut tx = Tx::begin(&write, &ctx).await?;
     if let Some(replay) = idempotency::replay(&mut tx, key, &hash).await? {
@@ -851,22 +886,17 @@ async fn set_status_inner(
     }
     let current = datum_mod_lots::get_lot(&mut tx, lot_id).await?;
     check_version(current.version, expected)?;
-    if edge == "release" && state.kernel().profile.id == datum_module::ProfileId::RegulatedDevice {
-        let token = SignatureToken {
-            signature: SignatureId::from_uuid(Uuid::nil()),
-            signer: session.principal.0.into_actor(),
-            meaning: SignatureMeaning("Lot released".into()),
-            record: RecordRef {
-                table: "sm.instance".into(),
-                id: Identifier::from_uuid(lot_id.as_uuid()),
-                version: current.version,
-            },
-            record_content_hash: [0; 32],
-        };
-        state
-            .kernel()
-            .transition(&mut tx, &doc, edge, Some(&token), &ctx)
-            .await?;
+    if edge == "release" {
+        let _ = required_edge_token(
+            state,
+            &mut tx,
+            headers,
+            session.principal.0.into_actor(),
+            "Lot released",
+            Identifier::from_uuid(lot_id.as_uuid()),
+            current.version,
+        )
+        .await?;
     }
     let lot = datum_mod_lots::set_status_http(&mut tx, state.kernel(), &ctx, lot_id, body).await?;
     let body = serde_json::to_value(&lot)?;
@@ -1299,6 +1329,7 @@ async fn release_stock_inner(
     ctx.source_kind = "api".into();
     ctx.reason = Some("api".into());
     ctx.actor_display = Some(session.display_name.clone());
+    bind_esign_header(&mut ctx, headers);
     let write = fresh_write(state).await?;
     let mut tx = Tx::begin(&write, &ctx).await?;
     if let Some(replay) = idempotency::replay(&mut tx, key, &hash).await? {
@@ -1307,23 +1338,16 @@ async fn release_stock_inner(
     }
     let current = datum_mod_lots::get_lot(&mut tx, lot).await?;
     check_version(current.version, expected)?;
-    if state.kernel().profile.id == datum_module::ProfileId::RegulatedDevice {
-        let token = SignatureToken {
-            signature: SignatureId::from_uuid(Uuid::nil()),
-            signer: session.principal.0.into_actor(),
-            meaning: SignatureMeaning("Lot released".into()),
-            record: RecordRef {
-                table: "sm.instance".into(),
-                id: Identifier::from_uuid(lot.as_uuid()),
-                version: current.version,
-            },
-            record_content_hash: [0; 32],
-        };
-        state
-            .kernel()
-            .transition(&mut tx, &doc, "release", Some(&token), &ctx)
-            .await?;
-    }
+    let _ = required_edge_token(
+        state,
+        &mut tx,
+        headers,
+        session.principal.0.into_actor(),
+        "Lot released",
+        Identifier::from_uuid(lot.as_uuid()),
+        current.version,
+    )
+    .await?;
     let posted =
         datum_mod_inventory::release_from_quarantine(&mut tx, state.kernel(), &ctx, req).await?;
     let body = serde_json::to_value(datum_mod_inventory::DocumentBody::from(&posted))?;
@@ -1899,9 +1923,7 @@ async fn approve_cal_inner(
         tx.commit().await?;
         return Ok(replay);
     }
-    // A Required edge with esign bound: present a token so prepare, not the
-    // missing-token check, is what refuses (SIGNATURE_REQUIRED / Invalid).
-    // `X-Datum-Signature` carries a minted id (docs/10 §5.2).
+    // Required edge: `X-Datum-Signature` or `None` (D-2b-5 missing token).
     let token = required_edge_token(
         state,
         &mut tx,
@@ -1914,7 +1936,7 @@ async fn approve_cal_inner(
     .await?;
     state
         .kernel()
-        .transition(&mut tx, &doc, "approve", Some(&token), &ctx)
+        .transition(&mut tx, &doc, "approve", token.as_ref(), &ctx)
         .await?;
     let body = json!({"id": doc_id.to_string(), "status": "approved"});
     idempotency::remember(&mut tx, key, &hash, 200, &body).await?;
