@@ -57,6 +57,10 @@ CREATE TABLE module.install_log (
 );
 ALTER TABLE module.install_log OWNER TO datum_owner;
 
+SELECT audit.attach('module.installed'::regclass);
+SELECT audit.attach('module.configuration'::regclass);
+SELECT audit.attach('module.install_log'::regclass);
+
 GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA module TO datum_app;
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA module TO datum_app;
 

@@ -51,6 +51,7 @@ pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 mod tests {
     use super::*;
     use datum_core::{PermissionKey, SignatureMeaning, SignatureRequirement};
+    use datum_module as _;
     use proptest::prelude::*;
     use rust_decimal as _;
     use tokio as _;

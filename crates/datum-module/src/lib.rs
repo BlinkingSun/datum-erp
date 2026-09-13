@@ -7,7 +7,6 @@
 
 #[cfg(test)]
 use chrono as _;
-use datum_print as _;
 #[cfg(test)]
 use rust_decimal as _;
 
@@ -17,7 +16,7 @@ mod error;
 mod install_graph;
 mod kernel;
 mod manifest;
-mod order;
+pub mod order;
 mod profile;
 mod registry;
 mod semver;
@@ -44,10 +43,11 @@ pub use manifest::{
     ModuleManifest, compiled_in, compiled_in_graph,
 };
 pub use order::{
-    CONTRACT_KERNEL_EDGES, KERNEL_AUDIT_RELS, KERNEL_ORDER, MIGRATE_PREFIX, ModuleNode,
-    SLICE_AUDIT_RELS, attach_kernel_audit, attach_slice_audit, install_kernel, install_slice,
-    is_topological_sort, kernel_crates, kernel_migrators, migrate_prefix, migrate_suffix,
-    run_migrations, topological_order,
+    CANONICAL_ORDER, CONTRACT_KERNEL_EDGES, CONTRACT_SLICE_EDGES, KERNEL_AUDIT_RELS, KERNEL_ORDER,
+    MIGRATE_PREFIX, ModuleNode, SLICE_AUDIT_RELS, attach_kernel_audit, attach_slice_audit,
+    canonical_migrators, install_kernel, install_slice, install_upto, is_topological_sort,
+    kernel_crates, kernel_migrators, migrate_prefix, migrate_suffix, run_migrations,
+    topological_order,
 };
 pub use profile::{
     DELTA_ALLOWED, GateBinding, Profile, ProfileId, ProfileModule, SignatureEdge, delta_keys,
@@ -101,6 +101,16 @@ mod tests {
         let crates = kernel_crates();
         assert_eq!(crates.len(), KERNEL_ORDER.len());
         for (name, listed) in crates.iter().zip(KERNEL_ORDER) {
+            assert_eq!(name.0, *listed);
+        }
+    }
+
+    #[test]
+    fn canonical_order_names_match_migrators_and_extends_kernel() {
+        assert_eq!(&CANONICAL_ORDER[..KERNEL_ORDER.len()], KERNEL_ORDER);
+        let crates = canonical_migrators().expect("canonical migrators");
+        assert_eq!(crates.len(), CANONICAL_ORDER.len());
+        for (name, listed) in crates.iter().zip(CANONICAL_ORDER) {
             assert_eq!(name.0, *listed);
         }
     }

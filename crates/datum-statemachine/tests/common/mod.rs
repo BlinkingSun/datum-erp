@@ -59,33 +59,13 @@ pub async fn bootstrap_pool(database: &str) -> PgPool {
         .expect("bootstrap pool")
 }
 
-/// Migrate db + audit, install event triggers, then identity + statemachine.
-/// Privilege and schema statements live in migrations run as `datum_migrate`;
-/// this crate does not issue them from Rust.
+/// D-2b-13: one published order through `datum-statemachine`.
 pub async fn migrate_and_install(db: &datum_test::TestDb) {
-    datum_db::migrate::run(
-        db.migrate_pool(),
-        &[
-            ("datum-db", &datum_db::MIGRATOR),
-            ("datum-audit", &datum_audit::MIGRATOR),
-        ],
-    )
-    .await
-    .expect("migrate db+audit");
-    let boot = bootstrap_pool(db.database()).await;
-    datum_audit::install_privileged(&boot)
+    let boot = db.bootstrap_pool().await.expect("bootstrap pool");
+    datum_module::order::install_upto(db.migrate_pool(), &boot, "datum-statemachine")
         .await
-        .expect("install_privileged");
+        .unwrap_or_else(|e| panic!("install_upto datum-statemachine: {e:#}"));
     boot.close().await;
-    datum_db::migrate::run(
-        db.migrate_pool(),
-        &[
-            ("datum-identity", &datum_identity::MIGRATOR),
-            ("datum-statemachine", &datum_statemachine::MIGRATOR),
-        ],
-    )
-    .await
-    .unwrap_or_else(|e| panic!("migrate identity+sm: {e:#}"));
     let write = WritePool::new(db.app_pool().clone());
     let mut tx = datum_db::Tx::begin(&write, &system_ctx("identity.seed"))
         .await

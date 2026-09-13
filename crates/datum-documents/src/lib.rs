@@ -41,6 +41,7 @@ pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 #[cfg(test)]
 mod tests {
     use super::*;
+    use datum_module as _;
     use proptest::prelude::*;
     use tokio as _;
 

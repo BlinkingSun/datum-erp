@@ -17,12 +17,12 @@ use datum_statemachine::{DocRef, EdgeBuilder, Engine, HookPhase, Machine, Module
 use datum_test::db_case;
 
 use datum_module::{
-    CONTRACT_KERNEL_EDGES, ConfigurationManifest, DELTA_ALLOWED, GateBinding, KERNEL_AUDIT_RELS,
-    KERNEL_ORDER, Kernel, Profile, ProfileId, SLICE_AUDIT_RELS, bind_signature_gate, compiled_in,
-    delta_keys, disable, edges_from_registry, enable, export_manifest, install,
-    is_topological_sort, list_installed, load_kernel_defaults, module_nodes, posting_sink,
-    profile_does_not_rewrite_edges, startup_fails_if_required_meets_no_signatures,
-    topological_order, verify,
+    CANONICAL_ORDER, CONTRACT_KERNEL_EDGES, CONTRACT_SLICE_EDGES, ConfigurationManifest,
+    DELTA_ALLOWED, GateBinding, KERNEL_AUDIT_RELS, KERNEL_ORDER, Kernel, Profile, ProfileId,
+    SLICE_AUDIT_RELS, bind_signature_gate, compiled_in, delta_keys, disable, edges_from_registry,
+    enable, export_manifest, install, is_topological_sort, list_installed, load_kernel_defaults,
+    module_nodes, posting_sink, profile_does_not_rewrite_edges,
+    startup_fails_if_required_meets_no_signatures, topological_order, verify,
 };
 
 use common::{
@@ -52,12 +52,30 @@ fn kernel_order_is_a_topological_sort_of_contract_graph() {
     assert!(KERNEL_ORDER.contains(&"datum-esign"));
     assert!(KERNEL_ORDER.contains(&"datum-customfields"));
     assert!(KERNEL_ORDER.contains(&"datum-documents"));
+    assert!(KERNEL_ORDER.contains(&"datum-print"));
     let pos = |name: &str| KERNEL_ORDER.iter().position(|n| *n == name).unwrap();
     assert!(pos("datum-esign") < pos("datum-documents"));
     assert!(pos("datum-customfields") < pos("datum-documents"));
     assert!(pos("datum-numbering") < pos("datum-documents"));
     assert!(pos("datum-statemachine") < pos("datum-documents"));
-    assert_eq!(*KERNEL_ORDER.last().unwrap(), "datum-documents");
+    assert!(pos("datum-documents") < pos("datum-print"));
+    assert_eq!(*KERNEL_ORDER.last().unwrap(), "datum-module");
+}
+
+#[test]
+fn canonical_order_is_a_topological_sort_of_contract_graph() {
+    assert_eq!(&CANONICAL_ORDER[..KERNEL_ORDER.len()], KERNEL_ORDER);
+    assert!(is_topological_sort(CANONICAL_ORDER, CONTRACT_KERNEL_EDGES));
+    assert!(is_topological_sort(CANONICAL_ORDER, CONTRACT_SLICE_EDGES));
+    let pos = |name: &str| CANONICAL_ORDER.iter().position(|n| *n == name).unwrap();
+    assert_eq!(CANONICAL_ORDER[0], "datum-db");
+    assert_eq!(*CANONICAL_ORDER.last().unwrap(), "datum-server");
+    assert!(pos("datum-module") < pos("datum-mod-items"));
+    assert!(pos("datum-mod-items") < pos("datum-mod-lots"));
+    assert!(pos("datum-mod-locations") < pos("datum-mod-lots"));
+    assert!(pos("datum-mod-lots") < pos("datum-mod-inventory"));
+    assert!(pos("datum-mod-inventory") < pos("datum-mod-production-min"));
+    assert!(pos("datum-mod-genealogy") < pos("datum-server"));
 }
 
 #[test]

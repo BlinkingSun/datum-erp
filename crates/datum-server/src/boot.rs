@@ -1,4 +1,4 @@
-//! Kernel wiring: migrate in `KERNEL_ORDER`, register modules, `Kernel::build`.
+//! Kernel wiring: migrate in `CANONICAL_ORDER`, register modules, `Kernel::build`.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -61,9 +61,9 @@ impl App {
         bind: SocketAddr,
         database_url: String,
     ) -> Result<Self> {
-        // Same order as `install_slice`: Wave 2s slice migrators run *before*
-        // audit attach so `datum.schema_history` inserts are not judged by
-        // `zz_audit_row` (42501). Slice attach set is `SLICE_AUDIT_RELS`.
+        // Same order as `install_upto(..., "datum-server")` / `install_slice`.
+        // `install_privileged` stays up for the whole install (D-2b-11).
+        // Slice attach set is `SLICE_AUDIT_RELS` (belt-and-braces).
         adopt_datum_db_history(migrate).await?;
         install_slice(migrate, bootstrap)
             .await

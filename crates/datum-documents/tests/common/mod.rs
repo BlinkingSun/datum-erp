@@ -24,31 +24,11 @@ pub fn profile_suffix(profile: &str) -> &'static str {
 }
 
 pub async fn migrate(db: &datum_test::TestDb) {
-    datum_db::migrate::run(
-        db.migrate_pool(),
-        &[
-            ("datum-db", &datum_db::MIGRATOR),
-            ("datum-audit", &datum_audit::MIGRATOR),
-        ],
-    )
-    .await
-    .expect("migrate db+audit");
     let boot = db.bootstrap_pool().await.expect("bootstrap");
-    datum_audit::install_privileged(&boot)
+    datum_module::order::install_upto(db.migrate_pool(), &boot, "datum-documents")
         .await
-        .expect("install_privileged");
+        .unwrap_or_else(|e| panic!("install_upto datum-documents: {e:#}"));
     boot.close().await;
-    datum_db::migrate::run(
-        db.migrate_pool(),
-        &[
-            ("datum-identity", &datum_identity::MIGRATOR),
-            ("datum-numbering", &datum_numbering::MIGRATOR),
-            ("datum-statemachine", &datum_statemachine::MIGRATOR),
-            ("datum-documents", &datum_documents::MIGRATOR),
-        ],
-    )
-    .await
-    .unwrap_or_else(|e| panic!("migrate identity+numbering+sm+documents: {e:#}"));
     let write = WritePool::new(db.app_pool().clone());
     let mut tx = datum_db::Tx::begin(&write, &system_ctx("identity.seed"))
         .await
