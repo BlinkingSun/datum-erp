@@ -859,15 +859,15 @@ async fn regulated_release_refused_without_signature_succeeds_with_two_component
         .expect("plain");
     let plain_write = plain.write_pool();
     let wo = DocRef {
-        doc_type: "wo".into(),
+        doc_type: "production".into(),
         doc_id: Identifier::generate(),
     };
-    let actor = actor_with_perms(&plain_write, &["wo.release"]).await;
+    let actor = actor_with_perms(&plain_write, &["production.release"]).await;
     let mut ctx = plain.transition_context(actor, &wo, "release");
     ctx.actor_display = Some("Operator".into());
     ctx.reason = Some("kernel-e2e".into());
     let mut tx = Tx::begin(&plain_write, &ctx).await.expect("spawn wo");
-    plain.spawn(&mut tx, &wo, "Draft").await.expect("spawn wo");
+    plain.spawn(&mut tx, &wo, "draft").await.expect("spawn wo");
     tx.commit().await.expect("spawn wo commit");
     let mut tx = Tx::begin(&plain_write, &ctx).await.expect("plain rel");
     plain
@@ -881,7 +881,7 @@ async fn regulated_release_refused_without_signature_succeeds_with_two_component
                 &dummy_token(&wo, 1, actor),
                 &SignatureRequirement {
                     meaning: SignatureMeaning("Released".into()),
-                    permission: PermissionKey("wo.release".into()),
+                    permission: PermissionKey("production.release".into()),
                 },
                 &wicket_core::RecordRef {
                     table: "sm.instance".into(),

@@ -24,30 +24,37 @@ regulated = false
 
 [[routes]]
 path = "/api/v1/inventory/receipts"
+method = "POST"
 permission = "inventory.receive"
 
 [[routes]]
 path = "/api/v1/inventory/issues"
+method = "POST"
 permission = "inventory.issue"
 
 [[routes]]
 path = "/api/v1/inventory/moves"
+method = "POST"
 permission = "inventory.move"
 
 [[routes]]
 path = "/api/v1/inventory/adjustments"
+method = "POST"
 permission = "inventory.adjust"
 
 [[routes]]
 path = "/api/v1/inventory/counts"
+method = "POST"
 permission = "inventory.count"
 
 [[routes]]
 path = "/api/v1/inventory/on-hand"
+method = "GET"
 permission = "inventory.view"
 
 [[routes]]
 path = "/api/v1/inventory/documents/{id}"
+method = "GET"
 permission = "inventory.view"
 
 [[machines]]

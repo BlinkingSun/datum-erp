@@ -26,6 +26,12 @@ pub static SERVER_MIGRATOR: Migrator = sqlx::migrate!("../wicket-server/migratio
 pub const ITEMS_MANIFEST: &str = include_str!("../../../modules/items/module.toml");
 pub const LOCATIONS_MANIFEST: &str = include_str!("../../../modules/locations/module.toml");
 pub const LOTS_MANIFEST: &str = include_str!("../../../modules/lots/module.toml");
+pub const INVENTORY_MANIFEST: &str = include_str!("../../../modules/inventory/module.toml");
+pub const PRODUCTION_MIN_MANIFEST: &str =
+    include_str!("../../../modules/production_min/module.toml");
+pub const GENEALOGY_MANIFEST: &str = include_str!("../../../modules/genealogy/module.toml");
+/// Test-only compiled-in fixture: there is no `modules/calibration` crate.
+pub const CALIBRATION_MANIFEST: &str = include_str!("../fixtures/mod-calibration.toml");
 
 /// One integrated first-party module the composition root owns.
 pub struct ModuleInstallSpec {
@@ -134,9 +140,10 @@ pub const WAVE_2S1_AUDIT_RELS: &[&str] = &[
     "lots.status_history",
 ];
 
-/// `mod-items` / `mod-lots` register machines from code; skip manifest machines.
-pub fn manifest_machines_owned_by_register(id: &str) -> bool {
-    matches!(id, "mod-items" | "mod-lots")
+/// `mod-items` / `mod-lots` once registered machines from code. TOML is frozen
+/// (AG-4); this is always false.
+pub fn manifest_machines_owned_by_register(_id: &str) -> bool {
+    false
 }
 
 /// Regulated-device profile: lot `release` is a Required signature point.

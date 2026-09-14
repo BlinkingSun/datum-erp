@@ -39,12 +39,15 @@ kind = "genealogy.refresh"
 
 [[routes]]
 path = "/api/v1/genealogy/trace"
+method = "GET"
 permission = "genealogy.view"
 
 [[routes]]
 path = "/api/v1/genealogy/impact/{lot}"
+method = "GET"
 permission = "genealogy.view"
 
 [[routes]]
 path = "/api/v1/genealogy/jobs/{id}"
+method = "GET"
 permission = "genealogy.view"

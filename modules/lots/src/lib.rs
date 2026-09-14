@@ -52,12 +52,11 @@ pub async fn migrate(pool: &wicket_db::Pool) -> Result<()> {
 }
 
 /// Register event schemas, routes, and the lot machine on `builder`.
-pub fn register(builder: &mut KernelBuilder, profile: &Profile) -> Result<()> {
+///
+/// Machines come from `module.toml` via [`KernelBuilder::apply_manifest`] (AG-4).
+pub fn register(builder: &mut KernelBuilder, _profile: &Profile) -> Result<()> {
     register_schemas()?;
-    let mut manifest = manifest()?;
-    manifest.machines.clear();
-    builder.apply_manifest(&manifest)?;
-    builder.register_machine(states::lot_machine(profile)?)?;
+    builder.apply_manifest(&manifest()?)?;
     register_hooks(builder)?;
     Ok(())
 }

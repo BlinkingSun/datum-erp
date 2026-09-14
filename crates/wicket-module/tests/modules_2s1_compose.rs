@@ -9,8 +9,7 @@ use sqlx::query_scalar;
 use std::sync::{Arc, Mutex};
 use wicket_core::{
     AnyQuantity, Boundary, CostElement, CurrencyId, DimensionKind, Identifier, ItemId, LocationId,
-    LotId, Money, PostingIntent, QuantityPosting, SignatureError, UnitId, ValueAccount,
-    ValuePosting,
+    LotId, Money, PostingIntent, QuantityPosting, UnitId, ValueAccount, ValuePosting,
 };
 use wicket_db::Tx;
 use wicket_ledger::{rebuild, upsert_location, verify_projection};
@@ -23,7 +22,7 @@ use wicket_mod_lots::{CreateLot, DOC_TYPE as LOT_DOC, LotStatus, create_lot};
 use wicket_statemachine::{DocRef, Veto};
 use wicket_test::db_case;
 
-use wicket_module::{Kernel, KernelBuilder, Profile, SignatureEdge, lots_release_is_required};
+use wicket_module::{Kernel, KernelBuilder, Profile, SignatureEdge};
 
 use common::{actor_with_perms, boot_ctx, migrate_and_install, pg_code};
 
@@ -240,36 +239,6 @@ async fn compose_once(db: wicket_test::TestDb, profile: Profile, label: &str) {
     rel_ctx.actor_display = Some("Operator".into());
     rel_ctx.reason = Some("2s1-compose".into());
 
-    if lots_release_is_required(&profile) {
-        let mut tx = Tx::begin(&write, &rel_ctx).await.expect("regulated tr");
-        let err = kernel
-            .transition(&mut tx, &doc, "release", None, &rel_ctx)
-            .await
-            .expect_err("Required refuses under NoSignatures");
-        assert!(
-            matches!(
-                err,
-                wicket_module::Error::Statemachine(wicket_statemachine::Error::Signature(
-                    SignatureError::NoProvider
-                ))
-            ) || matches!(
-                err,
-                wicket_module::Error::Statemachine(wicket_statemachine::Error::Signature(
-                    SignatureError::Invalid(_)
-                ))
-            ),
-            "{label}: signature gate must refuse, got {err:?}"
-        );
-        tx.rollback().await.ok();
-        let groups: i64 = query_scalar("SELECT count(*) FROM ledger.posting_group")
-            .fetch_one(db.app_pool())
-            .await
-            .expect("groups");
-        assert_eq!(groups, 0, "{label}: Required must post nothing");
-        db.finish().await.expect("finish");
-        return;
-    }
-
     let mut tx = Tx::begin(&write, &rel_ctx).await.expect("release tr");
     kernel
         .transition(&mut tx, &doc, "release", None, &rel_ctx)
@@ -338,12 +307,19 @@ async fn modules_2s1_compose_regulated_device() {
     register_wave_2s1(&mut builder, &profile);
     let kernel = builder.build().await.expect("build for edge list");
     assert!(
-        kernel.profile.required_edges().iter().any(|e| matches!(
+        !kernel.profile.required_edges().iter().any(|e| matches!(
             e,
             SignatureEdge::Required { module, edge, .. }
                 if module == LOT_DOC && edge == "release"
         )),
-        "regulated profile lists lot.release Required"
+        "TOML freezes lot.release as NotRequired (AG-4)"
+    );
+    assert!(
+        kernel.profile.required_edges().iter().any(|e| matches!(
+            e,
+            SignatureEdge::Required { edge, .. } if edge == "approve"
+        )),
+        "regulated profile still lists calibration.certificate.approve Required"
     );
     db.finish().await.expect("finish edge probe");
 

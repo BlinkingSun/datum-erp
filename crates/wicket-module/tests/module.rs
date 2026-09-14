@@ -18,11 +18,12 @@ use wicket_test::db_case;
 
 use wicket_module::{
     CANONICAL_ORDER, CONTRACT_KERNEL_EDGES, CONTRACT_SLICE_EDGES, ConfigurationManifest,
-    DELTA_ALLOWED, GateBinding, KERNEL_AUDIT_RELS, KERNEL_ORDER, Kernel, Profile, ProfileId,
-    SLICE_AUDIT_RELS, SignatureEdge, bind_signature_gate, compiled_in, delta_keys, disable,
-    edges_from_registry, enable, export_manifest, install, is_topological_sort, list_installed,
-    load_kernel_defaults, module_nodes, posting_sink, profile_does_not_rewrite_edges,
-    startup_fails_if_required_meets_no_signatures, topological_order, verify,
+    DELTA_ALLOWED, GateBinding, KERNEL_AUDIT_RELS, KERNEL_ORDER, Kernel, ModuleManifest, Profile,
+    ProfileId, SLICE_AUDIT_RELS, SignatureEdge, bind_signature_gate, compiled_in, delta_keys,
+    disable, edges_from_registry, enable, export_manifest, install, is_topological_sort,
+    list_installed, load_kernel_defaults, module_nodes, posting_sink,
+    profile_does_not_rewrite_edges, startup_fails_if_required_meets_no_signatures,
+    topological_order, verify,
 };
 
 use common::{
@@ -109,6 +110,79 @@ fn both_profiles_carry_eleven_keys_and_load() {
         b.modules
             .iter()
             .any(|m| m.id == "mod-calibration" && !m.enabled)
+    );
+}
+
+#[test]
+fn compiled_in_matches_first_party_module_toml() {
+    let catalog = compiled_in().unwrap();
+    let files: &[(&str, &str)] = &[
+        (
+            "mod-items",
+            include_str!("../../../modules/items/module.toml"),
+        ),
+        (
+            "mod-locations",
+            include_str!("../../../modules/locations/module.toml"),
+        ),
+        (
+            "mod-lots",
+            include_str!("../../../modules/lots/module.toml"),
+        ),
+        (
+            "mod-inventory",
+            include_str!("../../../modules/inventory/module.toml"),
+        ),
+        (
+            "mod-production-min",
+            include_str!("../../../modules/production_min/module.toml"),
+        ),
+        (
+            "mod-genealogy",
+            include_str!("../../../modules/genealogy/module.toml"),
+        ),
+    ];
+    for (id, toml) in files {
+        let parsed = ModuleManifest::parse(toml).unwrap_or_else(|e| panic!("{id}: {e}"));
+        let compiled = catalog.iter().find(|m| m.id == *id).expect(id);
+        assert_eq!(compiled.id, parsed.id, "{id} id");
+        assert_eq!(compiled.version, parsed.version, "{id} version");
+        assert_eq!(compiled.permissions, parsed.permissions, "{id} permissions");
+        assert_eq!(compiled.regulated, parsed.regulated, "{id} regulated");
+        assert_eq!(compiled.jobs, parsed.jobs, "{id} jobs");
+        assert_eq!(
+            compiled.subscriptions, parsed.subscriptions,
+            "{id} subscriptions"
+        );
+        assert_eq!(compiled.routes, parsed.routes, "{id} routes");
+    }
+}
+
+#[test]
+fn parse_routes_requires_method() {
+    let err = ModuleManifest::parse(
+        r#"
+[module]
+id = "mod-x"
+version = "0.1.0"
+name = "X"
+description = "x"
+[dependencies]
+kernel = "^0.1"
+[permissions]
+"x.view" = "View"
+[capabilities]
+requires-signature = []
+regulated = false
+[[routes]]
+path = "/api/v1/x"
+permission = "x.view"
+"#,
+    )
+    .expect_err("method required");
+    assert!(
+        err.to_string().contains("method"),
+        "missing method must fail parse, got {err}"
     );
 }
 
@@ -730,7 +804,6 @@ async fn enable_closes_over_dependencies() {
     tx.commit().await.expect("commit");
     for id in [
         "mod-genealogy",
-        "mod-production-min",
         "mod-inventory",
         "mod-items",
         "mod-locations",
@@ -738,6 +811,11 @@ async fn enable_closes_over_dependencies() {
     ] {
         assert_eq!(module_enabled(db.app_pool(), id).await, Some(true), "{id}");
     }
+    assert_eq!(
+        module_enabled(db.app_pool(), "mod-production-min").await,
+        Some(false),
+        "genealogy does not depend on production_min"
+    );
     db.finish().await.expect("finish");
 }
 

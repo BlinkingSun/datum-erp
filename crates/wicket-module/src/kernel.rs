@@ -1,7 +1,7 @@
 //! `Kernel::build`: wiring, seeds, freeze, spawn/transition glue, startup guard.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use serde_json::Value;
@@ -25,7 +25,6 @@ use crate::documents::{
     emit_effective, emit_revision_created, register_document_event_schemas,
     register_document_machine,
 };
-use crate::install_graph::manifest_machines_owned_by_register;
 use crate::manifest::{
     ManifestMachine, ManifestSubscription, ModuleManifest, compiled_in, compiled_in_graph, hex,
 };
@@ -51,6 +50,8 @@ struct PendingHook {
 pub struct ModuleRoute {
     /// Owning module id.
     pub module_id: String,
+    /// HTTP method (`GET`, `POST`, `PATCH`, …).
+    pub method: String,
     /// Path prefix.
     pub path: String,
     /// Permission that gates the route.
@@ -215,6 +216,7 @@ impl KernelBuilder {
         for r in &manifest.routes {
             self.extra_routes.push(ModuleRoute {
                 module_id: manifest.id.clone(),
+                method: r.method.clone(),
                 path: r.path.clone(),
                 permission: r.permission.clone(),
             });
@@ -282,7 +284,21 @@ impl Kernel {
         engine.register_machine(wicket_customfields::definition_machine(
             profile.id.as_str(),
         )?)?;
+        let catalog_types: BTreeSet<String> = catalog
+            .iter()
+            .filter(|m| {
+                profile
+                    .modules
+                    .iter()
+                    .find(|p| p.id == m.id)
+                    .is_some_and(|p| p.enabled)
+            })
+            .flat_map(|m| m.machines.iter().map(|mach| mach.doc_type.clone()))
+            .collect();
         for machine in extra_machines {
+            if catalog_types.contains(&machine.doc_type) {
+                continue;
+            }
             engine.register_machine(machine)?;
         }
         for hook in extra_hooks {
@@ -953,17 +969,6 @@ fn first_party_projection_types() -> Result<BTreeSet<String>> {
             types.insert(machine.doc_type);
         }
     }
-    for raw in [
-        crate::install_graph::ITEMS_MANIFEST,
-        crate::install_graph::LOTS_MANIFEST,
-        include_str!("../../../modules/inventory/module.toml"),
-        include_str!("../../../modules/production_min/module.toml"),
-    ] {
-        let m = ModuleManifest::parse(raw)?;
-        for machine in m.machines {
-            types.insert(machine.doc_type);
-        }
-    }
     Ok(types)
 }
 
@@ -1080,14 +1085,13 @@ fn register_enabled_from_manifests(
         if !enabled {
             continue;
         }
-        if !manifest_machines_owned_by_register(&m.id) {
-            for machine in &m.machines {
-                engine.register_machine(machine_from_decl(machine)?)?;
-            }
+        for machine in &m.machines {
+            engine.register_machine(machine_from_decl(machine)?)?;
         }
         for r in &m.routes {
             routes.push(ModuleRoute {
                 module_id: m.id.clone(),
+                method: r.method.clone(),
                 path: r.path.clone(),
                 permission: r.permission.clone(),
             });
@@ -1101,6 +1105,22 @@ fn register_enabled_from_manifests(
         }
     }
     Ok((routes, subscriptions, job_kinds))
+}
+
+/// Intern a TOML reason so [`EdgeBuilder::not_required`] can take `&'static str`.
+fn intern_static(s: &str) -> &'static str {
+    static POOL: OnceLock<Mutex<BTreeSet<&'static str>>> = OnceLock::new();
+    let pool = POOL.get_or_init(|| Mutex::new(BTreeSet::new()));
+    let mut g = match pool.lock() {
+        Ok(g) => g,
+        Err(p) => p.into_inner(),
+    };
+    if let Some(existing) = g.get(s).copied() {
+        return existing;
+    }
+    let leaked: &'static str = Box::leak(s.to_owned().into_boxed_str());
+    g.insert(leaked);
+    leaked
 }
 
 pub(crate) fn machine_from_decl(decl: &ManifestMachine) -> Result<Machine> {
@@ -1125,6 +1145,8 @@ pub(crate) fn machine_from_decl(decl: &ManifestMachine) -> Result<Machine> {
                 meaning: SignatureMeaning(meaning),
                 permission: PermissionKey(perm),
             });
+        } else if let Some(reason) = e.reason.as_deref() {
+            edge = edge.not_required(intern_static(reason));
         }
         b = b.edge(edge);
     }
@@ -1140,4 +1162,41 @@ fn hold_wave2b_edges() {
 /// Graph nodes for the compiled-in catalog (tests / hook-order).
 pub fn module_nodes() -> Result<Vec<ModuleNode>> {
     compiled_in_graph()
+}
+
+#[cfg(test)]
+mod machine_decl_tests {
+    use super::*;
+    use wicket_statemachine::SignatureDeclaration;
+
+    #[test]
+    fn not_required_reason_survives_machine_from_decl() {
+        let m = ModuleManifest::parse(crate::install_graph::ITEMS_MANIFEST).expect("items");
+        let machine = machine_from_decl(&m.machines[0]).expect("machine");
+        assert_eq!(machine.edges.len(), 2);
+        for e in &machine.edges {
+            match &e.signature {
+                SignatureDeclaration::NotRequired { reason } => {
+                    assert_eq!(
+                        *reason,
+                        "item release is not a regulated signature point in v1"
+                    );
+                }
+                other => panic!("expected NotRequired, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn required_meaning_survives_machine_from_decl() {
+        let m = ModuleManifest::parse(crate::install_graph::CALIBRATION_MANIFEST).expect("cal");
+        let machine = machine_from_decl(&m.machines[0]).expect("machine");
+        match &machine.edges[0].signature {
+            SignatureDeclaration::Required(req) => {
+                assert_eq!(req.meaning.0, "Approved");
+                assert_eq!(req.permission.0, "calibration.approve");
+            }
+            other => panic!("expected Required, got {other:?}"),
+        }
+    }
 }
