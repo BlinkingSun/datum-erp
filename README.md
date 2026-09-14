@@ -2,7 +2,7 @@
 
 <p align="center"><img src="design/icon-wicket-512.png" width="160" alt="Wicket ERP icon"></p>
 
-Conforms to: [ADR 0003](docs/adr/0003-database.md) (Accepted, as amended), [ADR 0006](docs/adr/0006-license.md) (Accepted).
+Conforms to: [ADR 0003](docs/adr/0003-database.md) (Accepted, as amended), [ADR 0006](docs/adr/0006-license.md) (Accepted), [ADR 0010](docs/adr/0010-one-registry.md) (Proposed).
 
 ## 1. What this is
 
@@ -22,13 +22,14 @@ A plain shop — a job shop that is not regulated — runs the same binary with 
 
 Half a day of reading. There is no shortcut.
 
-1. **[docs/00-erp-primer.md](docs/00-erp-primer.md)** — what an ERP does, taught by following one order of titanium bone screws from a customer request through to a recall query eighteen months later. Written for someone who has never worked inside one. Start here even if you think you know.
-2. **[docs/01-vision-and-scope.md](docs/01-vision-and-scope.md)** — who this is for and what it refuses to do.
-3. **[docs/02-architecture.md](docs/02-architecture.md)** — the kernel and module split, and the ledger.
-4. **[docs/adr/](docs/adr/)** — nine decisions, each with its costs stated. `README.md` indexes them.
-5. **[PLAN.md](PLAN.md)** — the three-wave build, seventeen invariants, and the crate contract.
-6. **[research/README.md](research/README.md)** — where the evidence lives.
-7. **[DESIGN.md](DESIGN.md)** — binding interface rules.
+1. **[GOALS.md](GOALS.md)** — the four things that must be true of every capability this project grows: it is legible to an AI agent, every function has an API, a shop can migrate onto it from an incumbent ERP, and both installing it and improving it are followable. Short, and binding. Section 6 states what is true today, which is mostly "not yet".
+2. **[docs/00-erp-primer.md](docs/00-erp-primer.md)** — what an ERP does, taught by following one order of titanium bone screws from a customer request through to a recall query eighteen months later. Written for someone who has never worked inside one. Start here even if you think you know.
+3. **[docs/01-vision-and-scope.md](docs/01-vision-and-scope.md)** — who this is for and what it refuses to do.
+4. **[docs/02-architecture.md](docs/02-architecture.md)** — the kernel and module split, and the ledger.
+5. **[docs/adr/](docs/adr/)** — ten decisions, each with its costs stated. `README.md` indexes them.
+6. **[PLAN.md](PLAN.md)** — the three-wave build, seventeen invariants, and the crate contract.
+7. **[research/README.md](research/README.md)** — where the evidence lives.
+8. **[DESIGN.md](DESIGN.md)** — binding interface rules.
 
 ## 5. Building
 
@@ -42,6 +43,8 @@ Wicket is licensed under the GNU Affero General Public License v3.0 or later; se
 
 ## 7. Contributing
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) before you open a pull request.
+Read [GOALS.md](GOALS.md) and then [CONTRIBUTING.md](CONTRIBUTING.md) before you open a pull request.
+Every pull request answers the four goals. The CI check that enforces this is ABSENT (promised: `TODO.md` T-06); until it lands the maintainer enforces it by hand.
+[TODO.md](TODO.md) is the sequenced backlog, and its Stage 0 is startable today.
 Use `git commit -s` so every commit carries a Developer Certificate of Origin sign-off.
 The public repository is https://github.com/BlinkingSun/wicket-erp.

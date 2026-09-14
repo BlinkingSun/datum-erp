@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/BlinkingSun/wicket-erp/security/policy
+    about: Do not open a public issue for a vulnerability. Follow SECURITY.md.
+  - name: Read the goals first
+    url: https://github.com/BlinkingSun/wicket-erp/blob/main/GOALS.md
+    about: Four goals govern what this project accepts. Proposals are judged against them.
