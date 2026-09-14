@@ -62,3 +62,44 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ripgrep postgresql-client
       - name: just db-reset then just ci-db
         run: just db-reset && just ci-db
+
+  lint-policy:
+    name: lint-policy
+    runs-on: ubuntu-latest
+    steps:
+      # Default pull_request checkout is the merge commit GitHub creates,
+      # which has no Signed-off-by. Inspect the PR head (or the push SHA).
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Check DCO sign-off
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            git fetch origin "$BASE_REF"
+            bash scripts/check-dco.sh "origin/${BASE_REF}..HEAD"
+          else
+            zeros=0000000000000000000000000000000000000000
+            if [ -z "${BEFORE:-}" ] || [ "$BEFORE" = "$zeros" ]; then
+              bash scripts/check-dco.sh HEAD
+            else
+              git fetch --no-tags origin "$BEFORE" 2>/dev/null || true
+              bash scripts/check-dco.sh "${BEFORE}..${SHA}"
+            fi
+          fi
+
+      - name: Check pull-request goal headings
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: bash scripts/check-pr-goals.sh
+
+      - name: Scan for unimplemented macros
+        run: bash scripts/lint-unimplemented.sh
