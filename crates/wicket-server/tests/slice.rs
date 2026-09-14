@@ -22,8 +22,8 @@ use wicket_db::{Tx, WriteContext, WritePool};
 use wicket_ledger::{GroupBuilder, post, rebuild, verify_projection};
 use wicket_module::Profile;
 use wicket_server::{
-    Config, bootstrap_against_app, openapi_document, registered_operations, rewrite_database,
-    run_iq, startup_guard_release, with_os_userinfo,
+    Config, bootstrap_against_app, capability_operations, openapi_document, registered_operations,
+    rewrite_database, run_iq, startup_guard_release, with_os_userinfo,
 };
 use wicket_statemachine::{EdgeBuilder, Engine, Machine};
 
@@ -1548,12 +1548,13 @@ async fn openapi_listed_paths_are_not_bare_404() {
         let w = common::boot(profile).await;
         let (st, body) = w.get("/api/v1/openapi.json").await;
         assert_eq!(st, StatusCode::OK, "{body}");
-        // Served document vs live router (not MOUNTED vs itself). Source-level
-        // router vs MOUNTED is scripts/lint-mounts.sh.
+        // T-25: served document equals the capability table; probes hit the live
+        // router (not a second copy of the table).
         let listed = registered_operations(&body);
-        assert!(
-            !listed.is_empty(),
-            "served OpenAPI document has no operations"
+        let table = capability_operations();
+        assert_eq!(
+            listed, table,
+            "served OpenAPI path+method set must equal the capability table"
         );
         for (method, path) in &listed {
             let probe = path.replace("{id}", &uuid::Uuid::nil().to_string());

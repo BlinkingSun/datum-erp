@@ -1,148 +1,100 @@
 #!/usr/bin/env bash
-# Reverse-diff: axum `.route(` table vs MOUNTED (ADR 0010 interim / T-23).
-# Extra or missing METHOD+path pairs fail. POSIX bash 3.2; portable awk.
+# T-24: the capability table is the only route source.
+# - http.rs must not contain a string-literal .route("...") mount
+# - every capability id in capabilities.rs has a match arm in http.rs
+# POSIX bash 3.2; portable awk.
 set -eu
 
 ROOT="${REPO_ROOT:-$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)}"
 HTTP="$ROOT/crates/wicket-server/src/http.rs"
-OPENAPI="$ROOT/crates/wicket-server/src/openapi.rs"
+CAPS="$ROOT/crates/wicket-server/src/capabilities.rs"
 
 if [ ! -f "$HTTP" ]; then
   echo "lint-mounts: missing router source: $HTTP" >&2
   exit 1
 fi
-if [ ! -f "$OPENAPI" ]; then
-  echo "lint-mounts: missing OpenAPI table: $OPENAPI" >&2
+if [ ! -f "$CAPS" ]; then
+  echo "lint-mounts: missing capability table: $CAPS" >&2
   exit 1
 fi
 
-extract_router() {
+# Ignore comments and string contents that mention the ban.
+if grep -n -E '^[^/]*\.route\("' "$HTTP" >/dev/null 2>&1; then
+  echo "lint-mounts: hand-written string-literal route mount in http.rs:" >&2
+  grep -n -E '^[^/]*\.route\("' "$HTTP" >&2
+  exit 1
+fi
+
+extract_ids() {
   awk '
-    {
-      src = src $0 "\n"
+    /kernel\(|module\(/ { want = 1 }
+    want && /"/ {
+      n = split($0, parts, "\"")
+      if (n >= 2 && parts[2] != "") {
+        print parts[2]
+        found++
+      }
+      want = 0
     }
     END {
-      n = length(src)
-      i = 1
-      found = 0
-      while (i <= n) {
-        rest = substr(src, i)
-        p = index(rest, ".route(")
-        if (p == 0) break
-        i = i + p + 5
-        depth = 1
-        start = i + 1
-        i++
-        while (i <= n && depth > 0) {
-          c = substr(src, i, 1)
-          if (c == "(") depth++
-          else if (c == ")") depth--
-          i++
-        }
-        body = substr(src, start, i - start - 1)
-        q1 = index(body, "\"")
-        if (q1 == 0) continue
-        after = substr(body, q1 + 1)
-        q2 = index(after, "\"")
-        if (q2 == 0) continue
-        path = substr(after, 1, q2 - 1)
-        nm = split("get post put patch delete", meths, " ")
-        for (mi = 1; mi <= nm; mi++) {
-          needle = meths[mi] "("
-          off = 1
-          while (1) {
-            chunk = substr(body, off)
-            at = index(chunk, needle)
-            if (at == 0) break
-            abs = off + at - 1
-            ok = 1
-            if (abs > 1) {
-              prev = substr(body, abs - 1, 1)
-              if (prev ~ /[A-Za-z0-9_]/) ok = 0
-            }
-            if (ok) {
-              print toupper(meths[mi]) " " path
-              found++
-            }
-            off = abs + length(needle)
-          }
-        }
+      if (found + 0 == 0) {
+        print "lint-mounts: extracted 0 capability ids" > "/dev/stderr"
+        exit 1
       }
-      if (found == 0) {
-        print "lint-mounts: extracted 0 routes from http.rs" > "/dev/stderr"
+    }
+  ' "$CAPS"
+}
+
+extract_arms() {
+  awk '
+    /"[A-Za-z][A-Za-z0-9_]*" =>/ {
+      n = split($0, parts, "\"")
+      if (n >= 2 && parts[2] != "") {
+        print parts[2]
+        found++
+      }
+    }
+    END {
+      if (found + 0 == 0) {
+        print "lint-mounts: extracted 0 handler arms from http.rs" > "/dev/stderr"
         exit 1
       }
     }
   ' "$HTTP"
 }
 
-extract_mounted() {
-  awk '
-    /method: "/ {
-      n = split($0, parts, "\"")
-      method = ""
-      if (n >= 2) method = parts[2]
-    }
-    /path: "/ {
-      n = split($0, parts, "\"")
-      path = ""
-      if (n >= 2) path = parts[2]
-      if (method != "" && path != "") {
-        print method " " path
-        found++
-      }
-      method = ""
-    }
-    END {
-      if (found + 0 == 0) {
-        print "lint-mounts: extracted 0 entries from MOUNTED" > "/dev/stderr"
-        exit 1
-      }
-    }
-  ' "$OPENAPI"
-}
+ids="$(extract_ids | sort -u)"
+arms="$(extract_arms | sort -u)"
 
-router_ops="$(extract_router | sort -u)"
-mounted_ops="$(extract_mounted | sort -u)"
-
-router_n="$(printf '%s\n' "$router_ops" | grep -c . || true)"
-mounted_n="$(printf '%s\n' "$mounted_ops" | grep -c . || true)"
-
-if [ "$router_n" -eq 0 ]; then
-  echo "lint-mounts: extracted 0 routes from http.rs" >&2
-  exit 1
-fi
-if [ "$mounted_n" -eq 0 ]; then
-  echo "lint-mounts: extracted 0 entries from MOUNTED" >&2
-  exit 1
-fi
+id_n="$(printf '%s\n' "$ids" | grep -c . || true)"
+arm_n="$(printf '%s\n' "$arms" | grep -c . || true)"
 
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/lint-mounts.XXXXXX")"
 cleanup() { rm -rf "$tmp"; }
 trap cleanup EXIT
 trap 'cleanup; exit 130' INT TERM
 
-printf '%s\n' "$router_ops" > "$tmp/router"
-printf '%s\n' "$mounted_ops" > "$tmp/mounted"
+printf '%s\n' "$ids" > "$tmp/ids"
+printf '%s\n' "$arms" > "$tmp/arms"
 
-extra_router="$(comm -23 "$tmp/router" "$tmp/mounted" || true)"
-extra_mounted="$(comm -13 "$tmp/router" "$tmp/mounted" || true)"
+extra_ids="$(comm -23 "$tmp/ids" "$tmp/arms" || true)"
+extra_arms="$(comm -13 "$tmp/ids" "$tmp/arms" || true)"
 
 fail=0
-if [ -n "$extra_router" ]; then
-  echo "lint-mounts: extra in router (missing from MOUNTED):" >&2
-  printf '%s\n' "$extra_router" | sed 's/^/  /' >&2
+if [ -n "$extra_ids" ]; then
+  echo "lint-mounts: capability ids with no handler arm:" >&2
+  printf '%s\n' "$extra_ids" | sed 's/^/  /' >&2
   fail=1
 fi
-if [ -n "$extra_mounted" ]; then
-  echo "lint-mounts: extra in MOUNTED (missing from router):" >&2
-  printf '%s\n' "$extra_mounted" | sed 's/^/  /' >&2
+if [ -n "$extra_arms" ]; then
+  echo "lint-mounts: handler arms with no capability id:" >&2
+  printf '%s\n' "$extra_arms" | sed 's/^/  /' >&2
   fail=1
 fi
 
 if [ "$fail" -ne 0 ]; then
-  echo "lint-mounts: $router_n router ops, $mounted_n MOUNTED ops" >&2
+  echo "lint-mounts: $id_n capability ids, $arm_n handler arms" >&2
   exit 1
 fi
 
-echo "lint-mounts: $router_n method+path pairs match"
+echo "lint-mounts: $id_n capability ids bound; no string-literal mounts"

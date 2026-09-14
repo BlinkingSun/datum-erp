@@ -12,6 +12,7 @@ use wicket_numbering as _;
 use wicket_uom as _;
 
 mod boot;
+mod capabilities;
 mod cli;
 mod config;
 mod envelope;
@@ -28,6 +29,9 @@ mod wire;
 pub use boot::{
     App, AppState, BootError, build_kernel, install_test_blob_root, migrate_slice_modules, run_iq,
     startup_guard_release,
+};
+pub use capabilities::{
+    Capability, CapabilityKind, operations as capability_operations, table as capabilities,
 };
 pub use config::{Config, bootstrap_against_app, rewrite_database, with_os_userinfo};
 pub use envelope::{ErrorBody, ListBody};

@@ -23,8 +23,7 @@ T-13 (licence-identifier backfill), T-17 (GitHub merge settings, owner).
 
 **Stage 1 is the keystone, and it is blocked on accepting
 [ADR 0010](docs/adr/0010-one-registry.md).** Seven separate items from four analyses
-collapse into it. T-20, T-21, T-22, T-23, and T-26 have landed. T-24, T-25, and
-T-27 have not. Stages 2 and 3 must not start before T-24 lands.
+collapse into it. T-20 through T-27 have landed. Stage 2 (T-30) is the next coverage wave.
 
 Stages 2 through 5 are ordered by dependency, not by importance. Stage 5 is the largest
 and can only begin once Stage 2 gives it a catalogue to map onto.
@@ -71,11 +70,11 @@ drift independently; three found the dropped route method independently.
 | T-20 | **DONE.** Single manifest source. `compiled_in()` reads each `module.toml` rather than embedding a copy | M | — | No inline manifest strings remain in `crates/wicket-module/src/manifest.rs`; first-party modules are `include_str!` of `modules/*/module.toml`; calibration (no crate) is a fixture. A test fails on drift between the compiled-in catalogue and the file on disk |
 | T-21 | **DONE.** Routes carry their method | S | T-20 | `[[routes]]` requires `method`; `ManifestRoute` and `ModuleRoute` store it; the local re-parse in `modules/items/src/lib.rs` is deleted |
 | T-22 | **DONE.** Machines survive registration | M | T-20 | Declared machines are the machines the engine freezes, including not-required reasons; `register()` no longer clears them |
-| T-23 | **DONE.** Mount reverse-diff lint | S | — | `scripts/lint-mounts.sh` extracts mounts from the router and compares them to `MOUNTED`, failing on any difference. Wired into `just ci`. The circular table-to-itself test is gone |
-| T-24 | The capability table, and a router generated from it | L | T-21, T-23 | One table is the only route source; the three catalogues collapse into it; a hand-written mount fails the lint |
-| T-25 | Document generated from the table; parity test reads the router | M | T-24 | The served document's method and path set equals the table, and the test derives one side from the router |
+| T-23 | **DONE.** Mount reverse-diff lint | S | — | Landed as the interim step; T-24 replaced the lint so it binds capability ids rather than grepping `.route("` vs `MOUNTED` |
+| T-24 | **DONE.** The capability table, and a router generated from it | L | T-21, T-23 | `crates/wicket-server/src/capabilities.rs` is the only route source. `http.rs` binds handlers by capability id. `scripts/lint-mounts.sh` fails a string-literal `.route("` and an unbound id |
+| T-25 | **DONE.** Document generated from the table; parity test reads the router | M | T-24 | OpenAPI is generated from the capability table. `openapi_listed_paths_are_not_bare_404` asserts the served document equals the table and probes the live router |
 | T-26 | **DONE.** Collapse the duplicate work-order namespace | S | T-23 | `/api/v1/work-orders` is the only prefix. `/api/v1/production/work-orders` is gone, not aliased |
-| T-27 | Module manifest lint | M | T-20 | Fails when a module's crate name, identifier and schema disagree, or when it is missing from the canonical order or either profile |
+| T-27 | **DONE.** Module manifest lint | M | T-20 | `scripts/lint-module-manifests.sh` fails when a first-party module's crate name, identifier, schema, canonical order, or either profile disagree. Wired into `just ci` |
 
 ---
 

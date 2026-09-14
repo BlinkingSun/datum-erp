@@ -100,3 +100,8 @@ permission = "lots.edit"
 path = "/api/v1/lots/{id}/packages"
 method = "GET"
 permission = "lots.view"
+
+[[routes]]
+path = "/api/v1/lots/{id}/packages"
+method = "POST"
+permission = "lots.edit"

@@ -83,12 +83,12 @@ exist only as a Rust `pub fn`, a clap subcommand, or a SQL statement. CI proves 
 by walking that registry against mounts, machines, jobs, and the CLI. A missing row
 fails the build.
 
-This goal is currently false, and not marginally. The live surface is a hand-written
-table in `crates/wicket-server/src/http.rs`; the OpenAPI document is generated
-from a **second** hand-written table (`MOUNTED` in `crates/wicket-server/src/openapi.rs`);
-and the module manifests declare a **third** set that the server does not yet generate
-mounts from. `scripts/lint-mounts.sh` (T-23) fails when the first two disagree.
-Generating both from one capability table is ABSENT (promised: `TODO.md` T-24, T-25).
+This goal is currently false, and not marginally. The live surface is the
+capability table in `crates/wicket-server/src/capabilities.rs`, which generates
+the router and the OpenAPI document (T-24, T-25). First-party `module.toml`
+still declares routes the process does not mount (item list, inventory issues,
+…). Mounting those is T-30. A coverage walk of every engine edge and CLI verb
+is ABSENT (promised: `TODO.md` T-43).
 
 Capabilities that exist in Rust and cannot be reached over the wire today include
 listing items, patching a location, listing lots, moving or adjusting stock, voiding a

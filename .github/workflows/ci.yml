@@ -103,3 +103,6 @@ jobs:
 
       - name: Scan for unimplemented macros
         run: bash scripts/lint-unimplemented.sh
+
+      - name: Module manifest identity
+        run: bash scripts/lint-module-manifests.sh

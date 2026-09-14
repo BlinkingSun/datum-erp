@@ -14,12 +14,11 @@ stranger reaches it through `/api/v1` under both `regulated-device` and
 `plain-shop` (`PLAN.md` §1a) with an expected result written next to the command
 (`GOALS.md` DOC-1). A `pub fn` with no mount is inventory.
 
-Goal 2 is false (`GOALS.md` §6). `compiled_in()` reads first-party `module.toml`
-via `include_str!` and `ManifestRoute` stores `method` (T-20, T-21). A reverse-diff
-lint (`scripts/lint-mounts.sh`, T-23) fails when the axum router and the OpenAPI
-`MOUNTED` table disagree. The router is still hand-written. Generating the router
-and the document from one capability table is ABSENT (promised: `TODO.md` T-24,
-T-25; ADR 0010 Proposed).
+Goal 2 is false (`GOALS.md` §6). One capability table
+(`crates/wicket-server/src/capabilities.rs`) generates the router and the
+OpenAPI document (T-24, T-25). `scripts/lint-mounts.sh` fails a string-literal
+`.route("` and an unbound capability id. Unmounted `module.toml` routes remain
+off the table until T-30.
 
 Kernel work that does not advance Wave 2s slice acceptance (`PLAN.md` §3 Wave 2s,
 thirteen assertions; `docs/07-roadmap.md` §2.3) is inventory, not progress. The
@@ -33,7 +32,7 @@ Green `just ci` is not slice acceptance.
 
 | Ban | Evidence |
 |---|---|
-| Must not open a new crate or module while Goal 2 is false. | The HTTP router and the OpenAPI `MOUNTED` table are still two handwritten lists (`crates/wicket-server/src/http.rs`, `crates/wicket-server/src/openapi.rs`). `scripts/lint-mounts.sh` fails on drift between those two. Module manifests are a third declaration the server does not yet generate mounts from. More mounts before T-24/T-25 land are debt. |
+| Must not open a new crate or module while Goal 2 is false. | The capability table is the mount source. Unmounted `module.toml` routes (T-30) are still declared and not mounted. Adding a handler without a table row, or a table row without a handler, is fail-class. |
 | Must not write an unbuilt mechanism in the present tense. | Every sentence is `is`, `must`, or `ABSENT (promised: TODO.md T-NN)`. |
 | Must not edit a file another lane owns. | 39 of 41 `integrate: merge` commits in this repository are tagged overlapping ownership. A three-way merge is not an integration strategy. One writer per file per wave. The second lane must escalate and stop. |
 | Must not grow the Goal 2 allowlist to park an awkward public function. | `GOALS.md` API-10. Allowlist growth is a change to `GOALS.md`, reviewed as one, not a nit. |
@@ -101,6 +100,5 @@ An agent proposing to clean any of these has not read the tree.
 must not describe the rate limit as live.
 
 An agent must read `README.md`, `GOALS.md`, and `docs/07-roadmap.md` before
-writing a word. `TODO.md` Stage 1 (T-20–T-27) is the keystone. T-20, T-21, T-22, T-23, and T-26
-have landed. T-24, T-25, and T-27 have not. Stages 2 and 3 must not start before
-T-24 lands.
+writing a word. `TODO.md` Stage 1 (T-20–T-27) has landed. Stage 2 coverage (T-30) is next:
+mount the module reads and writes that already have handlers.

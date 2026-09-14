@@ -396,12 +396,16 @@ sqlx-prepare crate:
     DATABASE_URL="${WICKET_MIGRATE_DATABASE_URL:?WICKET_MIGRATE_DATABASE_URL is required}" \
       cargo sqlx prepare --manifest-path "{{root}}/crates/{{crate}}/Cargo.toml" -- --all-targets --all-features
 
-# Reverse-diff axum `.route(` mounts vs MOUNTED (ADR 0010 / T-23).
+# T-24: capability ids bound; no string-literal .route("...") mounts.
 lint-mounts:
     bash "{{root}}/scripts/lint-mounts.sh"
 
-# Offline CI: format, clippy, SQL fence, mount lint, lib tests.
-ci: fmt-check clippy lint-sql lint-mounts test-lib
+# T-27: first-party module crate/id/schema/order/profile agreement.
+lint-module-manifests:
+    bash "{{root}}/scripts/lint-module-manifests.sh"
+
+# Offline CI: format, clippy, SQL fence, mount lint, module manifests, lib tests.
+ci: fmt-check clippy lint-sql lint-mounts lint-module-manifests test-lib
 
 # CI plus database tests (`ci` then `test-db`). This recipe, not `ci`, runs the
 # integration tests under crates/*/tests/, including Wave 2s slice acceptance,
