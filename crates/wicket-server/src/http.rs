@@ -56,20 +56,6 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/work-orders/{id}/complete",
             post(handlers::complete_wo),
         )
-        .route("/api/v1/production/work-orders", post(handlers::create_wo))
-        .route("/api/v1/production/work-orders/{id}", get(handlers::get_wo))
-        .route(
-            "/api/v1/production/work-orders/{id}/release",
-            post(handlers::release_wo),
-        )
-        .route(
-            "/api/v1/production/work-orders/{id}/issue",
-            post(handlers::issue_wo),
-        )
-        .route(
-            "/api/v1/production/work-orders/{id}/complete",
-            post(handlers::complete_wo),
-        )
         .route("/api/v1/genealogy/trace", get(handlers::genealogy_trace))
         .route(
             "/api/v1/calibration/certificates/{id}/approve",
