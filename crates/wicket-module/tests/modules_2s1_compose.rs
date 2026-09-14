@@ -22,7 +22,7 @@ use wicket_mod_lots::{CreateLot, DOC_TYPE as LOT_DOC, LotStatus, create_lot};
 use wicket_statemachine::{DocRef, Veto};
 use wicket_test::db_case;
 
-use wicket_module::{Kernel, KernelBuilder, Profile, SignatureEdge};
+use wicket_module::{Kernel, KernelBuilder, Profile, ProfileId, SignatureEdge};
 
 use common::{actor_with_perms, boot_ctx, migrate_and_install, pg_code};
 
@@ -240,11 +240,26 @@ async fn compose_once(db: wicket_test::TestDb, profile: Profile, label: &str) {
     rel_ctx.reason = Some("2s1-compose".into());
 
     let mut tx = Tx::begin(&write, &rel_ctx).await.expect("release tr");
-    kernel
+    let release = kernel
         .transition(&mut tx, &doc, "release", None, &rel_ctx)
-        .await
-        .expect("lot release posts receipt");
-    tx.commit().await.expect("commit release");
+        .await;
+    match profile.id {
+        ProfileId::PlainShop => {
+            release.expect("plain-shop lot release posts receipt");
+            tx.commit().await.expect("commit release");
+        }
+        ProfileId::RegulatedDevice => {
+            let err = release.expect_err("regulated unsigned lot.release is refused");
+            assert!(
+                matches!(
+                    err,
+                    wicket_module::Error::Statemachine(wicket_statemachine::Error::Signature(_))
+                ),
+                "{label}: unsigned regulated release: {err}"
+            );
+            tx.rollback().await.expect("rollback refused release");
+        }
+    }
 
     let qty: Decimal = query_scalar(
         "SELECT COALESCE(SUM(quantity), 0) FROM ledger.posting WHERE measure = 'QUANTITY'",
@@ -262,15 +277,17 @@ async fn compose_once(db: wicket_test::TestDb, profile: Profile, label: &str) {
             .expect("cfg ver");
     assert_eq!(cfg_ver, profile.spec_version, "{label}: config_version");
 
-    let app_ver: String = query_scalar(
-        "SELECT app_version FROM audit.event
-          WHERE table_name = 'posting_group' AND op = 'INSERT'
-          ORDER BY at DESC LIMIT 1",
-    )
-    .fetch_one(db.app_pool())
-    .await
-    .expect("audit app");
-    assert!(!app_ver.is_empty(), "{label}: audit app_version");
+    if profile.id == ProfileId::PlainShop {
+        let app_ver: String = query_scalar(
+            "SELECT app_version FROM audit.event
+              WHERE table_name = 'posting_group' AND op = 'INSERT'
+              ORDER BY at DESC LIMIT 1",
+        )
+        .fetch_one(db.app_pool())
+        .await
+        .expect("audit app");
+        assert!(!app_ver.is_empty(), "{label}: audit app_version");
+    }
 
     let werr = sqlx::query("UPDATE items.item SET description = 'x' WHERE id = $1")
         .bind(item.id.as_uuid())
@@ -307,12 +324,12 @@ async fn modules_2s1_compose_regulated_device() {
     register_wave_2s1(&mut builder, &profile);
     let kernel = builder.build().await.expect("build for edge list");
     assert!(
-        !kernel.profile.required_edges().iter().any(|e| matches!(
+        kernel.profile.required_edges().iter().any(|e| matches!(
             e,
             SignatureEdge::Required { module, edge, .. }
                 if module == LOT_DOC && edge == "release"
         )),
-        "TOML freezes lot.release as NotRequired (AG-4)"
+        "lot_machine overlay: regulated lot.release is Required (ADR 0005)"
     );
     assert!(
         kernel.profile.required_edges().iter().any(|e| matches!(
