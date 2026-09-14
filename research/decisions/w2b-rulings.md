@@ -130,4 +130,4 @@ A transient-class schema (`server_transient`, `inventory_transient`, …) must n
 
 **Ruling: a `Cargo.lock` diff is never a fail-class finding against a lane.** Audits and adjudications must not fail a lane on lockfile churn. **CONTRACT:** lanes never commit `Cargo.lock`; the integrator regenerates it once on the integrate branch (`cargo generate-lockfile`) at landing.
 
-Origin: ruled by the orchestrator 2026-09-13 01:11 after `audit-wicket-documents-r2-x2` failed a rework leg partly on lockfile churn; applied to the wicket-documents adjudication charter; recorded in `_team/reports/CLOSURES.md`.
+Origin: ruled by the orchestrator 2026-09-13 01:11 after `audit-wicket-documents-r2-x2` failed a rework leg partly on lockfile churn; applied to the wicket-documents adjudication charter; recorded in an unpublished run record; substance is in this file.

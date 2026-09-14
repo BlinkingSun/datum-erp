@@ -174,11 +174,11 @@ async fn gate_wrapped_transitions_under_both_profiles() {
         (
             "plain-shop",
             Profile::plain_shop().unwrap(),
-            "wo",
-            "Draft",
+            "production",
+            "draft",
             "release",
             "Released",
-            "wo.release",
+            "production.release",
             false,
         ),
     ] {
@@ -250,16 +250,19 @@ async fn hook_postings_reach_the_ledger() {
     let stock = LocationId::generate();
     let supplier = LocationId::generate();
     let mut builder = Kernel::builder(db.app_pool().clone(), Profile::plain_shop().unwrap());
-    builder.register_hook("mod-production-min", "wo", "release", move |_v, sink| {
-        contribute_receipt(sink, item, stock, supplier)
-    });
+    builder.register_hook(
+        "mod-production-min",
+        "production",
+        "release",
+        move |_v, sink| contribute_receipt(sink, item, stock, supplier),
+    );
     let kernel = builder.build().await.expect("build");
     let write = kernel.write_pool();
     let doc = DocRef {
-        doc_type: "wo".into(),
+        doc_type: "production".into(),
         doc_id: Identifier::generate(),
     };
-    let (actor, _) = actor_with_perm(&write, "wo.release", &doc, "release").await;
+    let (actor, _) = actor_with_perm(&write, "production.release", &doc, "release").await;
     let mut ctx = kernel.transition_context(actor, &doc, "release");
     ctx.actor_display = Some("Operator".into());
     ctx.reason = Some("module-glue-test".into());
@@ -285,7 +288,7 @@ async fn hook_postings_reach_the_ledger() {
     tx.commit().await.expect("commit reg");
 
     let mut tx = Tx::begin(&write, &ctx).await.expect("spawn");
-    kernel.spawn(&mut tx, &doc, "Draft").await.expect("spawn");
+    kernel.spawn(&mut tx, &doc, "draft").await.expect("spawn");
     tx.commit().await.expect("commit spawn");
 
     let mut tx = Tx::begin(&write, &ctx).await.expect("tr");
@@ -355,7 +358,7 @@ async fn hook_postings_reach_the_ledger() {
         "SELECT count(*) FROM audit.event
           WHERE table_name IN ('instance', 'posting_group', 'posting')
             AND actor_id <> $1
-            AND action LIKE 'wo.%'",
+            AND action LIKE 'production.%'",
     )
     .bind(actor.id.as_uuid())
     .fetch_one(db.app_pool())
@@ -375,12 +378,12 @@ async fn hook_postings_reach_the_ledger() {
         .expect("build empty");
     let write = kernel.write_pool();
     let doc = DocRef {
-        doc_type: "wo".into(),
+        doc_type: "production".into(),
         doc_id: Identifier::generate(),
     };
-    let (_, ctx) = actor_with_perm(&write, "wo.release", &doc, "release").await;
+    let (_, ctx) = actor_with_perm(&write, "production.release", &doc, "release").await;
     let mut tx = Tx::begin(&write, &ctx).await.expect("spawn");
-    kernel.spawn(&mut tx, &doc, "Draft").await.expect("spawn");
+    kernel.spawn(&mut tx, &doc, "draft").await.expect("spawn");
     tx.commit().await.expect("commit spawn");
     let mut tx = Tx::begin(&write, &ctx).await.expect("tr");
     kernel
@@ -463,10 +466,10 @@ async fn units_in_the_same_transaction() {
         .expect("build");
     let write = kernel.write_pool();
     let doc = DocRef {
-        doc_type: "wo".into(),
+        doc_type: "production".into(),
         doc_id: Identifier::generate(),
     };
-    let (_, ctx) = actor_with_perm(&write, "wo.release", &doc, "release").await;
+    let (_, ctx) = actor_with_perm(&write, "production.release", &doc, "release").await;
     let item = ItemId::generate();
     let lot = LotId::generate();
     let mut tx = Tx::begin(&write, &ctx).await.expect("begin");
@@ -513,7 +516,7 @@ async fn units_in_the_same_transaction() {
     let (canonical, residual) = converted.split(Rounding::HalfEven);
     assert_eq!(canonical.amount(), Decimal::ONE);
     let _ = residual;
-    kernel.spawn(&mut tx, &doc, "Draft").await.expect("spawn");
+    kernel.spawn(&mut tx, &doc, "draft").await.expect("spawn");
     kernel
         .transition(&mut tx, &doc, "release", None, &ctx)
         .await
@@ -531,12 +534,12 @@ async fn events_and_jobs_are_live() {
         .expect("build");
     let write = kernel.write_pool();
     let doc = DocRef {
-        doc_type: "wo".into(),
+        doc_type: "production".into(),
         doc_id: Identifier::generate(),
     };
-    let (_, ctx) = actor_with_perm(&write, "wo.release", &doc, "release").await;
+    let (_, ctx) = actor_with_perm(&write, "production.release", &doc, "release").await;
     let mut tx = Tx::begin(&write, &ctx).await.expect("begin");
-    kernel.spawn(&mut tx, &doc, "Draft").await.expect("spawn");
+    kernel.spawn(&mut tx, &doc, "draft").await.expect("spawn");
     kernel
         .transition(&mut tx, &doc, "release", None, &ctx)
         .await
@@ -620,6 +623,7 @@ subscriber = "mod-glue-test"
 
 [[routes]]
 path = "/api/v1/glue"
+method = "GET"
 permission = "glue.view"
 
 [[jobs]]
@@ -671,7 +675,7 @@ kind = "glue.tick"
         kernel
             .subscriptions
             .iter()
-            .any(|s| s.event == "inventory.lot_received" && s.subscriber == "wicket-jobs")
+            .any(|s| s.event == "inventory.lot_received" && s.subscriber == "mod-genealogy")
     );
     assert!(
         kernel

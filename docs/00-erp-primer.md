@@ -1,5 +1,7 @@
 # What an ERP Actually Does
 
+Audience: contributor. Status: historical.
+
 *Written for someone who builds things but has never worked inside an ERP. Read this
 first. Everything else in `docs/` assumes the vocabulary introduced here.*
 

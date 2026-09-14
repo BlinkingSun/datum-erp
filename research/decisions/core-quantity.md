@@ -3,8 +3,8 @@
 **Decider:** Opus (decision authority, team task `erp`, decision D1)
 **Date:** 2026-09-11
 **Status:** DECIDED. This is the frozen public contract for `wicket-core`. Wave 1 builds to it.
-**Inputs:** `_team/reports/sweep-plan-typed-qty.md`, `_team/reports/plan-audit.md` (§0.2, R2, G7, D1),
-`_team/reports/sweep-plan-ledger.md`, `_team/reports/sweep-plan-proptests.md` §§387–394,
+**Inputs:** `research/audits/slice-typed-quantity.md`, `research/audits/plan-audit.md` (§0.2, R2, G7, D1),
+`research/audits/slice-ledger.md`, `research/audits/slice-property-tests.md` §§387–394,
 `PLAN.md` §5, `docs/02-architecture.md` §2, `docs/adr/0002-backend-language.md`, `docs/adr/0004-append-only-ledger.md`.
 **Amends:** `PLAN.md` §5, `docs/adr/0002-backend-language.md`.
 
@@ -27,7 +27,7 @@ ADR 0002 cites — and it addresses only half of it, which §7 and §9 state pla
 
 ## 1. Reconciliation with the ledger decision lane
 
-`_team/reports/DECISION-ledger-invariant.md` **does not exist** as of this writing. I checked.
+The ledger decision (later promoted into `research/decisions/ledger-invariant.md`) **does not exist** as of this writing. I checked.
 This decision therefore states its dependencies as explicit assumptions. Reconcile before Wave 1
 freezes, or this contract needs a named amendment.
 

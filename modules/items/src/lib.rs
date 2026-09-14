@@ -46,17 +46,11 @@ pub async fn migrate(pool: &wicket_db::Pool) -> Result<()> {
 
 /// Register routes, events, and the item state machine on `builder`.
 ///
-/// Machines are registered through [`KernelBuilder::register_machine`] with an
-/// explicit [`wicket_statemachine::SignatureDeclaration::NotRequired`] reason
-/// (the composition-root TOML converter does not preserve `reason` on
-/// non-required edges).
+/// Machines come from `module.toml` via [`KernelBuilder::apply_manifest`] (AG-4).
 pub fn register(builder: &mut KernelBuilder, _profile: &Profile) -> Result<()> {
     events::register_event_schemas()?;
     hooks::register_hooks(builder);
-    let mut manifest = manifest()?;
-    manifest.machines.clear();
-    builder.apply_manifest(&manifest)?;
-    builder.register_machine(item_machine()?)?;
+    builder.apply_manifest(&manifest()?)?;
     Ok(())
 }
 
@@ -173,13 +167,17 @@ mod tests {
             );
         }
 
-        let toml_routes = parse_toml_routes(include_str!("../module.toml"));
-        assert_eq!(
-            toml_routes, EXPECTED,
-            "module.toml [[routes]] must match ROUTES"
-        );
-
         let m = manifest().expect("module.toml");
+        assert_eq!(m.routes.len(), EXPECTED.len());
+        for (route, (method, path, perm)) in m.routes.iter().zip(EXPECTED) {
+            assert_eq!(route.method, *method, "toml method for {}", route.path);
+            assert_eq!(route.path, *path);
+            assert_eq!(
+                route.permission, *perm,
+                "toml permission for {method} {path}"
+            );
+        }
+
         let release = m
             .machines
             .iter()
@@ -187,51 +185,6 @@ mod tests {
             .find(|e| e.name == "release")
             .expect("release edge");
         assert_eq!(release.permission, "items.release");
-    }
-
-    fn parse_toml_routes(toml: &str) -> Vec<(&str, &str, &str)> {
-        let mut out = Vec::new();
-        let mut path = None;
-        let mut method = None;
-        let mut permission = None;
-        let mut in_routes = false;
-        for line in toml.lines() {
-            let line = line.trim();
-            if line == "[[routes]]" {
-                if let (Some(p), Some(m), Some(perm)) = (path, method, permission) {
-                    out.push((m, p, perm));
-                }
-                path = None;
-                method = None;
-                permission = None;
-                in_routes = true;
-                continue;
-            }
-            if line.starts_with('[') && line != "[[routes]]" {
-                if in_routes && let (Some(p), Some(m), Some(perm)) = (path, method, permission) {
-                    out.push((m, p, perm));
-                }
-                in_routes = false;
-                path = None;
-                method = None;
-                permission = None;
-                continue;
-            }
-            if !in_routes {
-                continue;
-            }
-            if let Some(v) = line.strip_prefix("path = ") {
-                path = Some(v.trim_matches('"'));
-            } else if let Some(v) = line.strip_prefix("method = ") {
-                method = Some(v.trim_matches('"'));
-            } else if let Some(v) = line.strip_prefix("permission = ") {
-                permission = Some(v.trim_matches('"'));
-            }
-        }
-        if in_routes && let (Some(p), Some(m), Some(perm)) = (path, method, permission) {
-            out.push((m, p, perm));
-        }
-        out
     }
 
     use serde_json::Value;

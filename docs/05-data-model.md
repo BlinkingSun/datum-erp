@@ -1,6 +1,8 @@
 # Kernel data model
 
-**Conforms to:** [ADR 0004](adr/0004-append-only-ledger.md), [ADR 0005](adr/0005-compliance-in-kernel.md), [ADR 0008](adr/0008-single-tenant.md); `research/decisions/core-quantity.md` (D1), `research/decisions/ledger-invariant.md` (D2), `research/decisions/audit-persistence.md` (D3/D4), `research/decisions/install-story.md` (D5); `_team/reports/DECISION-w1-contracts.md` **D-W1-1** (money column scale, AMENDMENT A1) and **D-W1-2** (schema classes `app` / `transient` / `audit`).
+Audience: contributor. Status: shipped.
+
+**Conforms to:** [ADR 0004](adr/0004-append-only-ledger.md), [ADR 0005](adr/0005-compliance-in-kernel.md), [ADR 0008](adr/0008-single-tenant.md); `research/decisions/core-quantity.md` (D1), `research/decisions/ledger-invariant.md` (D2), `research/decisions/audit-persistence.md` (D3/D4), `research/decisions/install-story.md` (D5); `research/decisions/w1-contracts.md` **D-W1-1** (money column scale, AMENDMENT A1) and **D-W1-2** (schema classes `app` / `transient` / `audit`).
 
 This document is what a Wave 2 lane writes migrations from and what a contributor reads to learn what a record *is*. SQL restated from the decisions is byte-faithful unless noted; AMENDMENT A1 lines are footnoted **D-W1-1**. Storage money columns use **`numeric(24,6)`** only (D1 §4.1, D-W1-1).
 
@@ -8,7 +10,7 @@ This document is what a Wave 2 lane writes migrations from and what a contributo
 
 ## 1. Ledger
 
-Source: `research/decisions/ledger-invariant.md` §§2, 4, 5, 7; AMENDMENT A1 in `_team/reports/DECISION-w1-contracts.md`.
+Source: `research/decisions/ledger-invariant.md` §§2, 4, 5, 7; AMENDMENT A1 in `research/decisions/w1-contracts.md`.
 
 ### 1.1 Balance slices and predicates
 
@@ -320,7 +322,7 @@ REVOKE SET ON PARAMETER session_replication_role FROM wicket_app;
 
 `wicket_app` holds **`TRUNCATE` nowhere**. **`ON DELETE CASCADE` is banned in every schema**, including `transient` (PLAN §6b item 16 as amended).
 
-Default privileges pattern: `_team/reports/DECISION-w1-contracts.md` §2.4 (`dev/sql/02-grants.sql` owned by harness lane).
+Default privileges pattern: `research/decisions/w1-contracts.md` §2.4 (`dev/sql/02-grants.sql` owned by harness lane).
 
 ### 3.3 `audit.event` (shape)
 

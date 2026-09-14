@@ -4,8 +4,8 @@
 **Inputs read:** `research/decisions/core-quantity.md` §§1, 2.5, 4.1 (D1);
 `research/decisions/ledger-invariant.md` §§2 P2, 5.2, 7 R1–R6 (D2);
 `research/decisions/audit-persistence.md` §§1.1, 1.3, 1.4 (D3);
-`PLAN.md` §6b item 16; `_team/specs/SPEC-doc-datamodel.md` items 1–2;
-`_team/specs/SPEC-harness.md` §`dev/sql` and tests.
+`PLAN.md` §6b item 16; unpublished spec later promoted into `docs/05-data-model.md` (items 1–2);
+unpublished harness spec; substance is in this file §2.4 and `dev/sql/`.
 `research/` is evidence and is **not edited**; the amendment notes below are the
 operative text wherever they conflict with it.
 
@@ -138,7 +138,7 @@ authoring guide.
 >    `posting_group` header, the `posting` table with the measure-shape constraint, the
 >    consumption edge (§5.3), the deferred constraint trigger's obligations (§5.4), and
 >    the boundary matrix. **Restate §5.2 and §7 R6 with AMENDMENT A1 of
->    `_team/reports/DECISION-w1-contracts.md` applied**: `amount` is `numeric(24,6)` and
+>    `research/decisions/w1-contracts.md` applied**: `amount` is `numeric(24,6)` and
 >    `unit_cost_applied` is `numeric(24,8)`, not the `numeric(19,4)` / `numeric(19,8)`
 >    printed in the decision. Footnote each amended line with `D-W1-1`; every other line
 >    of §5.2 stays byte-faithful, and no money-scale `CHECK` is invented. State P2's

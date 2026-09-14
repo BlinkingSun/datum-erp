@@ -1,5 +1,7 @@
 # Competitive Landscape
 
+Audience: operator. Status: historical.
+
 Conforms to: `docs/adr/0004-append-only-ledger.md`, `docs/adr/0005-compliance-in-kernel.md`,
 `docs/adr/0006-license.md` (Accepted 2026-09-12), `docs/adr/0007-defer-general-ledger.md`,
 `docs/adr/0008-single-tenant.md`.

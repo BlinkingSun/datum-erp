@@ -1,5 +1,7 @@
 # Build Roadmap
 
+Audience: contributor. Status: partial.
+
 *What gets built in what order, what each step proves, and what a shop can actually
 use at each point. Nothing in this document is scheduled with dates: the build is
 parallel lanes on a single critical path, and the honest unit of progress is a gate that
@@ -65,7 +67,7 @@ Wave names and contents match `PLAN.md` v2 §3.
 | **What lands** | Batches in dependency order: `wicket-db` (DDL, migrations, roles, version stamping); `wicket-audit` (trigger attachment, hash chain); `wicket-identity`, `wicket-numbering`, `wicket-uom`, `wicket-events`; **`wicket-ledger` (the gate)**; `wicket-statemachine`, `wicket-jobs`; minimal `wicket-module` with profile configuration frozen per D-W1-5. |
 | **What it proves** | Postings conserve per balance slice; withdrawals allocate; audit rows attach to every mutating write; actors are mandatory; the deferred constraint canary fails when armed; state transitions can require signatures by declaration (refused under `NoSignatures` until Wave 2b). |
 | **What a shop can do** | Nothing yet. Still no HTTP API and no inventory screens. |
-| **Gate** | Wave 2 does not close until `PLAN.md` §7 ledger property suite passes in **commit mode** with the canary armed. Batch 2.6 consumes `_team/specs/SPEC-profiles.md` (eleven keys from D-W1-5). |
+| **Gate** | Wave 2 does not close until `PLAN.md` §7 ledger property suite passes in **commit mode** with the canary armed. Batch 2.6 consumes the eleven D-W1-5 keys in `research/decisions/traits-profiles.md`. |
 
 ### 2.3 Wave 2s — the vertical slice
 
@@ -162,7 +164,7 @@ these in daily screens; it still pays storage for them.
 requirements. `mod-genealogy` is `regulated = false`; slice acceptance runs unchanged on
 both profiles.
 
-Profile keys are frozen in `_team/specs/SPEC-profiles.md` before Wave 2 batch 2.6.
+Profile keys are frozen in `research/decisions/traits-profiles.md` (D-W1-5, eleven keys) before Wave 2 batch 2.6.
 
 ---
 

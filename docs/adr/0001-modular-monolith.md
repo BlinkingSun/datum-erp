@@ -1,5 +1,7 @@
 # 0001. Modular monolith, not microservices
 
+Audience: contributor. Status: shipped.
+
 Status:   Proposed
 Date:     2026-09-11
 Decider:  project lead

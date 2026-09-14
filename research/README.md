@@ -1,5 +1,7 @@
 # Research
 
+Audience: contributor. Status: historical+living index.
+
 Roughly 119,000 words of adversarial review and primary-source research, produced
 2026-09-11 before any code was written. It exists because four of the project's founding
 assumptions turned out to be wrong, and the record of *why* they were wrong is worth more
@@ -59,7 +61,7 @@ it, it says so.
 If you are about to contradict something here, that is allowed. Write down why, the way
 the decision records do.
 
-Decisions made during the foundation build (2026-09-12), promoted from the run's `_team/reports/`:
+Decisions made during the foundation build (2026-09-12), promoted from the run's excluded working directory:
 
 - `decisions/w1-contracts.md` — D-W1-1 (money column `numeric(24,6)`, `unit_cost_applied numeric(24,8)`; AMENDMENT A1 to `ledger-invariant.md` §5.2) and D-W1-2 (`wicket_app` holds DELETE only in schema `transient`; invariant 16 reworded to records).
 - `decisions/traits-profiles.md` — D-W1-3 (`PostingSink`, final text), D-W1-4 (`SignatureGate`, final text, total `SignatureDeclaration` on regulated edges), D-W1-5 (installation profiles: runtime enablement, module-owned signature requirements, the eleven `SPEC-profiles` keys).

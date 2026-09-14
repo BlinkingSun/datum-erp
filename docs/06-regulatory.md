@@ -1,5 +1,7 @@
 # Regulatory requirements
 
+Audience: quality. Status: partial.
+
 Conforms to: [ADR 0005](adr/0005-compliance-in-kernel.md) as amended, and
 `research/decisions/audit-persistence.md` (D3/D4).
 

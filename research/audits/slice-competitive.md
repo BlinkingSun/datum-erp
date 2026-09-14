@@ -324,7 +324,7 @@ Replace “What ERPNext and Odoo Community use” with: “ERPNext is GPL-3.0 (F
 ## 11. EXECUTOR / TIER / opus re-scope
 
 **`doc-landscape` (`docs/08-competitive-landscape.md`)**
-- **EXECUTOR:** grok or cursor, **gated on spike** — PLAN already gates this on `_team/reports/spike-landscape.md`. **Keep the gate.** Also require this file (`sweep-plan-competitive.md`) as a MUST-READ so the lane cannot paste `docs/01` §5.
+- **EXECUTOR:** grok or cursor, **gated on spike** — PLAN already gates this on the landscape spike (promoted into `research/background/competitive-landscape.md`). **Keep the gate.** Also require this file as a MUST-READ so the lane cannot paste `docs/01` §5.
 - **TIER:** **deep**, not standard. False sentences here become README and pitch. Standard prose audit will not catch “ERPNext has no ledger.”
 - **Must include:** ProShop as primary commercial analogue; JobBOSS²+Qualio as the common two-system stack; ERPNext SLE sourced from `stock_ledger.py` (append-mostly, not append-only); Odoo Quality = Enterprise; Paperless Parts owns CAD-to-quote; ADR 0006 license facts; explicit “what is not a wedge.”
 - **Must not include:** “every OSS ERP got immutability wrong”; “no ERP ingests STEP”; “AGPL is what they use.”
@@ -373,7 +373,7 @@ Replace “What ERPNext and Odoo Community use” with: “ERPNext is GPL-3.0 (F
 
 - Did not install ERPNext or Odoo and click through. Claims about EE-only upstream/downstream rest on forum + partner docs, not a live EE trial.
 - Did not obtain vendor quotes. Prices are third-party 2026 ranges; treat as order-of-magnitude.
-- Did not read a Spike landscape report — `spike-landscape.md` is not in `_team/reports/` yet (only `spike-probe.md` = “PROBE OK”).
+- Did not read a Spike landscape report — `spike-landscape.md` is not in the run's excluded working directory yet (only `spike-probe.md` = “PROBE OK”).
 - Did not edit product files, `docs/01`, PLAN, or ADRs.
 
 END

@@ -1,5 +1,7 @@
 # HTTP API conventions
 
+Audience: contributor. Status: partial.
+
 **Conforms to:** [ADR 0005](adr/0005-compliance-in-kernel.md), [ADR 0008](adr/0008-single-tenant.md), [ADR 0009](adr/0009-ui-stack.md); `docs/03-module-system.md` §3.4 and §7; `research/decisions/core-quantity.md` (D1).
 
 This is the public HTTP contract every module's routes follow. A third-party module that registers routes under its namespace appears in the generated OpenAPI document and gets a typed client for free (`docs/03-module-system.md` §3.4). The first-party UI is a client of the same surface (ADR 0009). `wicket-server` in Wave 2s implements exactly this, for the slice endpoints in §9.

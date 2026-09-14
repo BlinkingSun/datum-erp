@@ -1,5 +1,7 @@
 # CONTRACT — the Wicket workspace (Wave 1, frozen)
 
+Audience: contributor. Status: shipped.
+
 This file is the integration contract for every code lane. Where it and
 `research/audits/slice-wave1-stubs.md` disagree, **this file wins** (it carries the v2
 deltas). Where it is silent, that audit's §4, §5 and §7 are normative.
@@ -242,7 +244,7 @@ Design: a **synchronous collector with one finalize point**. A hook or transitio
 into the sink; `wicket-ledger` implements the sink as a group builder and, at `finalize`, inserts the
 group header, the postings and the consumption edges in the one database transaction the transition
 runs in. Core has no async and no database. Shapes mirror `research/decisions/ledger-invariant.md`
-§4.1, §5.1–5.3. **Ratified by DECISION D-W1-3** (`_team/reports/DECISION-traits-profiles.md`);
+§4.1, §5.1–5.3. **Ratified by DECISION D-W1-3** (`research/decisions/traits-profiles.md`);
 the text below is that ruling's, verbatim, and the core race builds it verbatim.
 
 Derives, uniformly: `Debug + Clone` on every struct and enum below; additionally

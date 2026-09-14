@@ -43,13 +43,12 @@ pub fn manifest() -> Result<ModuleManifest> {
 }
 
 /// Register event schemas, routes, and the work-order state machine on `builder`.
+///
+/// Machines come from `module.toml` via [`KernelBuilder::apply_manifest`] (AG-4).
 pub fn register(builder: &mut KernelBuilder, _profile: &Profile) -> Result<()> {
     register_schemas()?;
     register_hooks(builder)?;
-    let mut manifest = manifest()?;
-    manifest.machines.clear();
-    builder.apply_manifest(&manifest)?;
-    builder.register_machine(work_order_machine()?)?;
+    builder.apply_manifest(&manifest()?)?;
     Ok(())
 }
 

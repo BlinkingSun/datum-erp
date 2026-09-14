@@ -17,16 +17,20 @@ regulated = false
 
 [[routes]]
 path = "/api/v1/locations"
+method = "GET"
 permission = "locations.view"
 
 [[routes]]
 path = "/api/v1/locations/{id}"
+method = "GET"
 permission = "locations.view"
 
 [[routes]]
 path = "/api/v1/locations/tree"
+method = "GET"
 permission = "locations.view"
 
 [[routes]]
 path = "/api/v1/locations/{id}/deactivate"
+method = "POST"
 permission = "locations.edit"

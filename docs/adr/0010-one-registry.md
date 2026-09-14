@@ -1,5 +1,7 @@
 # 0010. One capability registry generates the router, the document, and the agent surface
 
+Audience: contributor. Status: absent.
+
 Status:   **Proposed**
 Date:     2026-09-13
 Decider:  project owner

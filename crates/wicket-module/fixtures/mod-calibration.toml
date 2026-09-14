@@ -1,0 +1,46 @@
+[module]
+id = "mod-calibration"
+version = "0.1.0"
+name = "Gage Calibration"
+description = "Calibration schedules and certificate approval"
+
+[dependencies]
+kernel = "^0.1"
+
+[permissions]
+"calibration.view" = "View calibration records"
+"calibration.approve" = "Approve a calibration certificate"
+
+[capabilities]
+requires-signature = ["calibration.approve"]
+regulated = true
+
+[[machines]]
+doc_type = "calibration.certificate"
+regulated = true
+states = ["Open", "Approved"]
+
+[[machines.edges]]
+from = "Open"
+to = "Approved"
+name = "approve"
+permission = "calibration.approve"
+required = true
+meaning = "Approved"
+signature_permission = "calibration.approve"
+
+[[routes]]
+path = "/api/v1/calibration"
+method = "GET"
+permission = "calibration.view"
+
+[[custom-fields]]
+entity = "items.item"
+key = "udi_device_identifier"
+type = "string"
+label = "UDI-DI"
+validate = "gs1-gtin"
+audit = true
+required = false
+indexed = false
+owner = "mod-calibration"

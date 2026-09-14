@@ -1,5 +1,7 @@
 # Module Catalog
 
+Audience: contributor. Status: partial.
+
 *The full intended surface of the system, what each piece does, what it needs, and
 roughly when it gets built. Sizes are rough: S is days, M is weeks, L is a month or
 two, XL is a quarter or more, for one experienced developer.*

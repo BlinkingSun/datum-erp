@@ -17,31 +17,31 @@ clippy:
 
 # String-level raw-SQL fence (CONTRACT §5a / §5a.1). Fails on any hit outside wicket-db / wicket-audit / wicket-test.
 # Session-protocol scans *.rs and src *.sql (FINDINGS-1 #9: stamp_esign.sql evaded *.rs).
-# Migrations have their own session-protocol plant (lint-sql-migrations.sh).
+# First scan covers crates/ and modules/ (T-58). Migrations have their own plant.
 lint-sql:
     command -v rg >/dev/null 2>&1 || { echo 'lint-sql: ripgrep (rg) is required' >&2; exit 1; }
     if rg -n --glob '*.rs' --glob '*.sql' --glob '!**/migrations/**' \
         --glob '!**/wicket-db/**' --glob '!**/wicket-audit/**' --glob '!**/wicket-test/**' \
         -e 'QueryBuilder' -e 'raw_sql' -e 'copy_in_raw' -e 'set_config' -e 'current_setting' \
-        "{{root}}/crates"; then \
+        "{{root}}/crates" "{{root}}/modules"; then \
       echo "lint-sql: session-protocol SQL token outside crates/wicket-db, crates/wicket-audit, and crates/wicket-test" >&2; \
       exit 1; \
     fi
     if rg -n -U --multiline-dotall --glob '*.rs' --glob '!**/wicket-db/**' --glob '!**/wicket-audit/**' --glob '!**/wicket-test/**' \
         -e 'allow\(.{0,400}?clippy::disallowed_' \
-        "{{root}}/crates"; then \
+        "{{root}}/crates" "{{root}}/modules"; then \
       echo "lint-sql: clippy disallowed allow outside crates/wicket-db, crates/wicket-audit, and crates/wicket-test" >&2; \
       exit 1; \
     fi
     if rg -n --glob 'build.rs' --glob '!**/wicket-db/**' --glob '!**/wicket-audit/**' --glob '!**/wicket-test/**' \
         -e 'sqlx' \
-        "{{root}}/crates"; then \
+        "{{root}}/crates" "{{root}}/modules"; then \
       echo "lint-sql: sqlx token in build.rs outside crates/wicket-db, crates/wicket-audit, and crates/wicket-test" >&2; \
       exit 1; \
     fi
     if rg -n --glob '*.rs' --glob '!**/wicket-db/**' --glob '!**/wicket-audit/**' --glob '!**/wicket-test/**' \
         -e 'GRANT ' -e 'CREATE DATABASE' \
-        "{{root}}/crates"; then \
+        "{{root}}/crates" "{{root}}/modules"; then \
       echo "lint-sql: GRANT or CREATE DATABASE outside crates/wicket-db, crates/wicket-audit, and crates/wicket-test" >&2; \
       exit 1; \
     fi
@@ -198,14 +198,21 @@ lint-sql-selftest:
       exit 1; \
     fi; \
     echo 'lint-sql-selftest: stamp_esign.sql is gone'; \
+    plant_session_sql_mod="$tmp/modules/items/src/_lint_sql_session_mod.sql"; \
     printf '%s\n' "SELECT pg_catalog.set_config('wicket.esign_id', 'lint-selftest', true);" > "$plant_session_sql"; \
     printf '%s\n' "SELECT pg_catalog.set_config('wicket.esign_id', 'lint-selftest', true);" > "$plant_session_sql_ok"; \
+    printf '%s\n' "SELECT pg_catalog.set_config('wicket.esign_id', 'lint-selftest', true);" > "$plant_session_sql_mod"; \
     session_out="$(rg -n --glob '*.rs' --glob '*.sql' --glob '!**/migrations/**' \
       --glob '!**/wicket-db/**' --glob '!**/wicket-audit/**' --glob '!**/wicket-test/**' \
       -e 'QueryBuilder' -e 'raw_sql' -e 'copy_in_raw' -e 'set_config' -e 'current_setting' \
-      "$tmp/crates" 2>&1 || true)"; \
+      "$tmp/crates" "$tmp/modules" 2>&1 || true)"; \
     if ! printf '%s\n' "$session_out" | grep -F 'crates/wicket-server/src/_lint_sql_session_include.sql' >/dev/null; then \
       echo 'lint-sql-selftest: expected session-protocol lint to report planted src *.sql set_config' >&2; \
+      printf '%s\n' "$session_out" >&2; \
+      exit 1; \
+    fi; \
+    if ! printf '%s\n' "$session_out" | grep -F 'modules/items/src/_lint_sql_session_mod.sql' >/dev/null; then \
+      echo 'lint-sql-selftest: expected session-protocol lint to report planted modules/ src *.sql set_config' >&2; \
       printf '%s\n' "$session_out" >&2; \
       exit 1; \
     fi; \
@@ -215,8 +222,9 @@ lint-sql-selftest:
       exit 1; \
     fi; \
     echo 'lint-sql-selftest: planted src *.sql set_config correctly rejected'; \
+    echo 'lint-sql-selftest: planted modules/ src *.sql set_config correctly rejected'; \
     echo 'lint-sql-selftest: wicket-db src *.sql set_config correctly allowed'; \
-    rm -f "$plant_session_sql" "$plant_session_sql_ok"; \
+    rm -f "$plant_session_sql" "$plant_session_sql_ok" "$plant_session_sql_mod"; \
     plant_dyn_doc="$tmp/crates/wicket-documents/migrations/99999999999999_lint_sql_dyn_documents.up.sql"; \
     plant_dyn_qid="$tmp/modules/items/src/_lint_sql_dyn_quote_ident.rs"; \
     plant_dyn_concat="$tmp/modules/items/src/_lint_sql_dyn_concat.rs"; \
@@ -388,8 +396,12 @@ sqlx-prepare crate:
     DATABASE_URL="${WICKET_MIGRATE_DATABASE_URL:?WICKET_MIGRATE_DATABASE_URL is required}" \
       cargo sqlx prepare --manifest-path "{{root}}/crates/{{crate}}/Cargo.toml" -- --all-targets --all-features
 
-# Offline CI: format, clippy, SQL fence, lib tests.
-ci: fmt-check clippy lint-sql test-lib
+# Reverse-diff axum `.route(` mounts vs MOUNTED (ADR 0010 / T-23).
+lint-mounts:
+    bash "{{root}}/scripts/lint-mounts.sh"
+
+# Offline CI: format, clippy, SQL fence, mount lint, lib tests.
+ci: fmt-check clippy lint-sql lint-mounts test-lib
 
 # CI plus database tests (`ci` then `test-db`). This recipe, not `ci`, runs the
 # integration tests under crates/*/tests/, including Wave 2s slice acceptance,

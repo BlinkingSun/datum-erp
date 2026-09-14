@@ -1,5 +1,7 @@
 # Architecture Decision Records
 
+Audience: contributor. Status: shipped.
+
 One file per decision that would be expensive to reverse. Each records what was
 decided, why, what it costs, and what would make us change our mind.
 

@@ -676,6 +676,6 @@ Three architecture facts fall out:
 
 UDI, AIDC, GS1 / HIBCC / ICCBBA issuing-agency mechanics, symbol quality tables, GUDID element list, EUDAMED status and the open HIBCC Basic UDI-DI format question are in:
 
-`C:/Users/fireb/Desktop/Shared/ERP/_team/reports/spike-regulatory-udi.md`
+`research/background/regulatory-udi-aidc.md`
 
 That document carries its own provenance caveats and open-gaps list.

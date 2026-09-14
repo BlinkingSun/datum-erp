@@ -22,8 +22,8 @@ use wicket_db::{Tx, WriteContext, WritePool};
 use wicket_ledger::{GroupBuilder, post, rebuild, verify_projection};
 use wicket_module::Profile;
 use wicket_server::{
-    Config, bootstrap_against_app, mounted_operations, openapi_document, registered_operations,
-    rewrite_database, run_iq, startup_guard_release, with_os_userinfo,
+    Config, bootstrap_against_app, openapi_document, registered_operations, rewrite_database,
+    run_iq, startup_guard_release, with_os_userinfo,
 };
 use wicket_statemachine::{EdgeBuilder, Engine, Machine};
 
@@ -362,7 +362,7 @@ async fn run_script(w: &World) {
     // Work order: issue bar, complete with finished lot + serials.
     let (st, wo) = w
         .post(
-            "/api/v1/production/work-orders",
+            "/api/v1/work-orders",
             json!({
                 "item_id": screw,
                 "revision": "C",
@@ -375,7 +375,7 @@ async fn run_script(w: &World) {
     let mut wo_ver = wo["version"].as_i64().unwrap_or(1);
     let (st, wo) = w
         .post_if_match(
-            &format!("/api/v1/production/work-orders/{wo_id}/release"),
+            &format!("/api/v1/work-orders/{wo_id}/release"),
             json!({}),
             wo_ver,
         )
@@ -384,7 +384,7 @@ async fn run_script(w: &World) {
     wo_ver = wo["version"].as_i64().unwrap_or(wo_ver + 1);
     let (st, wo) = w
         .post_if_match(
-            &format!("/api/v1/production/work-orders/{wo_id}/issue"),
+            &format!("/api/v1/work-orders/{wo_id}/issue"),
             match w.profile {
                 wicket_module::ProfileId::RegulatedDevice => json!({
                     "from_location_id": aloc,
@@ -409,7 +409,7 @@ async fn run_script(w: &World) {
     wo_ver = wo["version"].as_i64().unwrap_or(wo_ver + 1);
     let (st, done) = w
         .post_if_match(
-            &format!("/api/v1/production/work-orders/{wo_id}/complete"),
+            &format!("/api/v1/work-orders/{wo_id}/complete"),
             json!({
                 "quantity": qty("5", 1, "Count"),
                 "finished_lot_number": "LOT-WO-1847",
@@ -1133,7 +1133,7 @@ async fn issue_wo_is_one_transaction() {
         let (st, headers, body) = w
             .call(
                 "POST",
-                &format!("/api/v1/production/work-orders/{wo_id}/issue"),
+                &format!("/api/v1/work-orders/{wo_id}/issue"),
                 Some(vec![("if-match", format!("\"{wo_ver}\""))]),
                 Some(issue_body.clone()),
             )
@@ -1221,7 +1221,7 @@ async fn issue_wo_is_one_transaction() {
         // One Tx rolls the extra issue_line back; two committed txs leave it.
         let (st2, body2) = w
             .post_if_match(
-                &format!("/api/v1/production/work-orders/{wo_id}/issue"),
+                &format!("/api/v1/work-orders/{wo_id}/issue"),
                 issue_body,
                 wo_ver2,
             )
@@ -1259,7 +1259,7 @@ async fn setup_released_wo(w: &World) -> (String, i64, String, String, String) {
     force_lot_available(&w.pool, &lot).await;
     let (st, wo) = w
         .post(
-            "/api/v1/production/work-orders",
+            "/api/v1/work-orders",
             json!({
                 "item_id": item,
                 "revision": "A",
@@ -1272,7 +1272,7 @@ async fn setup_released_wo(w: &World) -> (String, i64, String, String, String) {
     let wo_ver = wo["version"].as_i64().unwrap_or(1);
     let (st, wo) = w
         .post_if_match(
-            &format!("/api/v1/production/work-orders/{wo_id}/release"),
+            &format!("/api/v1/work-orders/{wo_id}/release"),
             json!({}),
             wo_ver,
         )
@@ -1317,7 +1317,7 @@ async fn reverse_issue_restores_on_hand() {
 
         let (st, issued) = w
             .post_if_match(
-                &format!("/api/v1/production/work-orders/{wo_id}/issue"),
+                &format!("/api/v1/work-orders/{wo_id}/issue"),
                 json!({
                     "from_location_id": loc,
                     "lines": [{
@@ -1540,7 +1540,7 @@ async fn regulated_release_refused_under_no_signatures() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn openapi_matches_router() {
+async fn openapi_listed_paths_are_not_bare_404() {
     if common::skip_if_no_pg() {
         return;
     }
@@ -1548,9 +1548,13 @@ async fn openapi_matches_router() {
         let w = common::boot(profile).await;
         let (st, body) = w.get("/api/v1/openapi.json").await;
         assert_eq!(st, StatusCode::OK, "{body}");
+        // Served document vs live router (not MOUNTED vs itself). Source-level
+        // router vs MOUNTED is scripts/lint-mounts.sh.
         let listed = registered_operations(&body);
-        let mounted = mounted_operations();
-        assert_eq!(listed, mounted, "OpenAPI must equal mounted routes");
+        assert!(
+            !listed.is_empty(),
+            "served OpenAPI document has no operations"
+        );
         for (method, path) in &listed {
             let probe = path.replace("{id}", &uuid::Uuid::nil().to_string());
             let (pst, _, pbody) = w.call(method, &probe, None, Some(json!({}))).await;
@@ -1649,7 +1653,6 @@ async fn get_handlers_are_read_only() {
             format!("/api/v1/lots/{lot}/serials"),
             format!("/api/v1/inventory/on-hand?item_id={item}&location_id={loc}"),
             format!("/api/v1/work-orders/{wo_id}"),
-            format!("/api/v1/production/work-orders/{wo_id}"),
             format!("/api/v1/genealogy/trace?from_lot_id={lot}&direction=forward"),
         ];
         for uri in &gets {

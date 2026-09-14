@@ -1,7 +1,7 @@
 # DECISION — The conservation invariant of the Wicket ledger
 
 **Authority:** Opus (decision lane) · **Date:** 2026-09-11 · **Status:** decided, binding
-**Inputs:** `_team/reports/sweep-plan-ledger.md`, `_team/reports/sweep-plan-typed-qty.md`,
+**Inputs:** `research/audits/slice-ledger.md`, `research/audits/slice-typed-quantity.md`,
 ADR 0003, ADR 0004, ADR 0007, `PLAN.md` §5 §6, `docs/00-erp-primer.md` §9,
 `docs/02-architecture.md` §2–§3.
 **Amends:** `docs/adr/0004-append-only-ledger.md` (in place, this cycle).

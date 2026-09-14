@@ -11,6 +11,7 @@ use serde_json::{Value, json};
 use crate::boot::AppState;
 
 /// One mounted HTTP operation. Keep in sync with [`crate::http::router`].
+/// `scripts/lint-mounts.sh` diffs this table against the `.route(` table.
 #[derive(Clone, Copy)]
 pub struct Mounted {
     /// HTTP method.
@@ -220,41 +221,6 @@ pub const MOUNTED: &[Mounted] = &[
         method: "POST",
         path: "/api/v1/work-orders/{id}/complete",
         operation_id: "completeWorkOrder",
-        permission: "production.complete",
-        state_transition: true,
-    },
-    Mounted {
-        method: "POST",
-        path: "/api/v1/production/work-orders",
-        operation_id: "createWorkOrderNs",
-        permission: "production.create",
-        state_transition: false,
-    },
-    Mounted {
-        method: "GET",
-        path: "/api/v1/production/work-orders/{id}",
-        operation_id: "getWorkOrderNs",
-        permission: "production.view",
-        state_transition: false,
-    },
-    Mounted {
-        method: "POST",
-        path: "/api/v1/production/work-orders/{id}/release",
-        operation_id: "releaseWorkOrderNs",
-        permission: "production.release",
-        state_transition: true,
-    },
-    Mounted {
-        method: "POST",
-        path: "/api/v1/production/work-orders/{id}/issue",
-        operation_id: "issueWorkOrderNs",
-        permission: "production.issue",
-        state_transition: true,
-    },
-    Mounted {
-        method: "POST",
-        path: "/api/v1/production/work-orders/{id}/complete",
-        operation_id: "completeWorkOrderNs",
         permission: "production.complete",
         state_transition: true,
     },

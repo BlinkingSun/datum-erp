@@ -1,6 +1,10 @@
 # Vision and Scope
 
-*Status: draft for discussion. Nothing here is settled until it has an ADR.*
+Conforms to: [ADR 0003](adr/0003-database.md) (Accepted, as amended), [ADR 0006](adr/0006-license.md) (Accepted), [ADR 0007](adr/0007-defer-general-ledger.md) (Proposed), [ADR 0008](adr/0008-single-tenant.md) (Proposed); `09-workspace-contract.md`.
+
+Audience: contributor, quality. Status: partial.
+Living product vision. Kernel crates exist. Beachhead modules and the ten-minute install
+are unbuilt. Settled decisions live in `adr/`. Open questions are in §8.
 
 ---
 
@@ -11,7 +15,10 @@ Chosen name: **Wicket**.
 Wicket ERP is the product name (chosen 2026-09-13). A wicket is a small gate — the
 passage into the shop's system of record. The word is uncommon enough to search for.
 
-The name appears in exactly one constant in the codebase so it stays cheap to change.
+An earlier claim that the name lived in exactly one constant, so it stayed cheap to
+change, is false since the rename. Crate names, schema names, and documentation all
+say Wicket.
+
 Alternatives considered:
 
 | Name | For | Against |
@@ -42,11 +49,12 @@ kernel, present from the first commit, applying automatically to every module
 including ones nobody has written yet. This is the one thing that cannot be retrofitted.
 No open source ERP has a compliant electronic signature. The closest comparable
 project's change tracking is opt-in per record type, and its history rows are
-deletable by an administrator. See `_team/reports/sweep-plan-competitive.md`.
+deletable by an administrator. See `08-competitive-landscape.md` §2.1 (ERPNext
+`Version` is opt-in per DocType and Administrator may delete those rows).
 
 **It installs next to a PostgreSQL the operating system already owns.** One binary per
-platform, on macOS, Windows, and Linux. On a machine that already runs PostgreSQL 16 or
-later, a shop installs Wicket and is entering data in under ten minutes, with no database
+platform, on macOS, Windows, and Linux. On a machine that already runs PostgreSQL 17,
+a shop installs Wicket and is entering data in under ten minutes, with no database
 administrator and no container runtime. On a bare machine the honest number is thirty
 minutes, because PostgreSQL is installed first from its own platform installer. An
 evaluator who wants to see the product before installing anything runs one downloaded
@@ -68,7 +76,8 @@ This shop today is doing one of four things, all of them bad.
    in binders.
 3. Paying for an integrated commercial suite. Counted contracts put Arena at about
    $48,700 a year, Greenlight Guru about $44,000, and MasterControl about $115,700.
-   See `_team/reports/spike-landscape.md`.
+   See `08-competitive-landscape.md` §3.1 (Vendr medians in
+   `research/background/competitive-landscape.md` §7.1).
 4. Running entirely on spreadsheets and hoping the next audit goes well.
 
 **Why this beachhead.** It is the hardest target, and hard targets are defensible. A
@@ -159,8 +168,9 @@ Stating these plainly now saves arguments later.
 
 Concrete tests, in rough order of when they become answerable.
 
-1. **Install.** On a machine that already runs PostgreSQL 16 or later, a shop installs
-   Wicket and is entering data in under ten minutes, on any of three operating systems,
+1. **Install.** On a machine that already runs PostgreSQL 17 (the minimum; 18 is
+   tested — `09-workspace-contract.md`), a shop installs Wicket and is entering
+   data in under ten minutes, on any of three operating systems,
    with no database administrator and no container runtime. On a bare machine the honest
    number is thirty minutes, because PostgreSQL is installed first from its own platform
    installer — one administrator prompt on Windows, one package manager command on
@@ -187,19 +197,16 @@ Concrete tests, in rough order of when they become answerable.
 
 Things that genuinely are not decided. Tracked here rather than pretended away.
 
-- **Name.** See section 1.
-- **License.** Recommendation is AGPL-3.0, in `adr/0006-license.md`. Must be settled
-  before the first public commit, because relicensing later requires consent from
-  every contributor.
-- **Contributor agreement.** Developer Certificate of Origin is friendlier and is the
-  default recommendation. A Contributor License Agreement is the only way to preserve
-  the option of selling commercial exceptions later. This is a business decision rather
-  than a technical one, and it cannot be deferred cheaply.
 - **Where the eQMS boundary actually sits.** Document control and training records are
   clearly in. Design controls and the Design History File are probably out. Internal
   audit management is genuinely unclear.
 - **How modules are distributed.** Compiled in, or loaded at runtime. See
   `03-module-system.md`.
+
+Settled, and not reopened here: the product name is Wicket (§1). The license is
+AGPL-3.0-or-later. Contributions are under the Developer Certificate of Origin,
+version 1.1. There is no contributor license agreement. See `adr/0006-license.md`
+(Accepted).
 
 ---
 

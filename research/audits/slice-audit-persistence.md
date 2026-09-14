@@ -393,7 +393,7 @@ Blind-race: not for the SQL trigger file (one correct shape, low implementation 
 
 **Yes.** This is a tough-decision trigger: two plausible persistence designs, a grant that contradicts the ADR’s own guarantee, and a compliance claim that is false against the owner threat. Free-pool executors must not pick this.
 
-Questions for `_team/reports/DECISION-audit-persistence.md` (suggested):
+Questions for the then-unwritten audit-persistence decision (later promoted into `research/decisions/audit-persistence.md`) (suggested):
 
 1. **Enforcement:** trigger+GUC fail-closed + sealed `Tx` + lint (**recommended**), trigger-only, or trait-only? Trait-only should be rejected; it is the “audit as a module” failure mode in kernel clothing.
 2. **Audit INSERT grant:** revoke from `wicket_app`, `SECURITY DEFINER` only (**recommended**), or keep ADR 0005 as written and drop “cannot write a false one”?

@@ -3,7 +3,7 @@
 Task slug: `erp` · Workdir: `/Users/jroberts/Desktop/Internal Development/Tools/ERP` · Profile: production
 Roster rev 6 · Plan author: fable · v1 2026-09-11 (shop PC, roster rev 4) · **v2 2026-09-12 (MacBook, roster rev 6)**
 
-The v1 text is preserved at `_team/state/PLAN-v1-2026-09-11.md`.
+The v1 text is ABSENT from the published tree (never promoted). This file is v2.
 
 ---
 
@@ -114,40 +114,46 @@ screen.* What v2 adds is an acceptance target, so the claim is tested rather tha
   attributable actors, no hard deletes of records, version stamping, the constrained lot
   and serial identifier, and the audit export. A plain shop sees none of it in its screens
   and pays for it only in storage; it is not free and the plan does not say it is. The
-  profile definitions are frozen in `_team/specs/SPEC-profiles.md` (the eleven keys of
-  DECISION D-W1-5) before Wave 2.6 and consumed by `wicket-module` and `server-slice`.
+  eleven profile keys are frozen in `research/decisions/traits-profiles.md` (DECISION
+  D-W1-5). The shipped files are `profiles/regulated-device.toml` and
+  `profiles/plain-shop.toml`, consumed by `wicket-module` and `server-slice`.
+  `SPEC-profiles.md` is ABSENT (never published).
 - Wave 3's phase-end test runs the whole-program API test under **both** profiles.
 - **No customer-specific code, ever** (invariant 18). Anything the owner's own company
   needs that another shop would not is configuration or a module, never a branch.
 
-## 2. Current state (2026-09-12)
+## 2. Current state
 
-Written and complete: `docs/00` through `docs/04`; `docs/adr/0001` through `0009`
-(`0003` Accepted as amended; `0006` open; the rest Proposed); `docs/01` and `docs/02`
-reconciled against the decisions on 2026-09-11 (`_team/reports/doc-reconcile.md`); four
-decision records and ten audit slices promoted into `research/`; the four mockups in
-`design/`; `DESIGN.md`; `HANDOFF.md`.
+Written and complete: `docs/00` through `docs/11`; `docs/adr/0001` through `0010`
+(`0003` and `0006` Accepted, `0003` as amended; the rest Proposed); `docs/01` and `docs/02`
+reconciled against the decisions on 2026-09-11 (the unpublished reconcile report is
+ABSENT; the amended docs are the record); founding decisions plus Wave 1 / 2 / 2s / 2b
+rulings in `research/decisions/`; ten audit slices in `research/audits/`; the four
+mockups in `design/`; `DESIGN.md`; `HANDOFF.md`. `HANDOFF.md` §2 still says Wave 2 batch
+2.1 is next; that sentence is stale.
 
-The research spikes have **landed**: `spike-landscape`, `spike-regulatory`,
-`spike-regulatory-udi`, `spike-governance`, `spike-probe`. Their reports are in
-`_team/reports/` and their substance in `research/background/`. The two doc lanes gated
-on them (`doc-regulatory`, `doc-landscape`) are no longer gated.
+The research spikes have **landed**. Their substance is in `research/background/`. The
+unpublished spike reports are ABSENT. The two doc lanes gated on them
+(`doc-regulatory`, `doc-landscape`) are no longer gated.
 
-Not yet written: `docs/05` data model, `docs/06` regulatory, `docs/07` roadmap, `docs/08`
-competitive landscape, `docs/10` API conventions, the repository files (README,
-CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, LICENSE, .gitignore), and **all code**.
+Wave 1, Wave 2, Wave 2s and Wave 2b have landed as source: seventeen crates under
+`crates/`, six modules under `modules/`, both installation profiles under `profiles/`.
+Those crates are implementations, not Wave 1 compiling stubs. Wave 3 interface code is
+ABSENT. The slice acceptance suite is `crates/wicket-server/tests/slice.rs`. Repository
+files (`README.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, `LICENSE`,
+`.gitignore`) exist. A formal wave-close gate record is ABSENT.
 
 Repository: public `github.com/BlinkingSun/wicket-erp` (remote `origin`) plus the private
 mirror `wicket-dev` (remote `dev`); `main` only, plain fast-forward pushes. Author identity
-is the owner's Gmail, which is correct and stays. `_team/` is excluded via
-`.git/info/exclude`. Decisions made during this build live in `_team/reports/DECISION-*.md`
-and are promoted into `research/decisions/` at integration.
+is the owner's Gmail, which is correct and stays. Unpublished working files never enter
+git. Decisions made during this build live in `research/decisions/`.
 
 ## 3. Wave structure
 
 Four waves plus a slice. The split is dictated by real dependencies: every crate
 depends on the workspace and on `wicket-core`; lanes work in isolated worktrees where
-they cannot see each other's output.
+they cannot see each other's output. Wave 1 through Wave 2b have landed as source (§2);
+the tables below are the sequencing, not a claim that those crates are still stubs.
 
 ### Wave 1 — foundation and documentation (parallel, nine lanes)
 
@@ -174,18 +180,18 @@ Ownership rules that resolve the collisions the stub audit found:
   entries verbatim (`/target`, `**/*.rs.bk`, `.env`, `*.pdb`; never `.sqlx/`, never
   `migrations/`). `ws-skeleton` does not write it.
 - **The root `Cargo.toml` has one writer: `ws-skeleton`.** The canonical text is in
-  `_team/specs/CONTRACT-workspace.md`. `core` and `harness` carry a *throwaway* root in
+  `docs/09-workspace-contract.md`. `core` and `harness` carry a *throwaway* root in
   their worktrees so they compile in isolation; the throwaway is discarded at
   integration and their crate manifests must inherit only keys the canonical root
   defines.
 - `dev/compose.yml` belongs to `ws-skeleton`; `dev/sql/` belongs to `harness`.
 - Every crate manifest uses `[lints] workspace = true` and `.workspace = true` for
   version, edition, rust-version, license, publish.
-- Not one lane touches `_team/`, `docs/adr/`, or another lane's files. A lane that
+- Not one lane touches `docs/adr/` or another lane's files. A lane that
   believes it must raises an escalation in its report and stops.
 - **Placeholders and throwaway roots are untracked**, and the code lanes are integrated by
   path checkout in a fixed order with a `git ls-tree` gate. The full recipe is
-  `_team/specs/CONTRACT-workspace.md` §10 and it is mechanical; nothing in Wave 2 starts
+  `docs/09-workspace-contract.md` §10 and it is mechanical; nothing in Wave 2 starts
   until its post-integration gate passes on the integrated tree.
 - The `wicket-db` stub has real parts in Wave 1 (`connect`, pool hooks, `Tx::begin`), the
   raw-SQL fence (`clippy.toml` + `just lint-sql`) is `ws-skeleton`'s, and the five roles
@@ -226,7 +232,7 @@ batch run in parallel.
 | 2.3 | `wicket-identity`, `wicket-numbering`, `wicket-uom`, `wicket-events` | Independent of each other. Identity reserves the separable signing credential (invariant 14) now, so Wave 2b adds no column to a table with history. |
 | 2.4 | `wicket-ledger` | **The gate.** Deep audit, doubled, rework race pre-declared. Wave 2 does not close until the property suite in §7 passes in commit mode with the canary armed. |
 | 2.5 | `wicket-statemachine`, `wicket-jobs` | The work order needs states; background work needs a named service principal. Statemachine depends on `SignatureGate`, not on `wicket-esign`. **`SPEC-statemachine.md` freezes the hook ABI** (`docs/03` §3.2): topological hook order, the time budget and its loud failure, the veto shape, one sink per transaction and the mandatory `verify` call from edge metadata. |
-| 2.6 | `wicket-module` (minimal composition root) | Composes every crate above; never a parallel lane. Consumes `SPEC-profiles.md` (frozen after decision D-W1-5, before this batch). |
+| 2.6 | `wicket-module` (minimal composition root) | Composes every crate above; never a parallel lane. Consumes D-W1-5 (`research/decisions/traits-profiles.md`) and the shipped `profiles/*.toml` files. |
 
 Wave 2 specs are written one batch ahead: `SPEC-wicket-db.md` and `SPEC-audit.md` at Wave 1
 integration, `SPEC-identity.md`, `SPEC-numbering.md`, `SPEC-uom.md`, `SPEC-events.md` when
@@ -341,8 +347,15 @@ crates/
   wicket-print           core db audit documents esign                                                             (Wave 2b)
   wicket-module          core db + all of the above (composition root; wires PostingSink and SignatureGate)
   wicket-server          everything
-modules/                (Wave 2s onward; each depends on wicket-module's published interfaces only)
+modules/                (Wave 2s onward; each depends on wicket-module AND the kernel crates this graph already lists)
 ```
+
+A first-party module depends on `wicket-module` and on the kernel crates above that it
+uses (`wicket-core`, `wicket-db`, `wicket-events`, and others from this graph). The
+earlier sentence that a module depends on `wicket-module`'s published interfaces only is
+withdrawn: that rule lost; the Cargo manifests won (T-59). Enforcing it would reject
+every module contribution. Invariant 6 is unchanged: no module reads another module's
+tables.
 
 The graph is acyclic and that property is load-bearing. Two traits in `wicket-core` keep it
 that way:
@@ -360,8 +373,8 @@ that way:
 `wicket-core` holds primitives with no database dependency: identifier newtypes, `Actor`,
 `Money`, `Quantity<D>`, `UnitRef<D>`, `AnyQuantity`, the residual types, the
 `UnitConverter` trait, the two traits above, and the shared error types. The quantity
-contract is `research/decisions/core-quantity.md` §2, frozen, reproduced by reference in
-`_team/specs/SPEC-core.md`. Everything else depends on this crate, which is why it is
+contract is `research/decisions/core-quantity.md` §2, frozen. `SPEC-core.md` is ABSENT
+(never published). Everything else depends on this crate, which is why it is
 raced and deep-audited.
 
 `wicket-test` is the test harness: connects from `DATABASE_URL`, runs migrators in graph
@@ -469,7 +482,7 @@ Wave 1 and Wave 2.
     prohibited in **every** schema, `transient` included, because one cascade
     permanently removes the history of rows the author never looked at, and it is found
     at inspection.
-    (Amended by `_team/reports/DECISION-w1-contracts.md` D-W1-2, 2026-09-12.)
+    (Amended by `research/decisions/w1-contracts.md` D-W1-2, 2026-09-12.)
 17. **Every record carries the application version and configuration version that
     produced it**, because the customer's change assessment depends on knowing which
     build wrote what.
@@ -593,23 +606,20 @@ Conventions every lane must follow:
   green first, §11); the private mirror keeps Actions off.
 - Private mirror `BlinkingSun/wicket-dev` (remote `dev`) is kept as the backup remote and
   receives every landing first.
-- License AGPL-3.0-or-later; contributions under the DCO; `LICENSE`, `CONTRIBUTING.md` and
-  the header convention are `doc-repo`'s (Wave 1).
-- `_team/` never enters git. The substantive research is already promoted into
-  `research/`; anything else worth keeping is promoted the same way at integration.
-- Once the license lands: `LICENSE`, `CONTRIBUTING.md` with the DCO or CLA choice, the
-  header convention, and the copyright holder, all written by `doc-repo` on the amended
-  ADR.
+- License AGPL-3.0-or-later; contributions under the DCO. `LICENSE`, `CONTRIBUTING.md` and
+  the header convention exist (Wave 1 `doc-repo`).
+- Unpublished working files never enter git. The substantive research is in
+  `research/`.
 
 ## 13. Lane conventions for this repository
 
 - Worktrees live at `/Users/jroberts/Desktop/Internal Development/Tools/ERP-wt/wt-<lane>`;
   rework worktrees at `.../wt-<lane>-rw1`, `-rw2`. The exec-master creates them and copies
   the lane's spec in as `<worktree>/SPEC.md` (untracked).
-- Specs are authored by the planner in `_team/specs/SPEC-<lane>.md`. The workspace
-  contract every code lane must match is `_team/specs/CONTRACT-workspace.md`.
-- A lane writes its report to `<worktree>/_team/reports/<lane>.md` before it finishes;
-  the dispatcher mirrors it into the main tree.
+- Lane specs were unpublished working files and are ABSENT from the published tree.
+  The workspace contract every code lane must match is `docs/09-workspace-contract.md`.
+- Lane reports were unpublished working files and are ABSENT from the published tree.
+  Ruling substance that survived is in `research/decisions/`.
 - Commit budget is three per build lane; commits carry the `Lane:` trailer the git guards
   add. Read-only lane classes cannot commit. Nobody but the orchestrator pushes.
 - Absolute paths only, in every prompt and every report.
@@ -619,6 +629,6 @@ Conventions every lane must follow:
   commit guard counts any new commit in a lane's cwd against that lane's budget, so an
   orchestrator commit on `main` killed a running plan audit and its sweeps. Corollary: the
   orchestrator never commits on a tree that a live lane lists as cwd.
-- Sweep lanes run in consult mode and cannot write files; when a sweep's report is empty at
-  exit, the orchestrator persists the lane's reply from the bridge log
-  (`_team/state/persist-sweeps.py`) before the master consolidates.
+- Sweep lanes run in consult mode and cannot write files. The unpublished persist-sweeps
+  helper is ABSENT; when a sweep's report is empty at exit, the orchestrator persists the
+  lane's reply from the bridge log before the master consolidates.

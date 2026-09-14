@@ -107,6 +107,8 @@ pub struct ManifestSubscription {
 /// One HTTP route declared in `module.toml`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ManifestRoute {
+    /// HTTP method (`GET`, `POST`, `PATCH`, …). Required; parse fails if absent.
+    pub method: String,
     /// Path prefix (`/api/v1/calibration`).
     pub path: String,
     /// Permission that gates the route.
@@ -323,7 +325,12 @@ fn parse_subscriptions(root: &BTreeMap<String, Value>) -> Result<Vec<ManifestSub
 fn parse_routes(root: &BTreeMap<String, Value>) -> Result<Vec<ManifestRoute>> {
     let mut out = Vec::new();
     for table in table_array(root, "routes")? {
+        let method = toml::require_str(table, "method")?;
+        if method.trim().is_empty() {
+            return Err(Error::Manifest("route method is empty".into()));
+        }
         out.push(ManifestRoute {
+            method,
             path: toml::require_str(table, "path")?,
             permission: toml::require_str(table, "permission")?,
         });
@@ -405,143 +412,11 @@ pub(crate) fn hex(bytes: [u8; 32]) -> String {
 }
 
 /// Compiled-in Wave 2s module manifests (PLAN §3).
+///
+/// Reads each first-party `module.toml` via [`include_str!`] (AG-3). Order is
+/// Wave 2s.1 (items/locations/lots, topological), then inventory,
+/// production_min, genealogy, then the calibration fixture.
 pub fn compiled_in() -> Result<Vec<ModuleManifest>> {
-    const INVENTORY: &str = r#"
-[module]
-id = "mod-inventory"
-version = "0.1.0"
-name = "Inventory"
-description = "Receipts, issues, moves"
-
-[dependencies]
-kernel = "^0.1"
-mod-items = "^0.1"
-mod-locations = "^0.1"
-mod-lots = "^0.1"
-
-[permissions]
-"inventory.view" = "View inventory"
-
-[capabilities]
-requires-signature = []
-regulated = false
-
-[[routes]]
-path = "/api/v1/inventory"
-permission = "inventory.view"
-"#;
-    const PRODUCTION: &str = r#"
-[module]
-id = "mod-production-min"
-version = "0.1.0"
-name = "Production (slice)"
-description = "Minimal work order"
-
-[dependencies]
-kernel = "^0.1"
-mod-inventory = "^0.1"
-
-[permissions]
-"production.view" = "View work orders"
-"wo.release" = "Release a work order"
-
-[capabilities]
-requires-signature = []
-regulated = false
-
-[[machines]]
-doc_type = "wo"
-regulated = false
-states = ["Draft", "Released"]
-
-[[machines.edges]]
-from = "Draft"
-to = "Released"
-name = "release"
-permission = "wo.release"
-
-[[routes]]
-path = "/api/v1/production"
-permission = "production.view"
-"#;
-    const GENEALOGY: &str = r#"
-[module]
-id = "mod-genealogy"
-version = "0.1.0"
-name = "Genealogy"
-description = "Forward and backward trace"
-
-[dependencies]
-kernel = "^0.1"
-mod-inventory = "^0.1"
-mod-lots = "^0.1"
-mod-production-min = "^0.1"
-
-[permissions]
-"genealogy.view" = "View genealogy"
-
-[capabilities]
-requires-signature = []
-regulated = false
-
-[[subscriptions]]
-event = "inventory.lot_received"
-subscriber = "wicket-jobs"
-
-[[jobs]]
-kind = "genealogy.refresh"
-
-[[routes]]
-path = "/api/v1/genealogy"
-permission = "genealogy.view"
-"#;
-    const CALIBRATION: &str = r#"
-[module]
-id = "mod-calibration"
-version = "0.1.0"
-name = "Gage Calibration"
-description = "Calibration schedules and certificate approval"
-
-[dependencies]
-kernel = "^0.1"
-
-[permissions]
-"calibration.view" = "View calibration records"
-"calibration.approve" = "Approve a calibration certificate"
-
-[capabilities]
-requires-signature = ["calibration.approve"]
-regulated = true
-
-[[machines]]
-doc_type = "calibration.certificate"
-regulated = true
-states = ["Open", "Approved"]
-
-[[machines.edges]]
-from = "Open"
-to = "Approved"
-name = "approve"
-permission = "calibration.approve"
-required = true
-meaning = "Approved"
-signature_permission = "calibration.approve"
-
-[[routes]]
-path = "/api/v1/calibration"
-permission = "calibration.view"
-
-[[custom-fields]]
-entity = "items.item"
-key = "udi_device_identifier"
-type = "string"
-label = "UDI-DI"
-validate = "gs1-gtin"
-audit = true
-required = false
-indexed = false
-owner = "mod-calibration"
-"#;
     let wave = [
         ModuleManifest::parse(crate::install_graph::ITEMS_MANIFEST)?,
         ModuleManifest::parse(crate::install_graph::LOCATIONS_MANIFEST)?,
@@ -560,10 +435,18 @@ owner = "mod-calibration"
                 .ok_or_else(|| Error::UnknownModule(id.clone()))
         })
         .collect::<Result<Vec<_>>>()?;
-    out.push(ModuleManifest::parse(INVENTORY)?);
-    out.push(ModuleManifest::parse(PRODUCTION)?);
-    out.push(ModuleManifest::parse(GENEALOGY)?);
-    out.push(ModuleManifest::parse(CALIBRATION)?);
+    out.push(ModuleManifest::parse(
+        crate::install_graph::INVENTORY_MANIFEST,
+    )?);
+    out.push(ModuleManifest::parse(
+        crate::install_graph::PRODUCTION_MIN_MANIFEST,
+    )?);
+    out.push(ModuleManifest::parse(
+        crate::install_graph::GENEALOGY_MANIFEST,
+    )?);
+    out.push(ModuleManifest::parse(
+        crate::install_graph::CALIBRATION_MANIFEST,
+    )?);
     Ok(out)
 }
 
