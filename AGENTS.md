@@ -14,17 +14,18 @@ stranger reaches it through `/api/v1` under both `regulated-device` and
 `plain-shop` (`PLAN.md` §1a) with an expected result written next to the command
 (`GOALS.md` DOC-1). A `pub fn` with no mount is inventory.
 
-Goal 2 is false (`GOALS.md` §6). Three catalogues already disagree: the router
-table (`crates/wicket-server/src/http.rs:18-128`), the OpenAPI table
-(`crates/wicket-server/src/openapi.rs:29-397`), and the module manifests the
-server never reads (`docs/adr/0010-one-registry.md`). The one-registry collapse
-is ABSENT (promised: `TODO.md` T-20 through T-26; ADR 0010 Proposed).
+Goal 2 is false (`GOALS.md` §6). `compiled_in()` reads first-party `module.toml`
+via `include_str!` and `ManifestRoute` stores `method` (T-20, T-21). A reverse-diff
+lint (`scripts/lint-mounts.sh`, T-23) fails when the axum router and the OpenAPI
+`MOUNTED` table disagree. The router is still hand-written. Generating the router
+and the document from one capability table is ABSENT (promised: `TODO.md` T-24,
+T-25; ADR 0010 Proposed).
 
 Kernel work that does not advance Wave 2s slice acceptance (`PLAN.md` §3 Wave 2s,
 thirteen assertions; `docs/07-roadmap.md` §2.3) is inventory, not progress. The
-slice gate is `just ci-db` (`justfile:397`), which runs
-`crates/wicket-server/tests/slice.rs`. `just ci` (`justfile:392`) is
-`fmt-check clippy lint-sql test-lib`. `test-lib` (`justfile:313-314`) passes
+slice gate is `just ci-db` (`justfile`), which runs
+`crates/wicket-server/tests/slice.rs`. `just ci` is
+`fmt-check clippy lint-sql lint-mounts test-lib`. `test-lib` passes
 `--lib` and excludes every integration test under `crates/*/tests/`.
 Green `just ci` is not slice acceptance.
 
@@ -32,7 +33,7 @@ Green `just ci` is not slice acceptance.
 
 | Ban | Evidence |
 |---|---|
-| Must not open a new crate or module while Goal 2 is false. | Routes, the OpenAPI document, and `module.toml` are three handwritten tables that already disagree (`GOALS.md` §2; `docs/adr/0010-one-registry.md`). `compiled_in()` embeds stub manifests (`crates/wicket-module/src/manifest.rs:425-466`) that disagree with `modules/*/module.toml`. `ManifestRoute` stores `path` and `permission` and discards `method` (`crates/wicket-module/src/manifest.rs:109-114`). More mounts before ADR 0010 is accepted are debt. |
+| Must not open a new crate or module while Goal 2 is false. | The HTTP router and the OpenAPI `MOUNTED` table are still two handwritten lists (`crates/wicket-server/src/http.rs`, `crates/wicket-server/src/openapi.rs`). `scripts/lint-mounts.sh` fails on drift between those two. Module manifests are a third declaration the server does not yet generate mounts from. More mounts before T-24/T-25 land are debt. |
 | Must not write an unbuilt mechanism in the present tense. | Every sentence is `is`, `must`, or `ABSENT (promised: TODO.md T-NN)`. |
 | Must not edit a file another lane owns. | 39 of 41 `integrate: merge` commits in this repository are tagged overlapping ownership. A three-way merge is not an integration strategy. One writer per file per wave. The second lane must escalate and stop. |
 | Must not grow the Goal 2 allowlist to park an awkward public function. | `GOALS.md` API-10. Allowlist growth is a change to `GOALS.md`, reviewed as one, not a nit. |
@@ -57,8 +58,9 @@ A lane that cannot fill every row must not start.
 | Green command | The exact command that must pass. Slice work is `just ci-db`. `just ci` is not that command. |
 | Docs | The documentation patch in the same change if an operator or contributor is otherwise misled (`GOALS.md` DOC-4). |
 
-The four-goal CI check on pull-request bodies is ABSENT (promised: `TODO.md` T-06).
-Until it lands the maintainer enforces it by hand (`GOALS.md` GOV-1).
+The four-goal CI check on pull-request bodies is `scripts/check-pr-goals.sh`
+(wired in `.github/workflows/ci.yml` job `lint-policy`). A pull request whose
+body omits a goal heading fails the build (`GOALS.md` GOV-1).
 
 ## 4. Frozen decisions
 
@@ -90,7 +92,7 @@ An agent proposing to clean any of these has not read the tree.
 | Fact | Consequence |
 |---|---|
 | Zero `datum` matches in tracked files. | The rename is complete. |
-| Zero `todo!()` or `unimplemented!()` in tracked Rust. | The placeholder sweep is complete. `TODO.md` T-14 is a scanner, not a cleanup. |
+| Zero `todo!()` or `unimplemented!()` in tracked Rust. | The placeholder sweep is complete. `scripts/lint-unimplemented.sh` (T-14) is the scanner. |
 | Idempotency is implemented. | An agent must not rebuild it. |
 | `If-Match` is implemented (`crates/wicket-server/src/extract.rs:105-131`). | An agent must not rebuild it. |
 
@@ -99,5 +101,6 @@ An agent proposing to clean any of these has not read the tree.
 must not describe the rate limit as live.
 
 An agent must read `README.md`, `GOALS.md`, and `docs/07-roadmap.md` before
-writing a word. `TODO.md` Stage 1 (T-20–T-27) is the keystone. Stages 2 and 3
-must not start before it lands.
+writing a word. `TODO.md` Stage 1 (T-20–T-27) is the keystone. T-20, T-21, T-22, T-23, and T-26
+have landed. T-24, T-25, and T-27 have not. Stages 2 and 3 must not start before
+T-24 lands.

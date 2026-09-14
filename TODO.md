@@ -18,12 +18,13 @@ the item is real.
 
 **Stage 0 is the contribution product, and it comes first.** It needs no decision
 from the owner. It stops documents from lying to contributors now. Do it first.
+Most of Stage 0 landed in the 2026-09-14 swarm. Remaining: T-01 (owner contacts),
+T-13 (licence-identifier backfill), T-17 (GitHub merge settings, owner).
 
 **Stage 1 is the keystone, and it is blocked on accepting
 [ADR 0010](docs/adr/0010-one-registry.md).** Seven separate items from four analyses
-collapse into it. Until `module.toml` is the single source of truth and its routes
-carry a method, Goal 1 and Goal 2 cannot be worked on independently, and both are
-done twice. Stages 2 and 3 must not start before Stage 1 lands.
+collapse into it. T-20, T-21, T-22, T-23, and T-26 have landed. T-24, T-25, and
+T-27 have not. Stages 2 and 3 must not start before T-24 lands.
 
 Stages 2 through 5 are ordered by dependency, not by importance. Stage 5 is the largest
 and can only begin once Stage 2 gives it a catalogue to map onto.
@@ -38,23 +39,23 @@ that are currently false.
 | ID | Work | Size | Done when |
 |---|---|---|---|
 | T-01 | Fill the conduct and security contacts | S | `CODE_OF_CONDUCT.md:39` and `SECURITY.md:9` hold real addresses instead of placeholders; SECURITY states whether GitHub private vulnerability reporting is enabled |
-| T-02 | Pull request template carrying the four-goal gate | S | `.github/pull_request_template.md` requires an answer or a reasoned "not applicable" for each goal, plus sign-off and local gate confirmation |
-| T-03 | Issue templates and a published label set | S | Bug, feature, module proposal and request-for-comment forms exist; the label set is documented in `CONTRIBUTING.md` |
-| T-04 | Sign-off check in CI | S | The workflow fails when any commit in a pull request lacks a `Signed-off-by` line. Required by [ADR 0006](docs/adr/0006-license.md), currently unenforced |
-| T-05 | Request-for-comment path | S | A form and an index exist; `CONTRIBUTING.md` states which diffs require one before a pull request |
-| T-06 | Goal-heading lint on pull request bodies | S | CI fails a pull request whose body omits a goal heading |
-| T-07 | **Repair dangling `_team/` citations in tracked files** | M | No tracked file cites a path under `_team/`. Twenty-plus tracked files currently do, including `PLAN.md` (16 citations) and `docs/01-vision-and-scope.md`, which sources its competitive claim to a file that exists in neither published repository. Either publish the evidence under `research/` or restate the claim inline |
-| T-08 | Move the `_team` exclusion into the repository | S | The exclusion lives in a tracked ignore file rather than only in `.git/info/exclude`, so a second contributor cannot accidentally commit their own working directory |
-| T-09 | Correct the supported PostgreSQL floor | S | `docs/01-vision-and-scope.md:162` no longer says "16 or later"; the contract's 17 minimum and 18 tested (`docs/09-workspace-contract.md:23-24`) is stated once and consistently |
-| T-10 | Close the settled open questions in the vision | S | `docs/01-vision-and-scope.md` §8 no longer lists licence and contributor agreement as undecided; [ADR 0006](docs/adr/0006-license.md) settled both. Section 1's claim that the product name lives in one constant is removed, having been false since the rename |
-| T-11 | Stamp audience and status on every document | S | Each document declares operator, contributor or quality, and shipped, partial, absent or historical. `HANDOFF.md:14-16` says no code has been written while `HANDOFF.md:23` says a wave is integrated; both cannot be current |
-| T-12 | Correct the stale hosted-CI wording | S | The workflow comment and `HANDOFF.md:28` agree with `PLAN.md:591-593`. Actions are on and outside pull requests already get Linux CI |
+| T-02 | **DONE.** Pull request template carrying the four-goal gate | S | `.github/pull_request_template.md` requires an answer or a reasoned "not applicable" for each goal, plus sign-off and local gate confirmation |
+| T-03 | **DONE.** Issue templates and a published label set | S | Bug, feature, module proposal and request-for-comment forms exist; the label set is documented in `CONTRIBUTING.md` |
+| T-04 | **DONE.** Sign-off check in CI | S | `scripts/check-dco.sh` is wired in `.github/workflows/ci.yml` job `lint-policy`. A pull request whose commits lack `Signed-off-by` fails the build |
+| T-05 | **DONE.** Request-for-comment path | S | A form and an index exist; `CONTRIBUTING.md` states which diffs require one before a pull request |
+| T-06 | **DONE.** Goal-heading lint on pull request bodies | S | `scripts/check-pr-goals.sh` fails a pull request whose body omits a goal heading |
+| T-07 | **DONE.** Repair dangling `_team/` citations in tracked files | M | No tracked file cites a path under `_team/` (other than this backlog's own history of the defect). Cites were retargeted to `research/` and `docs/` or restated inline |
+| T-08 | **DONE.** Move the `_team` exclusion into the repository | S | `.gitignore` excludes `_team/` |
+| T-09 | **DONE.** Correct the supported PostgreSQL floor | S | `docs/01-vision-and-scope.md` states 17 minimum, 18 tested, matching `docs/09-workspace-contract.md` |
+| T-10 | **DONE.** Close the settled open questions in the vision | S | `docs/01-vision-and-scope.md` §8 records licence and DCO as settled by [ADR 0006](docs/adr/0006-license.md). The one-constant name claim is restated as false since the rename |
+| T-11 | **DONE.** Stamp audience and status on every document | S | Product docs, ADRs, HANDOFF (historical), DESIGN, and research/README declare audience and status. HANDOFF no longer claims "no code has been written" as present tense |
+| T-12 | **DONE.** Correct the stale hosted-CI wording | S | HANDOFF, README, and CONTRIBUTING agree that hosted Actions are on. Slice acceptance is `just ci-db` |
 | T-13 | Licence identifier lint and backfill | S | Every source file carries its identifier and a lint enforces it. `CONTRIBUTING.md` §9 requires this today and no file complies. Backfill in one maintainer change before enabling the lint |
-| T-14 | Unimplemented-macro scanner | S | CI fails on a placeholder macro outside compile-fail fixtures, as `CONTRIBUTING.md` §6 already requires in prose |
-| T-15 | The acceptance suite is outside the default gate | S | Either `just ci` (`justfile:392`) gains an integration-test recipe that does not need a database, or `README.md` §5 and `CONTRIBUTING.md` §6 stop calling `ci` the gate. Today `ci` ends in `test-lib`, which passes `--lib` (`justfile:313-314`) and therefore excludes every integration test under `crates/*/tests/`, including `crates/wicket-server/tests/slice.rs` (twenty tests, the Wave 2s acceptance). A contributor running the documented gate never exercises the product's own acceptance script |
-| T-16 | The build file describes a passing recipe as expected to fail | S | `justfile` no longer says ci-db is "expected RED until harness lands" (DONE in this change set). Public CI's `just ci-db` is green. The file is owned by another change in this same set; this item is the record, not the edit |
+| T-14 | **DONE.** Unimplemented-macro scanner | S | `scripts/lint-unimplemented.sh` fails CI on a placeholder macro outside compile-fail fixtures |
+| T-15 | **DONE.** The acceptance suite is outside the default gate | S | `README.md` §5 and `CONTRIBUTING.md` name `just ci` as the offline lint/lib gate and `just ci-db` as slice acceptance. `just ci` still ends in `test-lib` (`--lib`); that is now documented rather than mislabeled |
+| T-16 | **DONE.** The build file describes a passing recipe as expected to fail | S | `justfile` no longer says ci-db is "expected RED until harness lands". Public CI's `just ci-db` is green |
 | T-17 | Repository settings contradict the merge policy | S | GitHub `allow_squash_merge` is false, matching `CONTRIBUTING.md` §7 and `GOALS.md` GOV-5. Branch protection on `main` either enforces fast-forward or is recorded as ABSENT. Private vulnerability reporting is on, or `SECURITY.md:9-11` states it is off (see T-01). **Owner action, not a file change:** the repository has `allow_squash_merge`, `allow_rebase_merge` and `allow_merge_commit` all true. The documents describe a rule the platform does not enforce |
-| T-18 | One writer per file per wave | S | `CONTRIBUTING.md` and the agent standing orders state one writer per file per wave, and a subsequent wave produces no `integrate: merge` tagged "overlapping ownership". 39 of 41 such merges in this repository's history carry that tag. Concurrent lanes sharing files is the single most frequent integration defect |
+| T-18 | **DONE.** One writer per file per wave | S | `CONTRIBUTING.md` §7 and `AGENTS.md` state one writer per file per wave. Historical `integrate: merge` overlapping-ownership commits remain in git history; new waves must not add more |
 
 ---
 
@@ -67,13 +68,13 @@ drift independently; three found the dropped route method independently.
 
 | ID | Work | Size | Depends | Done when |
 |---|---|---|---|---|
-| T-20 | Single manifest source. `compiled_in()` reads each `module.toml` rather than embedding a copy | M | — | No inline manifest strings remain in `crates/wicket-module/src/manifest.rs`; a test fails on any drift between the compiled-in catalogue and the file on disk. **Merges three items that three separate analyses raised as the same work** |
-| T-21 | Routes carry their method | S | T-20 | `[[routes]]` requires `method`; `ManifestRoute` and `ModuleRoute` store it; the local re-parse in `modules/items/src/lib.rs:158-180` is deleted. **Merges two items raised independently** |
-| T-22 | Machines survive registration | M | T-20 | Declared machines are the machines the engine freezes, including not-required reasons; `register()` no longer clears them |
-| T-23 | Mount reverse-diff lint | S | — | A lint extracts mounts from the router and compares them to the document table, failing on any difference. This is the interim step [ADR 0010](docs/adr/0010-one-registry.md) explicitly accepts: it makes existing drift visible while the registry is built. It also replaces the circular parity test at `crates/wicket-server/tests/slice.rs:1543-1568`, which compares a table to itself |
+| T-20 | **DONE.** Single manifest source. `compiled_in()` reads each `module.toml` rather than embedding a copy | M | — | No inline manifest strings remain in `crates/wicket-module/src/manifest.rs`; first-party modules are `include_str!` of `modules/*/module.toml`; calibration (no crate) is a fixture. A test fails on drift between the compiled-in catalogue and the file on disk |
+| T-21 | **DONE.** Routes carry their method | S | T-20 | `[[routes]]` requires `method`; `ManifestRoute` and `ModuleRoute` store it; the local re-parse in `modules/items/src/lib.rs` is deleted |
+| T-22 | **DONE.** Machines survive registration | M | T-20 | Declared machines are the machines the engine freezes, including not-required reasons; `register()` no longer clears them |
+| T-23 | **DONE.** Mount reverse-diff lint | S | — | `scripts/lint-mounts.sh` extracts mounts from the router and compares them to `MOUNTED`, failing on any difference. Wired into `just ci`. The circular table-to-itself test is gone |
 | T-24 | The capability table, and a router generated from it | L | T-21, T-23 | One table is the only route source; the three catalogues collapse into it; a hand-written mount fails the lint |
 | T-25 | Document generated from the table; parity test reads the router | M | T-24 | The served document's method and path set equals the table, and the test derives one side from the router |
-| T-26 | Collapse the duplicate work-order namespace | S | T-23 | One prefix remains; the other is an explicit redirect or gone. `crates/wicket-server/src/http.rs:48-72` currently violates the one-namespace-per-module rule in `docs/10-api-conventions.md:19` |
+| T-26 | **DONE.** Collapse the duplicate work-order namespace | S | T-23 | `/api/v1/work-orders` is the only prefix. `/api/v1/production/work-orders` is gone, not aliased |
 | T-27 | Module manifest lint | M | T-20 | Fails when a module's crate name, identifier and schema disagree, or when it is missing from the canonical order or either profile |
 
 ---
@@ -119,9 +120,9 @@ the wire. None of it is new functionality.
 | T-55 | Module scaffold generator | M | T-54 | Generates a module that fails its own conformance suite until filled in, and generates no directory the module contract cannot honour |
 | T-56 | Publish and hash the introspection snapshot | M | T-24, T-51 | Modules, machines, edges, events, jobs and permissions are enumerable, and the snapshot is hashed into the configuration manifest |
 | T-57 | Tool-call surface, optional | M | T-56 | Every tool name equals a mounted operation identifier. Do not start before T-56 or it will duplicate the document badly |
-| T-58 | Extend the session-protocol lint to modules | S | — | The first scan in the justfile covers `modules/`, which it currently skips, letting module code evade the fence |
-| T-59 | Reconcile the module dependency rule with reality | S | T-05 | `PLAN.md:344` says a module depends only on the module crate's published interfaces; every first-party module depends on six kernel crates. Enforcing the sentence as written would reject every module contribution. Amend the sentence or the allowlist, and say which won |
-| T-60 | Resolve the phantom UI slot in the module contract | S | — | `docs/03-module-system.md:32-50` documents a UI route file that no module has. Implement the slot or strike it, because a scaffolding agent will otherwise emit dead files |
+| T-58 | **DONE.** Extend the session-protocol lint to modules | S | — | `just lint-sql` first scan covers `modules/` as well as `crates/` |
+| T-59 | **DONE.** Reconcile the module dependency rule with reality | S | T-05 | `PLAN.md` crate graph: Cargo manifests won. Modules depend on `wicket-module` AND the listed kernel crates. Enforcing "wicket-module published interfaces only" would reject every first-party module |
+| T-60 | **DONE.** Resolve the phantom UI slot in the module contract | S | — | `docs/03-module-system.md` no longer requires a `ui/` tree. A UI tree is ABSENT (promised: Wave 3 UI) |
 
 ---
 
@@ -132,11 +133,11 @@ run in parallel. Serves Goal 4a.
 
 | ID | Work | Size | Depends | Done when |
 |---|---|---|---|---|
-| T-70 | Classify every environment variable the source reads | S | — | A table lists each with its path, classified as required at boot, optional at runtime, test-only or compile-time. Note that the test-harness variable is widely misread as a production setting, and that the blob root is the only hard boot failure |
+| T-70 | **DONE.** Classify every environment variable the source reads | S | — | `docs/12-configuration.md` lists each with its path, classified as required at boot, optional at runtime, test-only or compile-time. `WICKET_REQUIRE_PG` is test-harness only. `WICKET_BLOB_ROOT` is the only hard production boot failure |
 | T-71 | Operator documentation index | S | T-11 | An index maps the topics below to files, and the readme points operators there before the plan and design documents |
 | T-72 | Prerequisites | M | T-71, T-09 | Operating systems, database version, and the contributor-only tools named as such |
 | T-73 | Provisioning: database, the five roles, and the grants | M | T-72 | Reproduces the development role split with production credentials, and includes a check proving the application role cannot write the audit tables |
-| T-74 | Configuration, and an example file that can actually boot | M | T-70 | Every required variable is present. The current example file omits the one variable whose absence is a hard boot failure |
+| T-74 | **DONE.** Configuration, and an example file that can actually boot | M | T-70 | `.env.example` includes `WICKET_BLOB_ROOT` and is a subset of `docs/12-configuration.md`. Development passwords only |
 | T-75 | Choosing a profile | M | T-71 | A table generated from the profile files, stating that a required signature edge under a no-signature gate fails at startup |
 | T-76 | First boot | M | T-73, T-74, T-75 | Each step carries a command, an expected result and an independent check. Distinguishes the product's migrate subcommand from the contributor recipe, which are different paths and desynchronise schema history if mixed |
 | T-77 | Day one on the shop floor | L | T-76 | Receive, build, complete and trace, using only routes that exist, each with an expected status |
@@ -200,9 +201,7 @@ These block specific items and cannot be resolved by a contributor.
    rule the platform does not enforce. This is an owner Settings change, not a file
    change. Also decide: branch protection on `main` so the fast-forward rule is
    real, and whether private vulnerability reporting is on. Blocks T-17.
-9. **Whether `just ci` must run the acceptance suite.** `justfile:392` ends in
-   `test-lib`, which passes `--lib` (`justfile:313-314`) and excludes every
-   integration test under `crates/*/tests/`, including
-   `crates/wicket-server/tests/slice.rs`. Either `ci` gains an integration-test
-   recipe that does not need a database, or the documents stop calling `ci` the
-   gate. Blocks T-15.
+9. **Whether `just ci` must run the acceptance suite.** Resolved 2026-09-14 by
+   the docs path (T-15): `just ci` is the offline lint/lib gate; `just ci-db` is
+   slice acceptance. Reopen only if `ci` itself should grow a no-database
+   integration-test recipe.

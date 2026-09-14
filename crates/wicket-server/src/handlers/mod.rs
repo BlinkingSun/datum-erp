@@ -1379,7 +1379,7 @@ pub struct WoCreate {
     id: Option<String>,
 }
 
-/// POST /api/v1/work-orders and /api/v1/production/work-orders
+/// POST /api/v1/work-orders
 pub async fn create_wo(State(state): State<AppState>, headers: H, body: Bytes) -> Response {
     let request_id = rid(&headers);
     match create_wo_inner(&state, &headers, &request_id, &body).await {

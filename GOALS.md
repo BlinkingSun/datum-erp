@@ -84,11 +84,11 @@ by walking that registry against mounts, machines, jobs, and the CLI. A missing 
 fails the build.
 
 This goal is currently false, and not marginally. The live surface is a hand-written
-table in `crates/wicket-server/src/http.rs:18-128`; the OpenAPI document is generated
-from a **second** hand-written table in `crates/wicket-server/src/openapi.rs:29-397`;
-and the module manifests declare a **third** set that the server never reads. The
-existing parity test compares the served document to `mounted_operations()` with both
-sides derived from the same table, so it cannot detect drift from the router at all.
+table in `crates/wicket-server/src/http.rs`; the OpenAPI document is generated
+from a **second** hand-written table (`MOUNTED` in `crates/wicket-server/src/openapi.rs`);
+and the module manifests declare a **third** set that the server does not yet generate
+mounts from. `scripts/lint-mounts.sh` (T-23) fails when the first two disagree.
+Generating both from one capability table is ABSENT (promised: `TODO.md` T-24, T-25).
 
 Capabilities that exist in Rust and cannot be reached over the wire today include
 listing items, patching a location, listing lots, moving or adjusting stock, voiding a
@@ -206,8 +206,8 @@ hosted CI never replaces the three-machine gate for kernel and schema changes.
 
 | | Rule |
 |---|---|
-| **GOV-1** | Every pull request MUST answer all four goals explicitly, or state why each is not applicable. A missing answer MUST fail the build once T-06 lands; until then the maintainer enforces it. |
-| **GOV-2** | Every commit MUST carry a Developer Certificate of Origin sign-off, and CI MUST check it (T-04, not yet wired). Settled by [ADR 0006](docs/adr/0006-license.md) and not reopened by a pull request. No contributor licence agreement will be asked for. |
+| **GOV-1** | Every pull request MUST answer all four goals explicitly, or state why each is not applicable. A missing heading fails the build (`scripts/check-pr-goals.sh`, T-06). |
+| **GOV-2** | Every commit MUST carry a Developer Certificate of Origin sign-off, and CI MUST check it (`scripts/check-dco.sh`, T-04). Settled by [ADR 0006](docs/adr/0006-license.md) and not reopened by a pull request. No contributor licence agreement will be asked for. |
 | **GOV-3** | Every source file MUST carry its licence identifier, and a lint MUST enforce it (T-13). No file complies today, so this is a backfill before it is a gate. |
 | **GOV-4** | The change class is decided by the diff, not by the author. Touching a public route, an event payload, the manifest schema, the module contract, the canonical order or the dependency allowlist requires an accepted request for comment first. A decision expensive to reverse requires its own decision record, never buried in a feature change. |
 | **GOV-5** | `main` must move by fast-forward only. Squash-merge must be disabled, because squashing rewrites the signed commits that ADR 0006 requires. Enforcement of that GitHub setting is ABSENT (promised: `TODO.md` T-17): the repository currently permits squash, rebase, and merge commits. Closing those options is a repository Settings change the maintainer makes; a contributor cannot fix it in a pull request. Hosted CI green is necessary and not sufficient: kernel, SQL and contract changes record a three-machine result. |
@@ -217,7 +217,7 @@ hosted CI never replaces the three-machine gate for kernel and schema changes.
 | **GOV-9** | Work suitable for a newcomer is never in the ledger, the audit chain, or the database session protocol. |
 | **GOV-10** | Automation decides the mechanical rules. The maintainer decides requests for comment, decision records, the reasons behind a "not applicable", security and conduct. No second-reviewer quorum is required of a solo project. |
 | **GOV-11** | Within a wave or a concurrent batch of work, one writer owns a file. A second contributor who needs the same file must escalate and wait; they must not edit it in parallel and merge afterward. Three-way merges of concurrently edited files are how this project has repeatedly lost work: 39 of 41 `integrate: merge` commits are tagged overlapping ownership. A merge is not an integration strategy. |
-| **GOV-12** | Every sentence in project documentation is `is`, `must`, or `ABSENT (promised: …)`. There is no fourth mood. A mechanism that does not exist is never described in the present tense. Precedent: `.github/pull_request_template.md:8-10` (T-06) and `.github/pull_request_template.md:70` (T-04). |
+| **GOV-12** | Every sentence in project documentation is `is`, `must`, or `ABSENT (promised: …)`. There is no fourth mood. A mechanism that does not exist is never described in the present tense. Precedent: `scripts/check-pr-goals.sh` (T-06) and `scripts/check-dco.sh` (T-04). |
 
 ---
 

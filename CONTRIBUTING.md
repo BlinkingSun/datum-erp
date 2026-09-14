@@ -53,7 +53,7 @@ The code is licensed **AGPL-3.0-or-later**. See `LICENSE` and `docs/adr/0006-lic
 
 ## 2. What every change must answer
 
-Four goals govern this project ([GOALS.md](GOALS.md)). The pull request template asks about each one. The CI check that fails an empty goal heading is ABSENT (promised: `TODO.md` T-06); until it lands the maintainer enforces it by reading. Answer honestly; "not applicable" with a reason is a complete answer, and it is the right answer most of the time.
+Four goals govern this project ([GOALS.md](GOALS.md)). The pull request template asks about each one. CI fails a pull request whose body omits a goal heading (`scripts/check-pr-goals.sh`). Answer honestly; "not applicable" with a reason is a complete answer, and it is the right answer most of the time.
 
 **Goal 1, agent-legible.** A new mutation carries a stable error token a caller can branch on, and a retry story. A bare `VALIDATION` for every failure is not an answer, because an agent cannot tell a held lot from a malformed part number by parsing English. A new state-machine edge appears in the legal-next-actions query.
 
@@ -63,7 +63,7 @@ Four goals govern this project ([GOALS.md](GOALS.md)). The pull request template
 
 **Goal 4, followable.** If an operator would notice, a document changes in the same pull request. A sentence naming a file, subcommand or route is false unless that path exists or is tagged absent.
 
-Every sentence in project documentation is `is`, `must`, or `ABSENT (promised: …)`. There is no fourth mood. A mechanism that does not exist is never described in the present tense. Precedent: `.github/pull_request_template.md:8-10` (T-06 goal-heading check) and `.github/pull_request_template.md:70` (T-04 sign-off check).
+Every sentence in project documentation is `is`, `must`, or `ABSENT (promised: …)`. There is no fourth mood. A mechanism that does not exist is never described in the present tense. Precedent: `scripts/check-pr-goals.sh` (T-06) and `scripts/check-dco.sh` (T-04).
 
 ## 3. Change classes
 

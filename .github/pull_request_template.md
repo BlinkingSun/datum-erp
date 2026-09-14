@@ -5,9 +5,9 @@ The four goal headings below are REQUIRED. Each one takes either a real answer
 or "N/A:" followed by a reason. An empty heading, or "N/A" with no reason, fails
 review.
 
-The CI check that enforces this automatically is ABSENT (promised: TODO.md T-06).
-Until it lands the maintainer reads for it, so a green build is not proof that you
-answered.
+CI fails this pull request if any of the four goal headings is missing
+(`scripts/check-pr-goals.sh`). An empty heading, or "N/A" with no reason, fails
+that check.
 
 If this change touches a public route, an event payload, the manifest schema, the
 module contract, the canonical order, or the dependency allowlist, it needs an
@@ -67,7 +67,7 @@ Write "N/A: kernel-internal" if nothing an operator touches changed.
 
 - [ ] `just ci` is green locally.
 - [ ] `just ci-db` is green, or this change touches no SQL, kernel, or schema.
-- [ ] Every commit is signed off (`git commit -s`). Required by ADR 0006. The CI check is ABSENT (promised: TODO.md T-04), so this one is on you.
+- [ ] Every commit is signed off (`git commit -s`). Required by ADR 0006. CI fails a pull request that is missing a `Signed-off-by` line (`scripts/check-dco.sh`).
 - [ ] New source files carry `SPDX-License-Identifier: AGPL-3.0-or-later`. No file in the tree complies yet; the lint and backfill are TODO.md T-13.
 - [ ] Migrations have a tested reverse.
 - [ ] No `unsafe`. No `todo!()`.

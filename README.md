@@ -26,7 +26,7 @@ A plain shop — a job shop that is not regulated — runs the same binary with 
 
 A first small change must start from [GOALS.md](GOALS.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [docs/00-erp-primer.md](docs/00-erp-primer.md). GOALS.md is binding. CONTRIBUTING.md is the DCO, the change classes, and what a pull request must answer. The primer is what an ERP does, taught by following one order of titanium bone screws from a customer request through to a recall query.
 
-[AGENTS.md](AGENTS.md) is the standing orders for anyone pointing an AI agent at this repository. [TODO.md](TODO.md) is the sequenced backlog.
+[AGENTS.md](AGENTS.md) is the standing orders for anyone pointing an AI agent at this repository. [TODO.md](TODO.md) is the sequenced backlog. Operators: [docs/12-configuration.md](docs/12-configuration.md) classifies every environment variable the source reads.
 
 Before touching the kernel, the ledger, or the module contract, half a day of reading. There is no shortcut.
 
@@ -56,7 +56,7 @@ Wicket is licensed under the GNU Affero General Public License v3.0 or later; se
 ## 7. Contributing
 
 Read [GOALS.md](GOALS.md) and then [CONTRIBUTING.md](CONTRIBUTING.md) before you open a pull request.
-Every pull request answers the four goals. The CI check that enforces this is ABSENT (promised: `TODO.md` T-06); until it lands the maintainer enforces it by hand.
+Every pull request answers the four goals. CI fails a pull request whose body omits a goal heading (`scripts/check-pr-goals.sh`). Every commit must carry `Signed-off-by` (`scripts/check-dco.sh`).
 [TODO.md](TODO.md) is the sequenced backlog, and its Stage 0 is startable today.
 [AGENTS.md](AGENTS.md) is the standing orders for anyone pointing an AI agent at this repository.
 Use `git commit -s` so every commit carries a Developer Certificate of Origin sign-off.

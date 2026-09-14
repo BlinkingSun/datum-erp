@@ -43,7 +43,7 @@ Collections are plural nouns. Nested actions that are state transitions, not new
 ```
 GET    /api/v1/items/{id}
 POST   /api/v1/inventory/receipts
-POST   /api/v1/production/work-orders/{id}/release
+POST   /api/v1/work-orders/{id}/release
 GET    /api/v1/genealogy/trace
 ```
 
@@ -265,7 +265,7 @@ The meaning text in the body must equal the `x-wicket-signature.meaning` of the 
 The transition then carries the minted id:
 
 ```
-POST /api/v1/production/work-orders/{id}/release
+POST /api/v1/work-orders/{id}/release
 X-Wicket-Signature: 01932c5a-8b10-7001-8000-0000000000e2
 If-Match: "3"
 ```
@@ -502,7 +502,7 @@ Response (201):
 ### 9.4 Work-order release — `WO-2026-1847`
 
 ```
-POST /api/v1/production/work-orders/01932c5a-8b10-7001-8000-000000000006/release
+POST /api/v1/work-orders/01932c5a-8b10-7001-8000-000000000006/release
 Idempotency-Key: 01932c5a-8b10-7001-8000-0000000000e3
 If-Match: "2"
 ```
@@ -550,7 +550,7 @@ HTTP 409. The row is unchanged. After Wave 2b the client mints per §5.2, sends 
 Floor POST, 500 ms budget. Completing a work order is a priced `TRANSFORMATION` group (PLAN §3 acceptance 5). The API does not accept a client-built posting list; the module contributes intents to the sink.
 
 ```
-POST /api/v1/production/work-orders/01932c5a-8b10-7001-8000-000000000006/complete
+POST /api/v1/work-orders/01932c5a-8b10-7001-8000-000000000006/complete
 Idempotency-Key: 01932c5a-8b10-7001-8000-0000000000e4
 If-Match: "3"
 ```
