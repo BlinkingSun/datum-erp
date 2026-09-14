@@ -288,6 +288,15 @@ pub const KERNEL: &[Capability] = &[
 /// Mounted first-party `[[routes]]`. Path+method exists in that module's toml.
 pub const MODULE: &[Capability] = &[
     module(
+        "listItems",
+        CapabilityKind::Http,
+        "GET",
+        "/api/v1/items",
+        "items.view",
+        "mod-items",
+        None,
+    ),
+    module(
         "createItem",
         CapabilityKind::Http,
         "POST",
@@ -306,6 +315,15 @@ pub const MODULE: &[Capability] = &[
         None,
     ),
     module(
+        "updateItem",
+        CapabilityKind::Http,
+        "PATCH",
+        "/api/v1/items/{id}",
+        "items.edit",
+        "mod-items",
+        None,
+    ),
+    module(
         "releaseItem",
         CapabilityKind::Transition,
         "POST",
@@ -313,6 +331,15 @@ pub const MODULE: &[Capability] = &[
         "items.release",
         "mod-items",
         Some("release"),
+    ),
+    module(
+        "listLocations",
+        CapabilityKind::Http,
+        "GET",
+        "/api/v1/locations",
+        "locations.view",
+        "mod-locations",
+        None,
     ),
     module(
         "createLocation",
@@ -330,6 +357,33 @@ pub const MODULE: &[Capability] = &[
         "/api/v1/locations/{id}",
         "locations.view",
         "mod-locations",
+        None,
+    ),
+    module(
+        "listLocationTree",
+        CapabilityKind::Http,
+        "GET",
+        "/api/v1/locations/tree",
+        "locations.view",
+        "mod-locations",
+        None,
+    ),
+    module(
+        "deactivateLocation",
+        CapabilityKind::Http,
+        "POST",
+        "/api/v1/locations/{id}/deactivate",
+        "locations.edit",
+        "mod-locations",
+        None,
+    ),
+    module(
+        "listLots",
+        CapabilityKind::Http,
+        "GET",
+        "/api/v1/lots",
+        "lots.view",
+        "mod-lots",
         None,
     ),
     module(
@@ -387,6 +441,15 @@ pub const MODULE: &[Capability] = &[
         None,
     ),
     module(
+        "createSerials",
+        CapabilityKind::Http,
+        "POST",
+        "/api/v1/lots/{id}/serials",
+        "lots.edit",
+        "mod-lots",
+        None,
+    ),
+    module(
         "createReceipt",
         CapabilityKind::Http,
         "POST",
@@ -411,6 +474,15 @@ pub const MODULE: &[Capability] = &[
         "/api/v1/inventory/on-hand",
         "inventory.view",
         "mod-inventory",
+        None,
+    ),
+    module(
+        "listWorkOrders",
+        CapabilityKind::Http,
+        "GET",
+        "/api/v1/work-orders",
+        "production.view",
+        "mod-production-min",
         None,
     ),
     module(
@@ -463,6 +535,24 @@ pub const MODULE: &[Capability] = &[
         CapabilityKind::Http,
         "GET",
         "/api/v1/genealogy/trace",
+        "genealogy.view",
+        "mod-genealogy",
+        None,
+    ),
+    module(
+        "getImpact",
+        CapabilityKind::Http,
+        "GET",
+        "/api/v1/genealogy/impact/{lot}",
+        "genealogy.view",
+        "mod-genealogy",
+        None,
+    ),
+    module(
+        "getGenealogyJob",
+        CapabilityKind::Http,
+        "GET",
+        "/api/v1/genealogy/jobs/{id}",
         "genealogy.view",
         "mod-genealogy",
         None,
@@ -533,7 +623,7 @@ mod tests {
     fn table_has_the_mounted_count() {
         assert_eq!(
             KERNEL.len() + MODULE.len(),
-            47,
+            57,
             "keep in lockstep with the live mount set"
         );
     }

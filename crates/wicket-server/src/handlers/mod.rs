@@ -16,9 +16,9 @@ use wicket_db::{ReadPool, Tx, WriteContext, WritePool};
 use wicket_identity::{PasswordProvider, Provider};
 use wicket_ledger::CostMethod;
 use wicket_mod_inventory::{BalanceQuery, DocumentKind, LineInput, ReceiveRequest, ReleaseRequest};
-use wicket_mod_items::{Kind, NewItem};
+use wicket_mod_items::{Kind, NewItem, UpdateItem};
 use wicket_mod_locations::{CreateLocation, LocationKind};
-use wicket_mod_lots::{CreateLotBody, LotStatus, PackageLevel, SetStatusBody};
+use wicket_mod_lots::{CreateLotBody, CreateSerialsBody, LotStatus, PackageLevel, SetStatusBody};
 use wicket_mod_production_min::{
     CompleteRequest, CreateWorkOrder, FinishedLotTemplate, IssueMaterialRequest, StartRequest,
 };
@@ -45,6 +45,102 @@ fn rid(headers: &H) -> String {
 
 fn parse_json<T: for<'de> Deserialize<'de>>(body: &[u8]) -> Result<T> {
     serde_json::from_slice(body).map_err(|e| Error::validation(e.to_string(), None))
+}
+
+fn nonempty(s: &Option<String>) -> Option<&str> {
+    s.as_deref().map(str::trim).filter(|s| !s.is_empty())
+}
+
+fn parse_limit(raw: Option<&str>) -> Result<Option<u32>> {
+    let Some(s) = raw.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(None);
+    };
+    let n: u32 = s
+        .parse()
+        .map_err(|_| Error::validation("limit must be an integer", Some("limit")))?;
+    if !(1..=200).contains(&n) {
+        return Err(Error::validation(
+            "limit must be between 1 and 200",
+            Some("limit"),
+        ));
+    }
+    Ok(Some(n))
+}
+
+fn map_items_err(e: wicket_mod_items::Error) -> Error {
+    match e {
+        wicket_mod_items::Error::InvalidLimit => {
+            Error::validation("limit must be between 1 and 200", Some("limit"))
+        }
+        wicket_mod_items::Error::StockMeasureImmutable
+        | wicket_mod_items::Error::StandardCostRequired
+        | wicket_mod_items::Error::InvalidTransition { .. }
+        | wicket_mod_items::Error::Manifest(_) => Error::validation(e.to_string(), None),
+        other => other.into(),
+    }
+}
+
+fn map_locations_err(e: wicket_mod_locations::Error) -> Error {
+    match e {
+        wicket_mod_locations::Error::Validation(ref msg) => {
+            let field = if msg == "limit" {
+                Some("limit")
+            } else if msg == "cursor" {
+                Some("cursor")
+            } else {
+                None
+            };
+            Error::validation(e.to_string(), field)
+        }
+        wicket_mod_locations::Error::OnHand | wicket_mod_locations::Error::Protected => {
+            Error::http("REFUSED", e.to_string(), None, StatusCode::CONFLICT)
+        }
+        wicket_mod_locations::Error::Immutable(_) | wicket_mod_locations::Error::Cycle => {
+            Error::validation(e.to_string(), None)
+        }
+        other => other.into(),
+    }
+}
+
+fn map_lots_err(e: wicket_mod_lots::Error) -> Error {
+    match e {
+        wicket_mod_lots::Error::InvalidLimit => {
+            Error::validation("limit must be between 1 and 200", Some("limit"))
+        }
+        other => other.into(),
+    }
+}
+
+fn map_production_err(e: wicket_mod_production_min::Error) -> Error {
+    match e {
+        wicket_mod_production_min::Error::InvalidLimit => {
+            Error::validation("limit must be between 1 and 200", Some("limit"))
+        }
+        wicket_mod_production_min::Error::Manifest(_) => Error::validation(e.to_string(), None),
+        other => other.into(),
+    }
+}
+
+fn map_genealogy_err(e: wicket_mod_genealogy::Error) -> Error {
+    match e {
+        wicket_mod_genealogy::Error::Lots(wicket_mod_lots::Error::NotFound) => {
+            Error::not_found("lot not found")
+        }
+        wicket_mod_genealogy::Error::NotFound => Error::not_found("not found"),
+        other => other.into(),
+    }
+}
+
+fn parse_cost_method(raw: &str) -> Result<CostMethod> {
+    match raw {
+        "FIFO" | "Fifo" | "fifo" => Ok(CostMethod::Fifo),
+        "MOVING_AVG" | "MovingAvg" => Ok(CostMethod::MovingAvg),
+        "STANDARD" | "Standard" => Ok(CostMethod::Standard),
+        other => Err(Error::validation(
+            format!("unknown cost_method {other}"),
+            Some("cost_method"),
+        )),
+    }
 }
 
 fn json_status(status: u16, v: Value) -> Response {
@@ -383,6 +479,183 @@ pub async fn get_item(
     }
 }
 
+#[derive(Debug, Default, Deserialize)]
+pub struct ItemListQ {
+    #[serde(default)]
+    limit: Option<String>,
+    #[serde(default)]
+    cursor: Option<String>,
+    #[serde(default)]
+    kind: Option<String>,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    number_prefix: Option<String>,
+}
+
+/// GET /api/v1/items
+pub async fn list_items(
+    State(state): State<AppState>,
+    headers: H,
+    Query(q): Query<ItemListQ>,
+) -> Response {
+    let request_id = rid(&headers);
+    match list_items_inner(&state, &headers, &request_id, q).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => error_response(e, &request_id),
+    }
+}
+
+async fn list_items_inner(
+    state: &AppState,
+    headers: &H,
+    request_id: &str,
+    q: ItemListQ,
+) -> Result<Value> {
+    let _session = extract::require_permission(state, headers, request_id, "items.view").await?;
+    let limit = parse_limit(nonempty(&q.limit))?;
+    let cursor = match nonempty(&q.cursor) {
+        Some(c) => Some(parse_uuid(c, "cursor", ItemId::from_uuid)?),
+        None => None,
+    };
+    let kind = match nonempty(&q.kind) {
+        Some(s) => {
+            Some(Kind::parse(s).map_err(|e| Error::validation(e.to_string(), Some("kind")))?)
+        }
+        None => None,
+    };
+    let status = match nonempty(&q.status) {
+        Some(s) => Some(
+            wicket_mod_items::Status::parse(s)
+                .map_err(|e| Error::validation(e.to_string(), Some("status")))?,
+        ),
+        None => None,
+    };
+    let filter = wicket_mod_items::ListFilter {
+        kind,
+        status,
+        number_prefix: nonempty(&q.number_prefix).map(str::to_string),
+        cursor,
+        limit,
+    };
+    let page = wicket_mod_items::list(state.pool(), filter)
+        .await
+        .map_err(map_items_err)?;
+    let data: Vec<wicket_mod_items::api::ItemBody> = page
+        .data
+        .iter()
+        .map(wicket_mod_items::api::ItemBody::from)
+        .collect();
+    Ok(json!({
+        "data": data,
+        "next_cursor": page.next_cursor,
+        "has_more": page.has_more,
+    }))
+}
+
+#[derive(Deserialize)]
+struct ItemPatch {
+    #[serde(default)]
+    revision: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    kind: Option<String>,
+    #[serde(default)]
+    r#type: Option<String>,
+    #[serde(default)]
+    stock_uom: Option<i64>,
+    #[serde(default)]
+    stock_scale: Option<i16>,
+    #[serde(default)]
+    residual_tolerance: Option<String>,
+    #[serde(default)]
+    cost_method: Option<String>,
+    #[serde(default)]
+    standard: Option<MoneyBody>,
+}
+
+/// PATCH /api/v1/items/{id}
+pub async fn update_item(
+    State(state): State<AppState>,
+    headers: H,
+    Path(id): Path<String>,
+    body: Bytes,
+) -> Response {
+    let request_id = rid(&headers);
+    match update_item_inner(&state, &headers, &request_id, &id, &body).await {
+        Ok((st, v)) => json_status(st, v),
+        Err(e) => error_response(e, &request_id),
+    }
+}
+
+async fn update_item_inner(
+    state: &AppState,
+    headers: &H,
+    request_id: &str,
+    id: &str,
+    raw: &[u8],
+) -> Result<(u16, Value)> {
+    let body: ItemPatch = parse_json(raw)?;
+    let session = extract::require_mutation(state, headers, request_id, "items.edit").await?;
+    let key = idempotency::require_key(headers)?;
+    let hash = idempotency::body_hash(raw);
+    let expected = require_if_match(headers)?;
+    let item_id = parse_uuid(id, "id", ItemId::from_uuid)?;
+    let kind = match body.kind.or(body.r#type) {
+        Some(s) => {
+            Some(Kind::parse(&s).map_err(|e| Error::validation(e.to_string(), Some("kind")))?)
+        }
+        None => None,
+    };
+    let residual = match body.residual_tolerance.as_deref() {
+        Some(s) => Some(
+            s.parse()
+                .map_err(|_| Error::validation("residual_tolerance", Some("residual_tolerance")))?,
+        ),
+        None => None,
+    };
+    let cost_method = match body.cost_method.as_deref() {
+        Some(s) => Some(parse_cost_method(s)?),
+        None => None,
+    };
+    let standard = match body.standard {
+        Some(m) => Some(m.to_money()?),
+        None => None,
+    };
+    let patch = UpdateItem {
+        version: expected,
+        revision: body.revision,
+        description: body.description,
+        kind,
+        stock_uom: body.stock_uom.map(wicket_core::UnitId),
+        stock_scale: body.stock_scale,
+        residual_tolerance: residual,
+        cost_method,
+        standard,
+    };
+    let write = state.write_pool();
+    let ctx = write_context(
+        &session,
+        "items.update",
+        request_id,
+        headers,
+        &state.kernel().profile.spec_version,
+    );
+    let mut tx = Tx::begin(&write, &ctx).await?;
+    if let Some(replay) = idempotency::replay(&mut tx, key, &hash).await? {
+        tx.commit().await?;
+        return Ok(replay);
+    }
+    let item = wicket_mod_items::update(&mut tx, item_id, patch)
+        .await
+        .map_err(map_items_err)?;
+    let body = serde_json::to_value(wicket_mod_items::api::ItemBody::from(&item))?;
+    idempotency::remember(&mut tx, key, &hash, 200, &body).await?;
+    tx.commit().await?;
+    Ok((200, body))
+}
+
 #[allow(clippy::result_large_err)]
 fn blocking<T, F, Fut>(request_id: &str, f: F) -> std::result::Result<T, Response>
 where
@@ -695,6 +968,153 @@ async fn get_location_inner(
         "kind": loc.kind.as_sql(),
         "version": loc.version,
     }))
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct ListQ {
+    #[serde(default)]
+    limit: Option<String>,
+    #[serde(default)]
+    cursor: Option<String>,
+}
+
+/// GET /api/v1/locations
+pub async fn list_locations(
+    State(state): State<AppState>,
+    headers: H,
+    Query(q): Query<ListQ>,
+) -> Response {
+    let request_id = rid(&headers);
+    match list_locations_inner(&state, &headers, &request_id, q).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => error_response(e, &request_id),
+    }
+}
+
+async fn list_locations_inner(
+    state: &AppState,
+    headers: &H,
+    request_id: &str,
+    q: ListQ,
+) -> Result<Value> {
+    let session = extract::require_permission(state, headers, request_id, "locations.view").await?;
+    let limit = parse_limit(nonempty(&q.limit))?;
+    let write = crate::read::pool(state);
+    let mut tx = crate::read::begin(
+        &write,
+        &session,
+        "locations.view",
+        request_id,
+        headers,
+        &state.kernel().profile.spec_version,
+    )
+    .await?;
+    let page = wicket_mod_locations::list_locations(&mut tx, limit, nonempty(&q.cursor)).await;
+    tx.rollback().await?;
+    serde_json::to_value(&page.map_err(map_locations_err)?).map_err(Error::from)
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct TreeQ {
+    #[serde(default)]
+    include_inactive: Option<String>,
+}
+
+fn parse_include_inactive(raw: Option<&str>) -> Result<bool> {
+    match raw.map(str::trim).filter(|s| !s.is_empty()) {
+        None => Ok(false),
+        Some("true") | Some("1") => Ok(true),
+        Some("false") | Some("0") => Ok(false),
+        Some(other) => Err(Error::validation(
+            format!("include_inactive must be true or false, got {other}"),
+            Some("include_inactive"),
+        )),
+    }
+}
+
+/// GET /api/v1/locations/tree
+pub async fn list_location_tree(
+    State(state): State<AppState>,
+    headers: H,
+    Query(q): Query<TreeQ>,
+) -> Response {
+    let request_id = rid(&headers);
+    match list_location_tree_inner(&state, &headers, &request_id, q).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => error_response(e, &request_id),
+    }
+}
+
+async fn list_location_tree_inner(
+    state: &AppState,
+    headers: &H,
+    request_id: &str,
+    q: TreeQ,
+) -> Result<Value> {
+    let session = extract::require_permission(state, headers, request_id, "locations.view").await?;
+    let include_inactive = parse_include_inactive(nonempty(&q.include_inactive))?;
+    let write = crate::read::pool(state);
+    let mut tx = crate::read::begin(
+        &write,
+        &session,
+        "locations.view",
+        request_id,
+        headers,
+        &state.kernel().profile.spec_version,
+    )
+    .await?;
+    let page = wicket_mod_locations::list_tree(&mut tx, include_inactive).await;
+    tx.rollback().await?;
+    serde_json::to_value(&page.map_err(map_locations_err)?).map_err(Error::from)
+}
+
+/// POST /api/v1/locations/{id}/deactivate
+pub async fn deactivate_location(
+    State(state): State<AppState>,
+    headers: H,
+    Path(id): Path<String>,
+    body: Bytes,
+) -> Response {
+    let request_id = rid(&headers);
+    match deactivate_location_inner(&state, &headers, &request_id, &id, &body).await {
+        Ok((st, v)) => json_status(st, v),
+        Err(e) => error_response(e, &request_id),
+    }
+}
+
+async fn deactivate_location_inner(
+    state: &AppState,
+    headers: &H,
+    request_id: &str,
+    id: &str,
+    raw: &[u8],
+) -> Result<(u16, Value)> {
+    let session = extract::require_mutation(state, headers, request_id, "locations.edit").await?;
+    wicket_mod_locations::register_schemas_global().map_err(map_locations_err)?;
+    let key = idempotency::require_key(headers)?;
+    let hash = idempotency::body_hash(raw);
+    let expected = require_if_match(headers)?;
+    let loc_id = parse_uuid(id, "id", LocationId::from_uuid)?;
+    let write = state.write_pool();
+    let ctx = write_context(
+        &session,
+        "locations.deactivate",
+        request_id,
+        headers,
+        &state.kernel().profile.spec_version,
+    );
+    let mut tx = Tx::begin(&write, &ctx).await?;
+    if let Some(replay) = idempotency::replay(&mut tx, key, &hash).await? {
+        tx.commit().await?;
+        return Ok(replay);
+    }
+    let loc = wicket_mod_locations::deactivate_location(&mut tx, loc_id, expected)
+        .await
+        .map_err(map_locations_err)?;
+    let body = serde_json::to_value(&loc)?;
+    idempotency::remember(&mut tx, key, &hash, 200, &body).await?;
+    tx.commit().await?;
+    Ok((200, body))
 }
 
 /// POST /api/v1/lots
@@ -1019,6 +1439,90 @@ async fn list_serials_inner(
     let page = wicket_mod_lots::list_serials(&mut tx, lot_id, Some(200), None).await;
     tx.rollback().await?;
     serde_json::to_value(&page?).map_err(Error::from)
+}
+
+/// GET /api/v1/lots
+pub async fn list_lots(
+    State(state): State<AppState>,
+    headers: H,
+    Query(q): Query<ListQ>,
+) -> Response {
+    let request_id = rid(&headers);
+    match list_lots_inner(&state, &headers, &request_id, q).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => error_response(e, &request_id),
+    }
+}
+
+async fn list_lots_inner(
+    state: &AppState,
+    headers: &H,
+    request_id: &str,
+    q: ListQ,
+) -> Result<Value> {
+    let session = extract::require_permission(state, headers, request_id, "lots.view").await?;
+    let limit = parse_limit(nonempty(&q.limit))?.map(i64::from);
+    let write = crate::read::pool(state);
+    let mut tx = crate::read::begin(
+        &write,
+        &session,
+        "lots.view",
+        request_id,
+        headers,
+        &state.kernel().profile.spec_version,
+    )
+    .await?;
+    let page = wicket_mod_lots::list_lots(&mut tx, limit, nonempty(&q.cursor)).await;
+    tx.rollback().await?;
+    serde_json::to_value(&page.map_err(map_lots_err)?).map_err(Error::from)
+}
+
+/// POST /api/v1/lots/{id}/serials
+pub async fn create_serials(
+    State(state): State<AppState>,
+    headers: H,
+    Path(id): Path<String>,
+    body: Bytes,
+) -> Response {
+    let request_id = rid(&headers);
+    match create_serials_inner(&state, &headers, &request_id, &id, &body).await {
+        Ok((st, v)) => json_status(st, v),
+        Err(e) => error_response(e, &request_id),
+    }
+}
+
+async fn create_serials_inner(
+    state: &AppState,
+    headers: &H,
+    request_id: &str,
+    id: &str,
+    raw: &[u8],
+) -> Result<(u16, Value)> {
+    let body: CreateSerialsBody = parse_json(raw)?;
+    let session = extract::require_mutation(state, headers, request_id, "lots.edit").await?;
+    let key = idempotency::require_key(headers)?;
+    let hash = idempotency::body_hash(raw);
+    let lot_id = parse_uuid(id, "id", LotId::from_uuid)?;
+    let write = state.write_pool();
+    let ctx = write_context(
+        &session,
+        "lots.edit",
+        request_id,
+        headers,
+        &state.kernel().profile.spec_version,
+    );
+    let mut tx = Tx::begin(&write, &ctx).await?;
+    if let Some(replay) = idempotency::replay(&mut tx, key, &hash).await? {
+        tx.commit().await?;
+        return Ok(replay);
+    }
+    let page = wicket_mod_lots::create_serials_http(&mut tx, state.kernel(), lot_id, body)
+        .await
+        .map_err(map_lots_err)?;
+    let body = serde_json::to_value(&page)?;
+    idempotency::remember(&mut tx, key, &hash, 201, &body).await?;
+    tx.commit().await?;
+    Ok((201, body))
 }
 
 #[derive(Deserialize)]
@@ -1479,6 +1983,78 @@ async fn get_wo_inner(state: &AppState, headers: &H, request_id: &str, id: &str)
     wo_json(&wo?)
 }
 
+#[derive(Debug, Default, Deserialize)]
+pub struct WoListQ {
+    #[serde(default)]
+    limit: Option<String>,
+    #[serde(default)]
+    cursor: Option<String>,
+    #[serde(default)]
+    status: Option<String>,
+}
+
+/// GET /api/v1/work-orders
+pub async fn list_work_orders(
+    State(state): State<AppState>,
+    headers: H,
+    Query(q): Query<WoListQ>,
+) -> Response {
+    let request_id = rid(&headers);
+    match list_work_orders_inner(&state, &headers, &request_id, q).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => error_response(e, &request_id),
+    }
+}
+
+async fn list_work_orders_inner(
+    state: &AppState,
+    headers: &H,
+    request_id: &str,
+    q: WoListQ,
+) -> Result<Value> {
+    let session =
+        extract::require_permission(state, headers, request_id, "production.view").await?;
+    let limit = parse_limit(nonempty(&q.limit))?;
+    let cursor = match nonempty(&q.cursor) {
+        Some(c) => Some(parse_uuid(c, "cursor", Identifier::from_uuid)?),
+        None => None,
+    };
+    let status = match nonempty(&q.status) {
+        Some(s) => Some(
+            wicket_mod_production_min::Status::parse(s)
+                .map_err(|e| Error::validation(e.to_string(), Some("status")))?,
+        ),
+        None => None,
+    };
+    let write = crate::read::pool(state);
+    let mut tx = crate::read::begin(
+        &write,
+        &session,
+        "production.view",
+        request_id,
+        headers,
+        &state.kernel().profile.spec_version,
+    )
+    .await?;
+    let page = wicket_mod_production_min::list(
+        &mut tx,
+        wicket_mod_production_min::ListFilter {
+            status,
+            cursor,
+            limit,
+        },
+    )
+    .await;
+    tx.rollback().await?;
+    let page = page.map_err(map_production_err)?;
+    let data: Result<Vec<Value>> = page.data.iter().map(wo_json).collect();
+    Ok(json!({
+        "data": data?,
+        "next_cursor": page.next_cursor,
+        "has_more": page.has_more,
+    }))
+}
+
 /// POST .../release
 pub async fn release_wo(
     State(state): State<AppState>,
@@ -1818,6 +2394,73 @@ async fn trace_inner(state: &AppState, headers: &H, request_id: &str, q: TraceQ)
             "job_id": job_id.0.to_string(),
             "result_url": result_url
         })),
+    }
+}
+
+/// GET /api/v1/genealogy/impact/{lot}
+pub async fn get_impact(
+    State(state): State<AppState>,
+    headers: H,
+    Path(lot): Path<String>,
+) -> Response {
+    let request_id = rid(&headers);
+    match get_impact_inner(&state, &headers, &request_id, &lot).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => error_response(e, &request_id),
+    }
+}
+
+async fn get_impact_inner(
+    state: &AppState,
+    headers: &H,
+    request_id: &str,
+    lot: &str,
+) -> Result<Value> {
+    let session = extract::require_permission(state, headers, request_id, "genealogy.view").await?;
+    let lot_id = parse_uuid(lot, "lot", LotId::from_uuid)?;
+    let write = crate::read::pool(state);
+    let mut tx = crate::read::begin(
+        &write,
+        &session,
+        "genealogy.view",
+        request_id,
+        headers,
+        &state.kernel().profile.spec_version,
+    )
+    .await?;
+    let impact = wicket_mod_genealogy::impact(&mut tx, lot_id).await;
+    tx.rollback().await?;
+    serde_json::to_value(&impact.map_err(map_genealogy_err)?).map_err(Error::from)
+}
+
+/// GET /api/v1/genealogy/jobs/{id}
+pub async fn get_genealogy_job(
+    State(state): State<AppState>,
+    headers: H,
+    Path(id): Path<String>,
+) -> Response {
+    let request_id = rid(&headers);
+    match get_genealogy_job_inner(&state, &headers, &request_id, &id).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => error_response(e, &request_id),
+    }
+}
+
+async fn get_genealogy_job_inner(
+    state: &AppState,
+    headers: &H,
+    request_id: &str,
+    id: &str,
+) -> Result<Value> {
+    let _session =
+        extract::require_permission(state, headers, request_id, "genealogy.view").await?;
+    let job_id = parse_uuid(id, "id", |u| wicket_jobs::JobId(Identifier::from_uuid(u)))?;
+    match wicket_mod_genealogy::job_status(state.pool(), job_id)
+        .await
+        .map_err(map_genealogy_err)?
+    {
+        Some(status) => serde_json::to_value(&status).map_err(Error::from),
+        None => Err(Error::not_found("job not found")),
     }
 }
 

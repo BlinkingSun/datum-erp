@@ -1557,7 +1557,9 @@ async fn openapi_listed_paths_are_not_bare_404() {
             "served OpenAPI path+method set must equal the capability table"
         );
         for (method, path) in &listed {
-            let probe = path.replace("{id}", &uuid::Uuid::nil().to_string());
+            let probe = path
+                .replace("{id}", &uuid::Uuid::nil().to_string())
+                .replace("{lot}", &uuid::Uuid::nil().to_string());
             let (pst, _, pbody) = w.call(method, &probe, None, Some(json!({}))).await;
             if pst == StatusCode::NOT_FOUND {
                 assert_eq!(
@@ -1584,10 +1586,18 @@ async fn get_handlers_are_read_only() {
         "navigation",
         "audit_export",
         "get_item",
+        "list_items",
+        "list_items_inner",
         "get_location",
         "get_location_inner",
+        "list_locations",
+        "list_locations_inner",
+        "list_location_tree",
+        "list_location_tree_inner",
         "get_lot",
         "get_lot_inner",
+        "list_lots",
+        "list_lots_inner",
         "list_packages",
         "list_pkg_inner",
         "list_serials",
@@ -1596,8 +1606,14 @@ async fn get_handlers_are_read_only() {
         "on_hand_inner",
         "get_wo",
         "get_wo_inner",
+        "list_work_orders",
+        "list_work_orders_inner",
         "genealogy_trace",
         "trace_inner",
+        "get_impact",
+        "get_impact_inner",
+        "get_genealogy_job",
+        "get_genealogy_job_inner",
         "health",
         "esign_manifestation",
         "esign_manifestation_inner",
@@ -1648,13 +1664,20 @@ async fn get_handlers_are_read_only() {
             "/api/v1/audit".into(),
             "/api/v1/navigation".into(),
             format!("/api/v1/items/{item}"),
+            "/api/v1/items".into(),
             format!("/api/v1/locations/{loc}"),
+            "/api/v1/locations".into(),
+            "/api/v1/locations/tree".into(),
             format!("/api/v1/lots/{lot}"),
+            "/api/v1/lots".into(),
             format!("/api/v1/lots/{lot}/packages"),
             format!("/api/v1/lots/{lot}/serials"),
             format!("/api/v1/inventory/on-hand?item_id={item}&location_id={loc}"),
             format!("/api/v1/work-orders/{wo_id}"),
+            "/api/v1/work-orders".into(),
             format!("/api/v1/genealogy/trace?from_lot_id={lot}&direction=forward"),
+            format!("/api/v1/genealogy/impact/{lot}"),
+            format!("/api/v1/genealogy/jobs/{}", uuid::Uuid::nil()),
         ];
         for uri in &gets {
             let (st, body) = w.get(uri).await;
@@ -1858,5 +1881,201 @@ fn iq_cfg(profile: Profile, database: &str) -> Config {
         database_url: database_url.clone(),
         migrate_url: rewrite_database(&migrate, database),
         bootstrap_url: bootstrap_against_app(&with_os_userinfo(&boot), &database_url),
+    }
+}
+
+fn assert_list_envelope(body: &Value, label: &str) {
+    assert!(body["data"].is_array(), "{label} data {body}");
+    assert!(body["has_more"].is_boolean(), "{label} has_more {body}");
+    let has_more = body["has_more"].as_bool().unwrap();
+    if has_more {
+        assert!(
+            body["next_cursor"].is_string(),
+            "{label} next_cursor must be a string on a non-empty next page {body}"
+        );
+    } else {
+        assert!(
+            body["next_cursor"].is_null(),
+            "{label} next_cursor must be null when has_more is false {body}"
+        );
+    }
+}
+
+async fn patch_if_match(w: &World, uri: &str, body: Value, version: i64) -> (StatusCode, Value) {
+    let (s, _, v) = w
+        .call(
+            "PATCH",
+            uri,
+            Some(vec![("if-match", format!("\"{version}\""))]),
+            Some(body),
+        )
+        .await;
+    (s, v)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn t30_ten_mounted_routes() {
+    if common::skip_if_no_pg() {
+        return;
+    }
+    for profile in profiles() {
+        let w = common::boot(profile).await;
+        let item = create_item(&w, "T30-1", "A", "t30 item", "buy", 1, "FIFO", None).await;
+        let loc = create_loc(&w, "T30-L", "t30 loc").await;
+        let lot = create_lot(&w, &item, "LOT-T30-1", None, None).await;
+        let (st, wo) = w
+            .post(
+                "/api/v1/work-orders",
+                json!({
+                    "item_id": item,
+                    "revision": "A",
+                    "quantity": qty("1", 1, "Count"),
+                }),
+            )
+            .await;
+        assert_eq!(st, StatusCode::CREATED, "{wo}");
+
+        // listItems
+        let (st, body) = w.get("/api/v1/items?limit=1").await;
+        assert_eq!(st, StatusCode::OK, "listItems {body}");
+        assert_list_envelope(&body, "listItems");
+        let (st, body) = w.get("/api/v1/items?limit=201").await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "listItems bad limit {body}");
+        assert_eq!(body["error"]["code"], "VALIDATION", "{body}");
+        assert_eq!(body["error"]["field"], "limit", "{body}");
+
+        // updateItem If-Match + 409
+        let ver = w.get(&format!("/api/v1/items/{item}")).await.1["version"]
+            .as_i64()
+            .unwrap();
+        let (st, _, body) = w
+            .call(
+                "PATCH",
+                &format!("/api/v1/items/{item}"),
+                None,
+                Some(json!({"description": "no if-match"})),
+            )
+            .await;
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "updateItem missing If-Match {body}"
+        );
+        assert_eq!(body["error"]["code"], "VALIDATION", "{body}");
+        let (st, body) = patch_if_match(
+            &w,
+            &format!("/api/v1/items/{item}"),
+            json!({"description": "stale"}),
+            ver + 9,
+        )
+        .await;
+        assert_eq!(st, StatusCode::CONFLICT, "updateItem stale {body}");
+        assert_eq!(body["error"]["code"], "CONFLICT", "{body}");
+        assert_eq!(body["error"]["field"], "version", "{body}");
+        let (st, body) = patch_if_match(
+            &w,
+            &format!("/api/v1/items/{item}"),
+            json!({"description": "t30 patched"}),
+            ver,
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "updateItem {body}");
+        assert_eq!(body["description"], "t30 patched", "{body}");
+
+        // listLocations
+        let (st, body) = w.get("/api/v1/locations?limit=1").await;
+        assert_eq!(st, StatusCode::OK, "listLocations {body}");
+        assert_list_envelope(&body, "listLocations");
+        let (st, body) = w.get("/api/v1/locations?limit=0").await;
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "listLocations bad limit {body}"
+        );
+        assert_eq!(body["error"]["code"], "VALIDATION", "{body}");
+
+        // listLocationTree — ListResponse::all (null cursor even when non-empty)
+        let (st, body) = w.get("/api/v1/locations/tree").await;
+        assert_eq!(st, StatusCode::OK, "listLocationTree {body}");
+        assert!(body["data"].is_array(), "listLocationTree data {body}");
+        assert_eq!(body["has_more"], false, "listLocationTree {body}");
+        assert!(body["next_cursor"].is_null(), "listLocationTree {body}");
+        assert!(
+            !body["data"].as_array().unwrap().is_empty(),
+            "listLocationTree empty {body}"
+        );
+
+        // deactivateLocation If-Match + 409
+        let loc_ver = w.get(&format!("/api/v1/locations/{loc}")).await.1["version"]
+            .as_i64()
+            .unwrap();
+        let (st, body) = w
+            .post(&format!("/api/v1/locations/{loc}/deactivate"), json!({}))
+            .await;
+        assert_eq!(
+            st,
+            StatusCode::BAD_REQUEST,
+            "deactivateLocation missing If-Match {body}"
+        );
+        assert_eq!(body["error"]["code"], "VALIDATION", "{body}");
+        let (st, body) = w
+            .post_if_match(
+                &format!("/api/v1/locations/{loc}/deactivate"),
+                json!({}),
+                loc_ver + 9,
+            )
+            .await;
+        assert_eq!(st, StatusCode::CONFLICT, "deactivateLocation stale {body}");
+        assert_eq!(body["error"]["code"], "CONFLICT", "{body}");
+        assert_eq!(body["error"]["field"], "version", "{body}");
+        let (st, body) = w
+            .post_if_match(
+                &format!("/api/v1/locations/{loc}/deactivate"),
+                json!({}),
+                loc_ver,
+            )
+            .await;
+        assert_eq!(st, StatusCode::OK, "deactivateLocation {body}");
+        assert_eq!(body["status"], "inactive", "{body}");
+
+        // listLots
+        let (st, body) = w.get("/api/v1/lots?limit=1").await;
+        assert_eq!(st, StatusCode::OK, "listLots {body}");
+        assert_list_envelope(&body, "listLots");
+
+        // createSerials
+        let (st, body) = w
+            .post(
+                &format!("/api/v1/lots/{lot}/serials"),
+                json!({"count": 2, "template": "SN-{000000}"}),
+            )
+            .await;
+        assert_eq!(st, StatusCode::CREATED, "createSerials {body}");
+        assert_eq!(body["data"].as_array().unwrap().len(), 2, "{body}");
+
+        // listWorkOrders
+        let (st, body) = w.get("/api/v1/work-orders?limit=1").await;
+        assert_eq!(st, StatusCode::OK, "listWorkOrders {body}");
+        assert_list_envelope(&body, "listWorkOrders");
+
+        // getImpact — existing lot, empty closure is 200
+        let (st, body) = w.get(&format!("/api/v1/genealogy/impact/{lot}")).await;
+        assert_eq!(st, StatusCode::OK, "getImpact {body}");
+        assert!(body["shipments"].is_array(), "getImpact shipments {body}");
+        assert!(body["customers"].is_array(), "getImpact customers {body}");
+        assert!(body["units"].is_array(), "getImpact units {body}");
+        let (st, body) = w
+            .get(&format!("/api/v1/genealogy/impact/{}", uuid::Uuid::nil()))
+            .await;
+        assert_eq!(st, StatusCode::NOT_FOUND, "getImpact missing lot {body}");
+        assert_eq!(body["error"]["code"], "NOT_FOUND", "{body}");
+
+        // getGenealogyJob — unknown id is 404, never {{"job": null}}
+        let (st, body) = w
+            .get(&format!("/api/v1/genealogy/jobs/{}", uuid::Uuid::nil()))
+            .await;
+        assert_eq!(st, StatusCode::NOT_FOUND, "getGenealogyJob {body}");
+        assert_eq!(body["error"]["code"], "NOT_FOUND", "{body}");
+        assert!(body.get("job").is_none(), "getGenealogyJob null job {body}");
     }
 }

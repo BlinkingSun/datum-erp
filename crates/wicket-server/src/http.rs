@@ -8,7 +8,7 @@ use std::net::SocketAddr;
 
 use axum::Router;
 use axum::extract::DefaultBodyLimit;
-use axum::routing::{MethodRouter, get, post, put};
+use axum::routing::{MethodRouter, get, patch, post, put};
 use tower::ServiceBuilder;
 use tower_http::trace::TraceLayer;
 
@@ -48,26 +48,36 @@ fn method_router(cap: &Capability) -> MethodRouter<AppState> {
         "archivePrint" => post(handlers::print::archive),
         "releaseFromQuarantine" => post(handlers::release_stock),
         "reverseIssue" => post(handlers::create_reversal),
+        "listItems" => get(handlers::list_items),
         "createItem" => post(handlers::create_item),
         "getItem" => get(handlers::get_item),
+        "updateItem" => patch(handlers::update_item),
         "releaseItem" => post(handlers::release_item),
+        "listLocations" => get(handlers::list_locations),
         "createLocation" => post(handlers::create_location),
         "getLocation" => get(handlers::get_location),
+        "listLocationTree" => get(handlers::list_location_tree),
+        "deactivateLocation" => post(handlers::deactivate_location),
+        "listLots" => get(handlers::list_lots),
         "createLot" => post(handlers::create_lot),
         "getLot" => get(handlers::get_lot),
         "setLotStatus" => post(handlers::set_lot_status),
         "listPackages" => get(handlers::list_packages),
         "createPackage" => post(handlers::create_package),
         "listSerials" => get(handlers::list_serials),
+        "createSerials" => post(handlers::create_serials),
         "createReceipt" => post(handlers::create_receipt),
         "createCount" => post(handlers::create_count),
         "getOnHand" => get(handlers::on_hand),
+        "listWorkOrders" => get(handlers::list_work_orders),
         "createWorkOrder" => post(handlers::create_wo),
         "getWorkOrder" => get(handlers::get_wo),
         "releaseWorkOrder" => post(handlers::release_wo),
         "issueWorkOrder" => post(handlers::issue_wo),
         "completeWorkOrder" => post(handlers::complete_wo),
         "traceGenealogy" => get(handlers::genealogy_trace),
+        "getImpact" => get(handlers::get_impact),
+        "getGenealogyJob" => get(handlers::get_genealogy_job),
         id => panic!("T-24: no handler bound for capability {id}"),
     }
 }
