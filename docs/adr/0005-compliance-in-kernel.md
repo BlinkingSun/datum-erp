@@ -1,8 +1,10 @@
 # 0005. Audit trail and electronic signature live in the kernel
 
+Audience: contributor. Status: partial.
+
 Status:   Proposed
 Date:     2026-09-11
-Amended:  2026-09-11, decision lane, see `_team/reports/DECISION-audit-persistence.md`
+Amended:  2026-09-11, decision lane, see `research/decisions/audit-persistence.md`
 Decider:  project lead
 
 ## Context

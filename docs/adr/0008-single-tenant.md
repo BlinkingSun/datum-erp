@@ -1,5 +1,7 @@
 # 0008. Single tenant per installation; residency is an installation property
 
+Audience: contributor. Status: shipped.
+
 Status:   Proposed
 Date:     2026-09-11
 Decider:  project lead

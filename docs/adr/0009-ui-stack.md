@@ -1,5 +1,7 @@
 # 0009. TypeScript and React for the UI, Tauri for the desktop shell
 
+Audience: contributor. Status: absent.
+
 Status:   Proposed
 Date:     2026-09-11
 Decider:  project lead
@@ -19,7 +21,7 @@ everywhere. That stack has never been recorded as a decision with its costs.
 
 Two constraints landed after the assertion.
 
-The install decision (ADR 0003 as amended, `_team/reports/DECISION-install-story.md`)
+The install decision (ADR 0003 as amended, `research/decisions/install-story.md`)
 withdrew bundled PostgreSQL. The Tauri shell's load-bearing job was carrying that
 cluster and supervising it. It no longer has a database to supervise. A browser on
 the LAN is a complete client for v1. Scanners present as keyboards. The

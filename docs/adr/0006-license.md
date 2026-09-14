@@ -1,5 +1,7 @@
 # 0006. License
 
+Audience: contributor. Status: shipped.
+
 Status:   **Accepted** (2026-09-12)
 Date:     2026-09-11, accepted 2026-09-12
 Decider:  project owner

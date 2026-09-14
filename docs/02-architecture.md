@@ -1,5 +1,7 @@
 # Architecture
 
+Audience: contributor. Status: partial.
+
 *Status: draft. Each major decision has a corresponding record in `adr/`.*
 
 ---

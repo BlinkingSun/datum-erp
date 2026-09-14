@@ -1,5 +1,7 @@
 # 0002. Rust for the backend
 
+Audience: contributor. Status: shipped.
+
 Status:   Proposed
 Date:     2026-09-11
 Decider:  project lead
@@ -37,7 +39,7 @@ Rust, with Axum for HTTP and SQLx for database access.
   proving the residual is zero or naming where the residual goes. State enums are
   matched exhaustively. In this domain that is worth a great deal.
 
-  **Correction, 2026-09-11 (decision D1, `_team/reports/DECISION-core-quantity.md`).**
+  **Correction, 2026-09-11 (decision D1, `research/decisions/core-quantity.md`).**
   This bullet previously read: *"A quantity in inches and a quantity in millimetres can
   be different types that will not add."* That is **false** for this system. Units of
   measure are customer-defined rows in a database, and an unbounded set of units cannot

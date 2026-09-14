@@ -1,5 +1,7 @@
 # The Module System
 
+Audience: contributor. Status: partial.
+
 *This is the document that determines whether anyone else can build on this project.
 Everything else is recoverable. Getting extensibility wrong is not.*
 
@@ -40,14 +42,12 @@ modules/calibration/
     events.rs          what it emits, what it subscribes to
     hooks.rs           validation hooks it registers against other modules
     states.rs          state machine declarations
-  ui/
-    routes.tsx         pages, registered into the shell
-    panels.tsx         panels injected into other modules' screens
-    nav.ts             navigation entries, gated by permission
   tests/
   docs/
     validation.md      intended use, requirements, test protocols
 ```
+
+A UI tree (`ui/`) is ABSENT (promised: Wave 3 UI). Scaffolding must not emit `ui/` files.
 
 The manifest declares everything the rest of the system needs to know without loading
 code.

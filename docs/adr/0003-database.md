@@ -1,12 +1,14 @@
 # 0003. PostgreSQL, installed and managed by the operating system
 
+Audience: contributor. Status: shipped.
+
 Status:   Accepted, amended 2026-09-11. The bundling half of the original decision is
           withdrawn. The database choice is unchanged.
 Date:     2026-09-11
 Decider:  project lead
 Amends:   the original title was "PostgreSQL, bundled with the installer"
-See also: `_team/reports/DECISION-install-story.md` (decision D5),
-          `_team/reports/sweep-plan-bundled-pg.md` (the evidence)
+See also: `research/decisions/install-story.md` (decision D5),
+          `research/audits/slice-bundled-postgres.md` (the evidence)
 
 ## Context
 
@@ -132,7 +134,7 @@ That condition is met, and then some. It was fired as a planning decision rather
 after a shop lost a ledger to a half-finished `pg_upgrade`, which is the whole point of
 writing revisit triggers down.
 
-**What the evidence found** (`_team/reports/sweep-plan-bundled-pg.md`): a user-process
+**What the evidence found** (`research/audits/slice-bundled-postgres.md`): a user-process
 cluster on Windows dies when the operator logs off, which is exactly what a shop floor
 does at the end of a shift. Running it as a Windows Service requires administrator
 rights. Endpoint protection has quarantined PostgreSQL write-ahead log files and killed

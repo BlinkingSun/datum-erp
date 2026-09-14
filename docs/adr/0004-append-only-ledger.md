@@ -1,8 +1,10 @@
 # 0004. All quantities and values are derived from an append-only ledger
 
+Audience: contributor. Status: shipped.
+
 Status:   Proposed
 Date:     2026-09-11
-Amended:  2026-09-11, decision lane, see `_team/reports/DECISION-ledger-invariant.md`
+Amended:  2026-09-11, decision lane, see `research/decisions/ledger-invariant.md`
 Decider:  project lead
 
 ## Context
@@ -102,7 +104,7 @@ it, and an allocation that does not sum exactly to the whole is rejected.
 The full derivation, the SQL, and a case-by-case walk through receipt, inspection,
 issue, completion, scrap, cycle count, shipment, customer return, rework, outside
 processing, inexact conversion, and correction are in
-`_team/reports/DECISION-ledger-invariant.md`. The data model records the normative
+`research/decisions/ledger-invariant.md`. The data model records the normative
 version.
 
 ## Consequences

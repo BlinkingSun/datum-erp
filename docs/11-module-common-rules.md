@@ -1,6 +1,8 @@
 # Module common rules and Wave 2s rulings
 
-Promoted from the live lane spec `_team/specs/SPEC-mod-common.md` at the Wave 2s close. The rulings table lives in `research/decisions/w2s-rulings.md`.
+Audience: contributor. Status: shipped.
+
+Promoted at the Wave 2s close. The rulings table lives in `research/decisions/w2s-rulings.md`.
 
 ## Acceptance addendum (2026-09-12, CONTRACT §5a as amended at batch 2.3)
 
