@@ -1,9 +1,10 @@
 # Design Guidelines — Wicket
 
-*Binding on every lane that touches the interface. Written before the visual approval
-gate; the approved mockups get recorded in section 10 once the user signs off, and
-where a mockup and this document disagree, the mockup wins and this document gets
-amended rather than ignored.*
+Audience: contributor. Status: partial (interface crate ABSENT).
+
+*Binding on every lane that touches the interface. Where a mockup and this document
+disagree, the mockup wins and this document gets amended rather than ignored. The
+visual approval gate is signed (section 10).*
 
 ---
 
@@ -164,14 +165,109 @@ Things that will be rejected in audit.
 
 ## 10. Approved visual direction
 
-*To be filled in after the visual approval gate. The approved mockups are
-`design/mockup-item-master.png`, `design/mockup-shop-floor.png`,
-`design/mockup-genealogy.png`, and the application icon `design/icon-wicket.png`.
-Until the user signs off, no interface lane starts.*
+Owner approved all four mockups as-is on 2026-09-13 19:10:
+
+| File | Screen |
+|---|---|
+| `design/mockup-shop-floor.png` | shop floor terminal |
+| `design/mockup-genealogy.png` | genealogy trace |
+| `design/mockup-item-master.png` | item master |
+| `design/icon-wicket.png` | application icon |
+
+Accepted as-is. The visual approval gate is signed. An interface crate is ABSENT (no
+UI lane starts in this change).
+
+Hex values below are modal (most frequent) samples of named regions in those PNGs.
+Anti-aliasing and photographic grain move nearby pixels. A value that cannot be read
+from the image is ABSENT, not invented. The three screens do not share one gold; they
+are recorded separately rather than averaged.
+
+### 10.1 Item master (`design/mockup-item-master.png`, 1280×720)
+
+| Token | Observed |
+|---|---|
+| `surface.base` | `#2E2E2E` (content canvas) |
+| `surface.raised` | `#1A1A1A` (left nav rail); table header bar `#464B51` |
+| `surface.overlay` | ABSENT (no modal in this file) |
+| `border.subtle` | table header vs canvas, `#464B51` on `#2E2E2E` |
+| `border.strong` | ABSENT |
+| `text.primary` | `#FFFFFF` (part number `MDS-450-M4x12`, description) |
+| `text.secondary` | nav inactive labels `#727272` |
+| `text.disabled` | ABSENT |
+| `accent` | `#FAAC3F` (SAVE fill); Released pill and Bill of Material underline sit on the same gold (`#FDAC40` / `#EAAD43`) |
+| `status.ok` | Released pill is this gold, not a green |
+| `status.warn` | ABSENT |
+| `status.danger` | ABSENT |
+| `status.info` | ABSENT |
+| Typeface family | ABSENT |
+| Weight / CSS size | ABSENT |
+| Measured cap-height | part number 21 px in this PNG |
+
+### 10.2 Shop floor terminal (`design/mockup-shop-floor.png`, 1280×720)
+
+| Token | Observed |
+|---|---|
+| `surface.base` | `#252628` |
+| `surface.raised` | scan field interior `#28292B`; secondary buttons `#303133` |
+| `surface.overlay` | ABSENT |
+| `border.subtle` | ABSENT |
+| `border.strong` | scan field ring `#FFFFFF`; REPORT QTY / REPORT SCRAP outlines `#FFFFFF` |
+| `text.primary` | `#FFFFFF` (`WO-2026-1847`, button labels) |
+| `text.secondary` | `#FFFFFF` at lower contrast on the item line; exact muted hex ABSENT (grain) |
+| `text.disabled` | ABSENT |
+| `accent` | CLOCK ON fill `#BA9352`; CLOCK ON label near-black `#000000` |
+| `status.ok` | CERT CURRENT `#95EEAA` (footer; sampled pixels are sparse and grainy) |
+| `status.warn` | ABSENT |
+| `status.danger` | ABSENT |
+| `status.info` | ABSENT |
+| Typeface family | ABSENT |
+| Weight / CSS size | ABSENT |
+| Measured cap-height | `WO-2026-1847` 63 px; `OP 20 TURN` gold 27 px in this PNG |
+
+### 10.3 Genealogy trace (`design/mockup-genealogy.png`, 1280×720)
+
+The title bar in this approved file still reads "Datum". That string is in the mockup;
+it is not a second product name.
+
+| Token | Observed |
+|---|---|
+| `surface.base` | `#1E1F21` (canvas) |
+| `surface.raised` | cards `#292E32`; header `#22252A`; right rail `#212429` |
+| `surface.overlay` | ABSENT |
+| `border.subtle` | card edges on canvas, `#292E32` on `#1E1F21` |
+| `border.strong` | muted bronze on query chip, card labels, right-rail edge `#9A8670` |
+| `text.primary` | `#FFFFFF` (lot and serial identifiers) |
+| `text.secondary` | ABSENT as a clean swatch (small labels, grain) |
+| `text.disabled` | ABSENT |
+| `accent` | `#9A8670` (bronze, not the item-master gold) |
+| `status.ok` | ABSENT as a distinct green; CERTIFIED is bronze on the mill-heat card |
+| `status.warn` | ABSENT |
+| `status.danger` | ABSENT |
+| `status.info` | ABSENT |
+| Typeface family | ABSENT |
+| Weight / CSS size | ABSENT |
+| Measured cap-height | window title 10 px; lot identifiers 14 px in this PNG |
+
+### 10.4 Application icon (`design/icon-wicket.png`, 1013×1013)
+
+Polished gold duck in a rounded square. Not chrome; recorded because it is one of the
+four signed files.
+
+| Region | Observed |
+|---|---|
+| Outer field | `#000000` |
+| Frame gold | `#BE863B` |
+| Body gold | `#D29942` |
+| Highlight gold | `#F0B95E` |
+| Interior ground | `#2E2923` |
+| Typeface | ABSENT (no lettering) |
 
 ## 11. Notes for the next agent
 
-The tokens in section 3 are role names and need real values assigned once the approved
-mockup exists. Take the values from the mockup rather than inventing a palette, and
-record them in one place that both the web client and the print and PDF renderer read,
-because a traveler printed from the system and the screen it was viewed on must agree.
+Section 3 is the role names. Section 10 is the values read from the signed mockups.
+A shared token file that both the web client and the print and PDF renderer read is
+ABSENT. A traveler printed from the system and the screen it was viewed on must agree
+once that file exists; do not invent a palette to fill the gap.
+
+Do not start an interface crate from this document. ADR 0009 names the UI stack; the
+crate is ABSENT.
