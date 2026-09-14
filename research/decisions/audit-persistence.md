@@ -4,9 +4,9 @@
 **Date:** 2026-09-11
 **Status:** Decided. Binding on Wave 1 `workspace`, Wave 2 `wicket-db`, `wicket-audit`,
 `wicket-identity`, `wicket-esign`, `wicket-numbering`, and on all customer-facing prose.
-**Inputs:** `_team/reports/sweep-plan-audit-sqlx.md`, `_team/reports/sweep-plan-part11.md`
-§§4.6, 5.1–5.8, `_team/reports/plan-audit.md` §0.3, §0.4, R3, R4, G10, G11, G18, D3, D4,
-`_team/reports/sweep-plan-proptests.md` (one-group-per-transaction), ADR 0003, ADR 0005,
+**Inputs:** `research/audits/slice-audit-persistence.md`, `research/audits/slice-part11.md`
+§§4.6, 5.1–5.8, `research/audits/plan-audit.md` §0.3, §0.4, R3, R4, G10, G11, G18, D3, D4,
+`research/audits/slice-property-tests.md` (one-group-per-transaction), ADR 0003, ADR 0005,
 PLAN §6.
 **Files amended by this decision:** `docs/adr/0005-compliance-in-kernel.md`,
 `PLAN.md` §6 invariants 3–5. No code was written.

@@ -493,7 +493,7 @@ Protocol: *test/gate code always splits off the algorithm lane.* PLAN currently 
 |------|------------------|----------|--------|
 | `ledger-engine` | `crates/wicket-ledger/src/**`, `migrations/**`, unit tests of the assembler | **cursor** (slice 1) or 1:1 with grok; **blind-race** after the slice keys are frozen (risky: Wave 2 does not close until this passes) | Algorithm, SQL trigger, projection, reverse, group header |
 | `ledger-proptest` | `crates/wicket-ledger/tests/**` **or** (cleaner) `crates/wicket-ledger-proptest/` | **the other family** (grok if engine is cursor) | Generator, model, ACs, PG harness, shards |
-| `spike-ledger-constraint` | `_team/reports/spike-ledger-constraint.md` + throwaway SQL | cursor | slice 1 already asked; **include empty-group trigger hole** |
+| `spike-ledger-constraint` | unpublished run record + throwaway SQL; substance is in `research/audits/slice-ledger.md` | cursor | slice 1 already asked; **include empty-group trigger hole** |
 | `spike-ledger-proptest` | failing harness + this SPEC copied into `crates/wicket-ledger/SPEC.md` | grok | Wave 1 optional — see §9 |
 
 **Do not** put costing/MRP goldens on either lane.
@@ -551,7 +551,7 @@ Workspace is already one human-equivalent doing toolchain, CI, compose, and ~15 
    - `Model` + `Op` enum
    - `#[ignore]` or `#[should_panic]` / failing `proptest!` that `commit`s one Receipt and asserts P1
    - `sqlx` harness skipped if no `DATABASE_URL`
-   - this report’s AC list copied to `crates/wicket-ledger/SPEC.md` (or `_team/specs/wicket-ledger.md` if crate dir is not to be touched yet — **spike may write SPEC under `_team/` only** if product files stay frozen; then Wave 2 engine copies it in)
+   - this report’s AC list copied to `crates/wicket-ledger/SPEC.md` (or a file in the run's excluded working directory if crate dir is not to be touched yet — **spike may write SPEC in the excluded working directory only** if product files stay frozen; then Wave 2 engine copies it in)
 4. Wave 2 `ledger-proptest` un-ignores and fills the generator; `ledger-engine` makes it green.
 
 A harness that is **red on purpose** is the only way PLAN’s “highest-value test” exists as an acceptance gate rather than a retrospective essay. Without it, Wave 2 will ship a constraint trigger and a handful of hand-written receipts and call the property-test box ticked.
@@ -599,8 +599,8 @@ If Wave 1 cannot spare a spike lane: **this file is the SPEC**. Exec-master must
 - docs/00-erp-primer.md §§3 (bone-screw), 4, 9.2 (UoM)  
 - docs/04-module-catalog.md Phase 0–1  
 - docs/03-module-system.md §3.2 hooks  
-- `_team/reports/sweep-plan-ledger.md` (real SQL invariant, empty-group implication)  
-- `_team/reports/sweep-plan-typed-qty.md` (bucket = `(group, ledger, item, unit)`)  
+- `research/audits/slice-ledger.md` (real SQL invariant, empty-group implication)  
+- `research/audits/slice-typed-quantity.md` (bucket = `(group, ledger, item, unit)`)  
 - [proptest state machine shrinking](https://proptest-rs.github.io/proptest/proptest/state-machine.html) — delete-from-back then front-shrink transitions  
 - [PostgreSQL CREATE TRIGGER](https://www.postgresql.org/docs/17/sql-createtrigger.html) — constraint triggers are row-level; empty insert set does not fire  
 )

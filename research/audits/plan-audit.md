@@ -6,7 +6,7 @@
 **Verdict: REVISE**
 
 Sweep: 5 cursor / 5 grok (`sweep-plan-*`). Native `spawn_subagent` lookups: 0.  
-Sources: PLAN.md, `docs/00`–`04`, ADRs 0001–0007, ten sweep reports under `_team/reports/sweep-plan-*.md`, eCFR 21 CFR 11 (2026-09-10), PostgreSQL 17/18 docs, ERPNext `develop` SLE/Bin, Odoo CE/EE quality split, Paperless Parts.
+Sources: PLAN.md, `docs/00`–`04`, ADRs 0001–0007, ten sweep reports (unpublished run records; substance is in `research/audits/slice-*.md`), eCFR 21 CFR 11 (2026-09-10), PostgreSQL 17/18 docs, ERPNext `develop` SLE/Bin, Odoo CE/EE quality split, Paperless Parts.
 
 This file is the sole writer of `plan-audit.md`. Sweep reports are evidence, not the deliverable.
 
@@ -119,7 +119,7 @@ ADR 0006 is the one irreversible decision. `doc-repo` writing `LICENSE` and work
 
 ## 3. Decisions that must land before Wave 1 types freeze
 
-Opus, laned, written into SPEC + `_team/reports/DECISION-*.md`. Not Claude build lanes.
+Opus, laned, written into SPEC + decision records (later promoted into `research/decisions/`). Not Claude build lanes.
 
 | Decision | Options (recommended first) | Blocks |
 |---|---|---|
@@ -234,16 +234,16 @@ Pre-declare shards in the Wave 2 manifest. Do not discover this at INTEGRATE.
 
 | Slice | Lane | Family | Report |
 |---|---|---|---|
-| 1 Ledger constraint | sweep-plan-ledger | cursor | `_team/reports/sweep-plan-ledger.md` |
-| 2 Audit/SQLx | sweep-plan-audit-sqlx | grok | `_team/reports/sweep-plan-audit-sqlx.md` |
-| 3 Crate graph | sweep-plan-crate-graph | cursor | `_team/reports/sweep-plan-crate-graph.md` |
-| 4 Wave 1 stubs | sweep-plan-wave1-stubs | grok | `_team/reports/sweep-plan-wave1-stubs.md` |
-| 5 Typed quantities | sweep-plan-typed-qty | cursor | `_team/reports/sweep-plan-typed-qty.md` |
-| 6 Property tests | sweep-plan-proptests | grok | `_team/reports/sweep-plan-proptests.md` |
-| 7 Bundled PG | sweep-plan-bundled-pg | cursor | `_team/reports/sweep-plan-bundled-pg.md` |
-| 8 Part 11 | sweep-plan-part11 | grok | `_team/reports/sweep-plan-part11.md` |
-| 9 Extension points | sweep-plan-ext-points | cursor | `_team/reports/sweep-plan-ext-points.md` |
-| 10 Competitive | sweep-plan-competitive | grok | `_team/reports/sweep-plan-competitive.md` |
+| 1 Ledger constraint | sweep-plan-ledger | cursor | `research/audits/slice-ledger.md` |
+| 2 Audit/SQLx | sweep-plan-audit-sqlx | grok | `research/audits/slice-audit-persistence.md` |
+| 3 Crate graph | sweep-plan-crate-graph | cursor | `research/audits/slice-crate-graph.md` |
+| 4 Wave 1 stubs | sweep-plan-wave1-stubs | grok | `research/audits/slice-wave1-stubs.md` |
+| 5 Typed quantities | sweep-plan-typed-qty | cursor | `research/audits/slice-typed-quantity.md` |
+| 6 Property tests | sweep-plan-proptests | grok | `research/audits/slice-property-tests.md` |
+| 7 Bundled PG | sweep-plan-bundled-pg | cursor | `research/audits/slice-bundled-postgres.md` |
+| 8 Part 11 | sweep-plan-part11 | grok | `research/audits/slice-part11.md` |
+| 9 Extension points | sweep-plan-ext-points | cursor | `research/audits/slice-extension-points.md` |
+| 10 Competitive | sweep-plan-competitive | grok | `research/audits/slice-competitive.md` |
 
 Process note: first `team-sweep --wait` returned immediately because this Windows node marks live lanes `DIED` at dispatch; `--wait` treats `DIED` as terminal and the command Job Object killed the workers. Second dispatch used `team-sweep` without `--wait` plus a waiter on report files (same 1:1 split). Do not treat board `DIED` as evidence the research did not run.
 

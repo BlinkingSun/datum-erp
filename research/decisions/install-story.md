@@ -3,8 +3,8 @@
 Authority: decision authority, team task `erp`.
 Date: 2026-09-11.
 Status: **decided**. Binding on ADR 0003, `docs/01` §7 criterion 1, `docs/02` §6, and Wave 3 scope.
-Inputs: `_team/reports/sweep-plan-bundled-pg.md`, `_team/reports/plan-audit.md` §0.4 / R7 / G9 / G26 /
-D5, `_team/reports/spike-regulatory.md` §2.2, `docs/adr/0003-database.md`,
+Inputs: `research/audits/slice-bundled-postgres.md`, `research/audits/plan-audit.md` §0.4 / R7 / G9 / G26 /
+D5, `research/background/regulatory.md` §2.2, `docs/adr/0003-database.md`,
 `docs/01-vision-and-scope.md` §7, `docs/02-architecture.md` §6.
 
 ---

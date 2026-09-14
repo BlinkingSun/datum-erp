@@ -1,8 +1,8 @@
 # Wave 2 rulings (kernel) — 2026-09-12
 
 Orchestrator rulings and adjudications that bind the kernel as integrated. Each one is evidenced in
-`_team/reports/CLOSURES.md` (the run record) and in the spec addenda under `_team/specs/`; the live workspace
-contract is promoted to `docs/09-workspace-contract.md` at the Wave 2 close.
+an unpublished run record (substance is in this file) and in spec addenda later promoted into
+`docs/09-workspace-contract.md` at the Wave 2 close.
 
 ## Contract rulings
 
