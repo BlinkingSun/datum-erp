@@ -16,13 +16,14 @@ the item is real.
 
 ## How to use this file
 
-**Stage 0 is startable today and blocks nothing.** It is cheap, it is mostly truth
-repair and intake plumbing, and it makes every later stage reviewable. Do it first.
+**Stage 0 is the contribution product, and it comes first.** It needs no decision
+from the owner. It stops documents from lying to contributors now. Do it first.
 
-**Stage 1 is the keystone.** Seven separate items from four analyses collapse into it.
-Until `module.toml` is the single source of truth and its routes carry a method, Goal 1
-and Goal 2 cannot be worked on independently, and both will be done twice. Nothing in
-Stages 2 and 3 should start before Stage 1 lands.
+**Stage 1 is the keystone, and it is blocked on accepting
+[ADR 0010](docs/adr/0010-one-registry.md).** Seven separate items from four analyses
+collapse into it. Until `module.toml` is the single source of truth and its routes
+carry a method, Goal 1 and Goal 2 cannot be worked on independently, and both are
+done twice. Stages 2 and 3 must not start before Stage 1 lands.
 
 Stages 2 through 5 are ordered by dependency, not by importance. Stage 5 is the largest
 and can only begin once Stage 2 gives it a catalogue to map onto.
@@ -48,8 +49,12 @@ that are currently false.
 | T-10 | Close the settled open questions in the vision | S | `docs/01-vision-and-scope.md` §8 no longer lists licence and contributor agreement as undecided; [ADR 0006](docs/adr/0006-license.md) settled both. Section 1's claim that the product name lives in one constant is removed, having been false since the rename |
 | T-11 | Stamp audience and status on every document | S | Each document declares operator, contributor or quality, and shipped, partial, absent or historical. `HANDOFF.md:14-16` says no code has been written while `HANDOFF.md:23` says a wave is integrated; both cannot be current |
 | T-12 | Correct the stale hosted-CI wording | S | The workflow comment and `HANDOFF.md:28` agree with `PLAN.md:591-593`. Actions are on and outside pull requests already get Linux CI |
-| T-13 | Licence identifier lint and backfill | S | Every source file carries its identifier and a lint enforces it. `CONTRIBUTING.md:77-80` requires this today and no file complies. Backfill in one maintainer change before enabling the lint |
-| T-14 | Unimplemented-macro scanner | S | CI fails on a placeholder macro outside compile-fail fixtures, as `CONTRIBUTING.md:64` already requires in prose |
+| T-13 | Licence identifier lint and backfill | S | Every source file carries its identifier and a lint enforces it. `CONTRIBUTING.md` §9 requires this today and no file complies. Backfill in one maintainer change before enabling the lint |
+| T-14 | Unimplemented-macro scanner | S | CI fails on a placeholder macro outside compile-fail fixtures, as `CONTRIBUTING.md` §6 already requires in prose |
+| T-15 | The acceptance suite is outside the default gate | S | Either `just ci` (`justfile:392`) gains an integration-test recipe that does not need a database, or `README.md` §5 and `CONTRIBUTING.md` §6 stop calling `ci` the gate. Today `ci` ends in `test-lib`, which passes `--lib` (`justfile:313-314`) and therefore excludes every integration test under `crates/*/tests/`, including `crates/wicket-server/tests/slice.rs` (twenty tests, the Wave 2s acceptance). A contributor running the documented gate never exercises the product's own acceptance script |
+| T-16 | The build file describes a passing recipe as expected to fail | S | `justfile` no longer says ci-db is "expected RED until harness lands" (DONE in this change set). Public CI's `just ci-db` is green. The file is owned by another change in this same set; this item is the record, not the edit |
+| T-17 | Repository settings contradict the merge policy | S | GitHub `allow_squash_merge` is false, matching `CONTRIBUTING.md` §7 and `GOALS.md` GOV-5. Branch protection on `main` either enforces fast-forward or is recorded as ABSENT. Private vulnerability reporting is on, or `SECURITY.md:9-11` states it is off (see T-01). **Owner action, not a file change:** the repository has `allow_squash_merge`, `allow_rebase_merge` and `allow_merge_commit` all true. The documents describe a rule the platform does not enforce |
+| T-18 | One writer per file per wave | S | `CONTRIBUTING.md` and the agent standing orders state one writer per file per wave, and a subsequent wave produces no `integrate: merge` tagged "overlapping ownership". 39 of 41 such merges in this repository's history carry that tag. Concurrent lanes sharing files is the single most frequent integration defect |
 
 ---
 
@@ -96,6 +101,7 @@ the wire. None of it is new functionality.
 | T-41 | Print log and template version bump | S | T-24 | Routed, or made crate-private |
 | T-42 | Ledger reversal, balance and projection verification | M | T-31 | No public ledger operation remains without a row or an allowlist entry |
 | T-43 | **The Goal 2 gate: capability coverage test** | M | T-24, T-38 | Boots both profiles, walks engine edges, job kinds, module routes and CLI subcommands against the table, and fails on any capability with no row and no allowlist entry |
+| T-44 | Golden OpenAPI fixture fails the build on path drift | S | T-23 | A committed fixture of OpenAPI paths is compared to the served document's path set, and the build fails on any extra or missing path. Complements T-23, which diffs router mounts against the document table (`crates/wicket-server/src/http.rs:18-128` vs `crates/wicket-server/src/openapi.rs:29-397`) rather than against a fixture. ABSENT today: the parity test at `crates/wicket-server/tests/slice.rs:1543-1568` compares a table to itself |
 
 ---
 
@@ -188,3 +194,15 @@ These block specific items and cannot be resolved by a contributor.
    largest functional hole in Goal 3.
 7. **How an outside pull request reaches the private mirror,** given the standing law
    that the mirror receives landings first. Blocks the merge policy in T-05.
+8. **Repository merge settings.** `CONTRIBUTING.md` §7 and `GOALS.md` GOV-5 state
+   squash-merge is disabled. The GitHub repository has `allow_squash_merge`,
+   `allow_rebase_merge` and `allow_merge_commit` all true. The documents describe a
+   rule the platform does not enforce. This is an owner Settings change, not a file
+   change. Also decide: branch protection on `main` so the fast-forward rule is
+   real, and whether private vulnerability reporting is on. Blocks T-17.
+9. **Whether `just ci` must run the acceptance suite.** `justfile:392` ends in
+   `test-lib`, which passes `--lib` (`justfile:313-314`) and excludes every
+   integration test under `crates/*/tests/`, including
+   `crates/wicket-server/tests/slice.rs`. Either `ci` gains an integration-test
+   recipe that does not need a database, or the documents stop calling `ci` the
+   gate. Blocks T-15.

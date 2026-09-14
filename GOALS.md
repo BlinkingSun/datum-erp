@@ -210,12 +210,14 @@ hosted CI never replaces the three-machine gate for kernel and schema changes.
 | **GOV-2** | Every commit MUST carry a Developer Certificate of Origin sign-off, and CI MUST check it (T-04, not yet wired). Settled by [ADR 0006](docs/adr/0006-license.md) and not reopened by a pull request. No contributor licence agreement will be asked for. |
 | **GOV-3** | Every source file MUST carry its licence identifier, and a lint MUST enforce it (T-13). No file complies today, so this is a backfill before it is a gate. |
 | **GOV-4** | The change class is decided by the diff, not by the author. Touching a public route, an event payload, the manifest schema, the module contract, the canonical order or the dependency allowlist requires an accepted request for comment first. A decision expensive to reverse requires its own decision record, never buried in a feature change. |
-| **GOV-5** | `main` moves by fast-forward only. Squash-merge is disabled, because it rewrites the signed commits. Hosted CI green is necessary and not sufficient: kernel, SQL and contract changes record a three-machine result. |
+| **GOV-5** | `main` must move by fast-forward only. Squash-merge must be disabled, because squashing rewrites the signed commits that ADR 0006 requires. Enforcement of that GitHub setting is ABSENT (promised: `TODO.md` T-17): the repository currently permits squash, rebase, and merge commits. Closing those options is a repository Settings change the maintainer makes; a contributor cannot fix it in a pull request. Hosted CI green is necessary and not sufficient: kernel, SQL and contract changes record a three-machine result. |
 | **GOV-6** | A module contribution ships the full set or it does not merge: crate and module identifiers matching the schema name, forward and reverse migrations with a tested reverse, a validation document, routes under its own namespace, a total signature declaration, an entry in the canonical order and in both profiles, and a manifest read from its own file. |
 | **GOV-7** | A new third-party dependency is a request for comment plus an allowlist edit in the same change. |
 | **GOV-8** | Below 1.0 there is no compatibility promise, but the surfaces in GOV-4 still require a request for comment. From 1.0 the published compatibility rules bind. |
 | **GOV-9** | Work suitable for a newcomer is never in the ledger, the audit chain, or the database session protocol. |
 | **GOV-10** | Automation decides the mechanical rules. The maintainer decides requests for comment, decision records, the reasons behind a "not applicable", security and conduct. No second-reviewer quorum is required of a solo project. |
+| **GOV-11** | Within a wave or a concurrent batch of work, one writer owns a file. A second contributor who needs the same file must escalate and wait; they must not edit it in parallel and merge afterward. Three-way merges of concurrently edited files are how this project has repeatedly lost work: 39 of 41 `integrate: merge` commits are tagged overlapping ownership. A merge is not an integration strategy. |
+| **GOV-12** | Every sentence in project documentation is `is`, `must`, or `ABSENT (promised: …)`. There is no fourth mood. A mechanism that does not exist is never described in the present tense. Precedent: `.github/pull_request_template.md:8-10` (T-06) and `.github/pull_request_template.md:70` (T-04). |
 
 ---
 
@@ -247,6 +249,6 @@ Blunt, because the rest of this document is aspiration until these change.
 | 2. Every function has an API | **Not met.** Three disagreeing catalogues. Many implemented capabilities have no route. The parity test is circular and cannot detect router drift. |
 | 3. Migration | **Not started.** No import code, no maps, no staging. Capped at inventory and open work orders until a BOM module exists. |
 | 4a. Implementation docs | **Not met.** No operator documentation tree. The example environment file cannot boot the product. The supported database floor is stated two ways. |
-| 4b. Contribution | **Partly met.** Licence, sign-off, decision records, formatting, lint and test gates exist. Sign-off is unchecked, there are no templates, and a fully green change can still violate Goals 1 through 3. |
+| 4b. Contribution | **Partly met.** Licence, decision records, formatting, lint and test gates exist. Templates are live on the public repository. Sign-off is still unchecked. The merge policy is stated but unenforced. A fully green change can still violate Goals 1 through 3. |
 
 *Next: `TODO.md` for the sequenced work, `CONTRIBUTING.md` for how to land it.*

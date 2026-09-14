@@ -2,7 +2,7 @@
 
 Conforms to: [ADR 0006](docs/adr/0006-license.md) (Accepted); [ADR 0010](docs/adr/0010-one-registry.md) (Proposed); crate graph as frozen in `PLAN.md` §5; the four goals in [GOALS.md](GOALS.md).
 
-Read [GOALS.md](GOALS.md) before you read the rest of this file. It states the four things that must be true of every capability this project grows, and a change that violates one does not merge no matter how good it is otherwise.
+Read [GOALS.md](GOALS.md) before you read the rest of this file. It states the four things that must be true of every capability this project grows, and a change that violates one does not merge no matter how good it is otherwise. Contributors directing an AI agent at this repository must read [AGENTS.md](AGENTS.md).
 
 ## 1. Contribution agreement
 
@@ -61,6 +61,8 @@ Four goals govern this project ([GOALS.md](GOALS.md)). The pull request template
 
 **Goal 4, followable.** If an operator would notice, a document changes in the same pull request. A sentence naming a file, subcommand or route is false unless that path exists or is tagged absent.
 
+Every sentence in project documentation is `is`, `must`, or `ABSENT (promised: …)`. There is no fourth mood. A mechanism that does not exist is never described in the present tense. Precedent: `.github/pull_request_template.md:8-10` (T-06 goal-heading check) and `.github/pull_request_template.md:70` (T-04 sign-off check).
+
 ## 3. Change classes
 
 The class is decided by the diff, not by the author.
@@ -107,7 +109,9 @@ Propose the module first with the module-proposal issue form. Writing it before 
 
 ## 7. How a change reaches main
 
-`main` moves by fast-forward only. Squash-merge is disabled, because squashing rewrites the signed commits that ADR 0006 requires. Never force-push.
+`main` must move by fast-forward only. Squash-merge must be disabled, because squashing rewrites the signed commits that ADR 0006 requires. Enforcement of that GitHub setting is ABSENT (promised: `TODO.md` T-17): the repository currently permits squash, rebase, and merge commits. Closing those options is a repository Settings change the maintainer makes; a contributor cannot fix it in a pull request. Never force-push.
+
+Within a wave or a concurrent batch of work, one writer owns a file. A second contributor who needs the same file must escalate and wait; they must not edit it in parallel and merge afterward. Three-way merges of concurrently edited files are how this project has repeatedly lost work: 39 of 41 `integrate: merge` commits in this repository are tagged overlapping ownership. A merge is not an integration strategy.
 
 Hosted CI green is necessary and not sufficient. This project validates locally on three machines across three operating systems before a change lands, and hosted CI does not replace that gate for kernel, SQL, schema, lint-fence or contract changes. A documentation-only change needs only the local gate and hosted CI.
 

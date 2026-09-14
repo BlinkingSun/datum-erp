@@ -5,19 +5,43 @@ use at each point. Nothing in this document is scheduled with dates: the build i
 parallel lanes on a single critical path, and the honest unit of progress is a gate that
 passes, not a calendar week.*
 
-**Conforms to:** ADR 0001, 0004, 0005, 0006, 0007, 0008, 0009; `PLAN.md` v2 §1a and §3;
+**Conforms to:** ADR 0001, 0004, 0005, 0006, 0007, 0008, 0009, 0010 (Proposed); `PLAN.md` v2 §1a and §3;
 DECISION D-W1-5 (installation profiles).
 
 ---
 
 ## 1. Current state
 
-As of the foundation build (`PLAN.md` §2): `docs/00` through `docs/04`, the ADRs, the
-decision records in `research/decisions/`, and the design mockups exist. **No application
-code ships yet.** Wave 1 is in flight: workspace stubs, a complete `wicket-core`, the test
-harness, and the remaining foundation documentation. Until Wave 1 integrates and Wave 2
-batch 2.4 (the ledger) passes its property suite, there is nothing to install and
-nothing to demo beyond documents and contracts.
+Pre-alpha. There is no release.
+
+The foundation-build snapshot is stale. `PLAN.md` §2 still says all code is unwritten.
+`HANDOFF.md` §2 still says Wave 1 is integrated and Wave 2 batch 2.1 (`wicket-db`) is next.
+This tree is neither of those states.
+
+What is on disk, counted in this worktree:
+
+| | |
+|---|---|
+| Crates | Seventeen under `crates/` (`Cargo.toml` workspace members: `wicket-core` through `wicket-server`). |
+| Modules | Six under `modules/`: `items`, `locations`, `lots`, `inventory`, `production_min`, `genealogy` (`modules/README.md`). |
+| Rust sources | 312 `.rs` files under `crates/` and `modules/`. |
+| HTTP | Slice, esign, custom-fields, documents, and print routes are mounted (`crates/wicket-server/src/http.rs:18-128`). |
+| Profiles | `profiles/plain-shop.toml` and `profiles/regulated-device.toml` exist. |
+| Slice suite | `crates/wicket-server/tests/slice.rs` (twenty `#[tokio::test]` functions in this tree). |
+
+Those crates are implementations with `src/`, migrations, and tests, not the compiling
+stubs Wave 1 named. `wicket-ledger` is an append-only posting engine
+(`crates/wicket-ledger/src/lib.rs:1-5`). The six modules each ship a `module.toml`.
+`docs/11-module-common-rules.md:3` and `research/decisions/w2s-rulings.md:3` describe a
+Wave 2s close; `research/decisions/w2-rulings.md` and `research/decisions/w2b-rulings.md`
+exist as ruling records. A formal wave-close gate record is ABSENT: the source those
+waves name is present, and HANDOFF.md still contradicts the tree.
+
+Wave 3 interface code is ABSENT (no UI package in the workspace; `PLAN.md` §3 Wave 3;
+ADR 0009). A shop cannot install a daily operations product.
+
+The single measure of progress is the slice acceptance suite in §2.3, not a wave label
+and not a crate count. Breadth work must wait until that suite is boring (§9).
 
 ---
 
@@ -50,7 +74,24 @@ Wave names and contents match `PLAN.md` v2 §3.
 | **What lands** | Modules `mod-items`, `mod-locations`, `mod-lots`, `mod-inventory`, `mod-production-min`, `mod-genealogy`, plus `server-slice` (HTTP API, OpenAPI, headless acceptance script). Canonical example set (`MDS-450-M4x12`, heat `HT-ATI-24-8831`, work order `WO-2026-1847`, and the rest in `PLAN.md` §3). |
 | **What it proves** | The riskiest architecture choices work on real PostgreSQL data end to end: lot entities from the first posting, quarantine as postings, priced `TRANSFORMATION` with P3 consumption edges, genealogy forward/backward agreement, projections equal to ledger fold, audit attribution, both installation profiles with the same slice script (signature declarations differ only where the plan allows). |
 | **What a shop can do** | Run the slice through the API only: receive bar stock by heat and lot, hold quarantine, issue to a minimal work order, complete to a finished lot, trace genealogy. Not a daily operations UI; not Phase 1 catalog completeness (valuation methods, full item master polish, and office workflows come later). |
-| **Gate** | Headless script against the API asserting all thirteen items in `PLAN.md` §3 (Wave 2s acceptance), including green ledger properties and pass under **both** `regulated-device` and `plain-shop` profiles. |
+| **Gate** | The project's single measure of progress. `crates/wicket-server/tests/slice.rs` must assert all thirteen items in `PLAN.md` §3 (Wave 2s acceptance) under both `regulated-device` and `plain-shop`, including green ledger properties. Presence of module directories is not the gate; the script being boring is. |
+
+That suite is the scoreboard. It is a headless script against the API
+(`crates/wicket-server/tests/slice.rs:1`). The two profile tests
+(`slice_end_to_end_plain_shop`, `slice_end_to_end_regulated_device`) drive the
+canonical example set through the thirteen assertions. Twenty `#[tokio::test]`
+functions live in that file in this tree.
+
+`just ci` does **not** run it. `justfile:392` defines `ci` as `fmt-check clippy
+lint-sql test-lib`. `justfile:313-314` defines `test-lib` as
+`cargo test --workspace --lib --all-features`, which excludes every integration
+test under `crates/*/tests/`. Only `just ci-db` (`justfile:397`, which adds
+`test-db`) exercises `slice.rs`. Wiring the suite into `just ci` is ABSENT
+(promised: `TODO.md` T-15).
+
+Breadth work must not start while that script is not boring. Catalog Phase 4
+quality workflows, CAD estimating, incumbent migration adapters, and UI chrome
+must wait; see §9 and the dependency rules in §6.
 
 ### 2.4 Wave 2b — remaining kernel crates
 
@@ -127,7 +168,8 @@ Profile keys are frozen in `_team/specs/SPEC-profiles.md` before Wave 2 batch 2.
 
 ## 5. Milestones that matter to an outsider
 
-Ordered by what they **prove**, not by feature checklists alone.
+Ordered by what they **prove**, not by feature checklists alone. Until the slice
+suite in §2.3 is boring, later milestones in this list are sequenced, not started.
 
 ### 5.1 Slice runs end to end on real data through the API
 
@@ -135,9 +177,13 @@ Ordered by what they **prove**, not by feature checklists alone.
 and genealogy read model are coherent under PostgreSQL constraints and real concurrency —
 the engineering bet behind Phase 1 inventory retires here, not when Wave 2 closes.
 
-**Contains:** Wave 2s modules and `server-slice`, acceptance script per `PLAN.md` §3.
+**Contains:** Wave 2s modules and `server-slice`. The acceptance script is
+`crates/wicket-server/tests/slice.rs`, asserting the thirteen items in `PLAN.md` §3
+under both profiles. That file is the scoreboard (§2.3). `just ci` does not run it;
+only `just ci-db` does. Wiring the suite into `just ci` is ABSENT (promised: `TODO.md` T-15).
 
-**Shop utility:** API-level demo and integration testing only until Wave 3 UI lands.
+**Shop utility:** API-level demo and integration testing only. Wave 3 UI chrome is
+frozen until this suite is boring (§9).
 
 ### 5.2 First release worth running a shop on (catalog Phase 3)
 
@@ -224,3 +270,25 @@ It does not assign dates or durations. It does not promise catalog Phase 2+ modu
 part of the foundation build schedule. Feature lists for later phases live in
 `docs/04-module-catalog.md`; delivery order after Wave 3 follows that catalog and future
 plans, not implied timelines here.
+
+---
+
+## 9. Frozen until the slice is boring
+
+These are correct ideas. They are not next. The order is the dependency table in §6,
+not a rejection of the work.
+
+Until `crates/wicket-server/tests/slice.rs` is boring — green under both profiles
+and asserting the thirteen items in `PLAN.md` §3 — the following must stay frozen:
+
+| Work | Why it waits | §6 rule |
+|---|---|---|
+| Wave 3 UI chrome (shell, item master, shop floor, genealogy screens) | The screens consume the slice API (`PLAN.md` §3 Wave 3). Visual approval is a further gate (`PLAN.md` §4). | Visual approval before Wave 3 UI lanes. |
+| Catalog Phase 4 quality workflows (doc control, inspection, NCR, CAPA, DHR/DMR as product) | Phase 4 sits on a shop already running the slice (`docs/04-module-catalog.md`; this document §3 and §5.3). | Catalog Phases 2–7 after the foundation build. |
+| CAD-native estimating | Catalog Phase 7 (`docs/04-module-catalog.md` "Ends with" table). | Catalog Phases 2–7 after the foundation build. |
+| Incumbent migration adapters | Goal 3 (`GOALS.md` §3). Loaders must call published HTTP APIs. Those APIs are the slice. | Slice modules before `server-slice`. |
+
+No new phase is named here. No existing phase is renamed. Wave 2b kernel crates
+(signatures, documents, print, custom fields) remain sequenced after a running
+slice (`PLAN.md` §0 item 3; §6 "Wave 2s before Wave 2b"). That order stands.
+Phase 4 modules on top of those crates are frozen with the rest of this table.

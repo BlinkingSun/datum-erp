@@ -307,7 +307,9 @@ lint-sql-selftest:
 test:
     cargo test --manifest-path "{{root}}/Cargo.toml" --workspace --all-features
 
-# Library tests only; must pass with no WICKET_*_URL.
+# Library tests only (`--lib`). Excludes every integration test under crates/*/tests/,
+# including Wave 2s slice acceptance (crates/wicket-server/tests/slice.rs).
+# Must pass with no WICKET_*_URL. Not a full test run; that is `test` or `ci-db`.
 test-lib:
     cargo test --manifest-path "{{root}}/Cargo.toml" --workspace --lib --all-features
 
@@ -389,5 +391,7 @@ sqlx-prepare crate:
 # Offline CI: format, clippy, SQL fence, lib tests.
 ci: fmt-check clippy lint-sql test-lib
 
-# CI plus database tests (expected RED until harness lands).
+# CI plus database tests (`ci` then `test-db`). This recipe, not `ci`, runs the
+# integration tests under crates/*/tests/, including Wave 2s slice acceptance,
+# because `test-lib` passes `--lib`.
 ci-db: ci test-db
