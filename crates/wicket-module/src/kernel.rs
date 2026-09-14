@@ -278,27 +278,22 @@ impl Kernel {
         let graph: Vec<wicket_statemachine::ModuleNode> =
             compiled_in_graph()?.into_iter().map(Into::into).collect();
         engine.set_module_graph(graph)?;
+        // Last extra_machine per doc_type wins. That lets a module's
+        // register() overlay a profile-aware freeze (lots release is Required
+        // only under regulated-device) on the TOML default without
+        // KernelBuilder::register_machine being dropped as a duplicate.
+        let mut extra_by_type: BTreeMap<String, Machine> = BTreeMap::new();
+        for machine in extra_machines {
+            extra_by_type.insert(machine.doc_type.clone(), machine);
+        }
+        let extra_types: BTreeSet<String> = extra_by_type.keys().cloned().collect();
         let (mut routes, mut subscriptions, mut job_kinds) =
-            register_enabled_from_manifests(&mut engine, &profile, &catalog)?;
+            register_enabled_from_manifests(&mut engine, &profile, &catalog, &extra_types)?;
         register_document_machine(&mut engine, profile.id.as_str())?;
         engine.register_machine(wicket_customfields::definition_machine(
             profile.id.as_str(),
         )?)?;
-        let catalog_types: BTreeSet<String> = catalog
-            .iter()
-            .filter(|m| {
-                profile
-                    .modules
-                    .iter()
-                    .find(|p| p.id == m.id)
-                    .is_some_and(|p| p.enabled)
-            })
-            .flat_map(|m| m.machines.iter().map(|mach| mach.doc_type.clone()))
-            .collect();
-        for machine in extra_machines {
-            if catalog_types.contains(&machine.doc_type) {
-                continue;
-            }
+        for machine in extra_by_type.into_values() {
             engine.register_machine(machine)?;
         }
         for hook in extra_hooks {
@@ -1072,6 +1067,7 @@ fn register_enabled_from_manifests(
     engine: &mut Engine,
     profile: &Profile,
     catalog: &[ModuleManifest],
+    extra_types: &BTreeSet<String>,
 ) -> Result<(Vec<ModuleRoute>, Vec<ManifestSubscription>, Vec<ModuleJob>)> {
     let mut routes = Vec::new();
     let mut subscriptions = Vec::new();
@@ -1086,6 +1082,9 @@ fn register_enabled_from_manifests(
             continue;
         }
         for machine in &m.machines {
+            if extra_types.contains(&machine.doc_type) {
+                continue;
+            }
             engine.register_machine(machine_from_decl(machine)?)?;
         }
         for r in &m.routes {

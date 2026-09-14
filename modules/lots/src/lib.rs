@@ -53,10 +53,16 @@ pub async fn migrate(pool: &wicket_db::Pool) -> Result<()> {
 
 /// Register event schemas, routes, and the lot machine on `builder`.
 ///
-/// Machines come from `module.toml` via [`KernelBuilder::apply_manifest`] (AG-4).
-pub fn register(builder: &mut KernelBuilder, _profile: &Profile) -> Result<()> {
+/// Routes, jobs and subscriptions come from `module.toml` via
+/// [`KernelBuilder::apply_manifest`]. The lot machine is the profile-aware
+/// freeze from [`lot_machine`]: under regulated-device, `release` is Required.
+/// That overlay last-wins in `Kernel::build` (AG-4 default is the TOML
+/// NotRequired reason; a profile must not add a requirement *in the profile
+/// file*, but the module owns the signature declaration per ADR 0005).
+pub fn register(builder: &mut KernelBuilder, profile: &Profile) -> Result<()> {
     register_schemas()?;
     builder.apply_manifest(&manifest()?)?;
+    builder.register_machine(lot_machine(profile)?)?;
     register_hooks(builder)?;
     Ok(())
 }
