@@ -4,6 +4,8 @@
 
 Conforms to: [ADR 0003](docs/adr/0003-database.md) (Accepted, as amended), [ADR 0006](docs/adr/0006-license.md) (Accepted), [ADR 0010](docs/adr/0010-one-registry.md) (Proposed).
 
+Audience: operator. Status: partial.
+
 ## 1. What this is
 
 Wicket is an open source ERP for discrete manufacturing. The wedge is a 21 CFR Part 11 electronic signature — no surveyed open source ERP has one (`research/background/competitive-landscape.md` §0.1) — and an append-only ledger of quantity and value, both as kernel properties that a module cannot turn off. Everything else named in the vision (quality workflows, a Device History Record, CAD-native estimating) is a roadmap, not a present product (`docs/01-vision-and-scope.md`).
@@ -41,7 +43,11 @@ Before touching the kernel, the ledger, or the module contract, half a day of re
 
 Rust **1.98.1** is pinned in `rust-toolchain.toml` (`PLAN.md` §11). PostgreSQL **17** is installed and lifecycle-managed by the operating system; Wicket never installs or manages PostgreSQL (`docs/adr/0003-database.md` as amended). You also need `just` and `sqlx-cli` 0.9.0 (`PLAN.md` §11).
 
-`just ci` is the local gate: `fmt-check`, `clippy`, `lint-sql`, and `test-lib` (`PLAN.md` §11). Machines with a container runtime can bring up Postgres from `dev/compose.yml` (image `postgres:17`). Machines without one use the OS-managed server on `127.0.0.1:5432`. Wicket never installs that server. Run `just db-gc` to drop orphaned `wicket_t_*` test databases left behind by killed test runs (default age threshold 60 minutes, override with `WICKET_DB_GC_MIN`).
+`just ci` is the offline lint and library-test gate: `fmt-check`, `clippy`, `lint-sql`, and `test-lib` (`PLAN.md` §11). `test-lib` passes `--lib` and excludes every integration test under `crates/*/tests/`, including the Wave 2s slice suite. Green `just ci` is not slice acceptance.
+
+`just ci-db` is the slice and acceptance gate. It runs `crates/wicket-server/tests/slice.rs` under both profiles. Hosted CI on the public repository is on (`.github/workflows/ci.yml`); the `ci-db` job is green.
+
+Machines with a container runtime can bring up Postgres from `dev/compose.yml` (image `postgres:17`). Machines without one use the OS-managed server on `127.0.0.1:5432`. Wicket never installs that server. Run `just db-gc` to drop orphaned `wicket_t_*` test databases left behind by killed test runs (default age threshold 60 minutes, override with `WICKET_DB_GC_MIN`).
 
 ## 6. License
 

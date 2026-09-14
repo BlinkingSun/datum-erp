@@ -1,7 +1,11 @@
 # Handoff — Wicket
 
-*Written 2026-09-11, at the end of the planning phase. **Update 2026-09-12:** the license is decided (ADR 0006 Accepted, AGPL-3.0-or-later + DCO) and the public repository exists at github.com/BlinkingSun/wicket-erp; PLAN.md is at v2, see its section 0. For whoever picks this up next,
-including a future version of the person who started it.*
+Audience: contributor. Status: historical (planning-era, 2026-09-11; public-repository note 2026-09-12).
+
+This file is a planning-era snapshot. It is not the live status board.
+Current state is [README.md](README.md) §2, [docs/07-roadmap.md](docs/07-roadmap.md) §1, and [TODO.md](TODO.md).
+
+*Written 2026-09-11, at the end of the planning phase. A 2026-09-12 note records that the license is decided (ADR 0006 Accepted, AGPL-3.0-or-later + DCO) and that the public repository exists at github.com/BlinkingSun/wicket-erp; PLAN.md is at v2, see its section 0. Kept for whoever picks this up next, including a future version of the person who started it.*
 
 ---
 
@@ -11,27 +15,29 @@ An open source ERP for discrete manufacturing, aimed first at medical device
 manufacturers of roughly ten to a hundred people, built so that everything regulated is
 an optional module over a kernel that is compliance-aware from the first commit.
 
-No code has been written. What exists is a plan that has survived a hostile review, nine
-architecture decision records, and about 119,000 words of research. That is the deliverable
-of this phase and it is deliberate: four of the founding assumptions turned out to be
+As of 2026-09-11, no code had been written. What existed was a plan that had survived a hostile review, nine
+architecture decision records, and about 119,000 words of research. That was the deliverable
+of that phase and it was deliberate: four of the founding assumptions turned out to be
 wrong, and finding that out before thirteen crates were built on them was the entire point.
 
-## 2. Status
+## 2. Status as of 2026-09-12 (superseded)
+
+This table is the 2026-09-12 snapshot. It is not current. See [README.md](README.md) §2 and [docs/07-roadmap.md](docs/07-roadmap.md) §1.
 
 | | |
 |---|---|
-| Phase | **Wave 1 integrated (2026-09-12).** Wave 2 batch 2.1 (`wicket-db`) is next. |
-| Code | Workspace of 17 crates; `wicket-core` complete (44+ tests); `wicket-test` harness (8 tests, commit mode, canary); `wicket-db` real transaction and pool parts; 14 compiling stubs. `just ci` and `just ci-db` green on `main`. |
+| Phase | Wave 1 integrated (2026-09-12). Wave 2 batch 2.1 (`wicket-db`) was next in this snapshot. |
+| Code | Workspace of 17 crates; `wicket-core` complete (44+ tests); `wicket-test` harness (8 tests, commit mode, canary); `wicket-db` real transaction and pool parts; 14 compiling stubs. `just ci` and `just ci-db` green on `main` in this snapshot. |
 | Plan audit | Cycle 2 of 2: APPROVE after closure check. |
 | Decisions | 9 ADRs (0003 and 0006 Accepted) + five build decisions D-W1-1..5 in `research/decisions/`. |
 | Blocked on | The visual approval gate (section 5). Nothing backend waits on it. |
-| Repository | Public `github.com/BlinkingSun/wicket-erp`, `main` only, Actions off until the three-node local CI round. Private mirror `wicket-dev`. |
+| Repository | Public `github.com/BlinkingSun/wicket-erp`. GitHub Actions are on for the public repository since 2026-09-12 (`PLAN.md` §12); outside pull requests already get Linux CI. The private mirror `wicket-dev` keeps Actions off. |
 
 **How Wave 1 was built (for whoever resumes):** `PLAN.md` §0 lists what changed from v1; the integration
-contract is `docs/09-workspace-contract.md`; the Wave 2 specs for batches 2.1 and 2.2 are written
-(`_team/specs/SPEC-wicket-db.md`, `SPEC-audit.md`) and the next batch spec is always written one batch ahead.
-Tooling and process lessons of this run are in the ledger annotations (`_team/reports/AGENTS.md`) and in
-`CLOSURES.md`, which is the honest record of every failed slot, including the two the orchestrator caused.
+contract is `docs/09-workspace-contract.md`. Wave 2 batch 2.1 and 2.2 specs were written one batch
+ahead; the tracked rulings are `research/decisions/w2-rulings.md`. Tooling and process lessons of
+this run were promoted into `research/decisions/` (`w1-contracts.md`, `traits-profiles.md`) and
+`research/audits/`.
 
 ## 3. Read these in this order
 
@@ -110,7 +116,9 @@ it away. Not both.
 
 ## 6. What happens next
 
-In order. Nothing here has started.
+This section is the 2026-09-11 sequence. It is not the live backlog. The sequenced backlog is [TODO.md](TODO.md).
+
+In order. Nothing here had started as of that date.
 
 1. Settle the two items in section 5.
 2. Re-audit the revised plan. The original audit ran on the grok master channel and the
@@ -172,10 +180,10 @@ real data. Resist adding modules until that runs.
 
 ## 9. Practical notes
 
-**Repository.** Local only, no remote, branch `main`, two commits. The author is recorded
-as Josh with the email on this machine; that was a guess and should be corrected before
-anything is pushed. `_team/` is excluded from version control as process scaffolding; the
-substantive output was copied into `research/` and is tracked.
+**Repository.** As of 2026-09-11: local only, no remote, branch `main`, two commits. The author is recorded
+as Josh with the email on this machine; that was a guess, later corrected before
+the public push. Process scaffolding from the planning run is untracked. The
+substantive output was promoted into `research/` and is tracked.
 
 **Before the first public commit**, in addition to the license: a `LICENSE` file, a
 `CONTRIBUTING.md` recording the contributor agreement decision, a `.gitignore`, and a

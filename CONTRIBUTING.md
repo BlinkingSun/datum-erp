@@ -2,6 +2,8 @@
 
 Conforms to: [ADR 0006](docs/adr/0006-license.md) (Accepted); [ADR 0010](docs/adr/0010-one-registry.md) (Proposed); crate graph as frozen in `PLAN.md` §5; the four goals in [GOALS.md](GOALS.md).
 
+Audience: contributor. Status: partial.
+
 Read [GOALS.md](GOALS.md) before you read the rest of this file. It states the four things that must be true of every capability this project grows, and a change that violates one does not merge no matter how good it is otherwise. Contributors directing an AI agent at this repository must read [AGENTS.md](AGENTS.md).
 
 ## 1. Contribution agreement
@@ -98,7 +100,8 @@ Propose the module first with the module-proposal issue form. Writing it before 
 
 ## 6. Code rules
 
-- `just ci` is green before a pull request is opened (`PLAN.md` §11).
+- `just ci` is the offline lint and library-test gate (`fmt-check`, `clippy`, `lint-sql`, `test-lib`; `PLAN.md` §11). It must be green before a pull request is opened. `test-lib` passes `--lib` and excludes every integration test under `crates/*/tests/`. Green `just ci` is not slice acceptance.
+- Slice, kernel, SQL, and schema work must also have `just ci-db` green. `just ci-db` is the Wave 2s / slice acceptance gate (`crates/wicket-server/tests/slice.rs`). A documentation-only change does not require it.
 - No `unsafe`.
 - No `todo!()` on `main`.
 - Every migration has a tested reverse (`PLAN.md` §6 invariant 8).
@@ -113,7 +116,7 @@ Propose the module first with the module-proposal issue form. Writing it before 
 
 Within a wave or a concurrent batch of work, one writer owns a file. A second contributor who needs the same file must escalate and wait; they must not edit it in parallel and merge afterward. Three-way merges of concurrently edited files are how this project has repeatedly lost work: 39 of 41 `integrate: merge` commits in this repository are tagged overlapping ownership. A merge is not an integration strategy.
 
-Hosted CI green is necessary and not sufficient. This project validates locally on three machines across three operating systems before a change lands, and hosted CI does not replace that gate for kernel, SQL, schema, lint-fence or contract changes. A documentation-only change needs only the local gate and hosted CI.
+Hosted CI on the public repository is on (`.github/workflows/ci.yml`). Hosted CI green is necessary and not sufficient. This project validates locally on three machines across three operating systems before a change lands, and hosted CI does not replace that gate for kernel, SQL, schema, lint-fence or contract changes. A documentation-only change needs only `just ci` and hosted CI.
 
 Expect the maintainer to land your change rather than pressing the button themselves; that is a consequence of the fast-forward and mirror rules, not a comment on your work.
 
