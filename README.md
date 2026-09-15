@@ -1,5 +1,12 @@
 # Wicket
 
+<p align="center">
+  <a href="https://makerinparadise.com/blog/wicket-erp-open-source/"><img src="docs/assets/makerinparadise-banner.jpg" alt="Maker in Paradise — why Wicket exists" width="100%"></a>
+</p>
+<p align="center">
+  <strong><a href="https://makerinparadise.com/blog/wicket-erp-open-source/">Why Wicket exists</a> — https://makerinparadise.com/blog/wicket-erp-open-source/</strong>
+</p>
+
 <p align="center"><img src="design/icon-wicket-512.png" width="160" alt="Wicket ERP icon"></p>
 
 Conforms to: [ADR 0003](docs/adr/0003-database.md) (Accepted, as amended), [ADR 0006](docs/adr/0006-license.md) (Accepted), [ADR 0010](docs/adr/0010-one-registry.md) (Proposed).
