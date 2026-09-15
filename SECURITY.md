@@ -6,9 +6,12 @@ Conforms to: [ADR 0005](docs/adr/0005-compliance-in-kernel.md); `research/decisi
 
 Report vulnerabilities privately. Do not open a public issue.
 
-**[PRIVATE CONTACT TO BE FILLED BY THE PROJECT OWNER]**
+**josh@makerinparadise.com**
 
-If GitHub private vulnerability reporting is enabled on https://github.com/BlinkingSun/wicket-erp, use that. Until the owner fills the placeholder above, treat the report as unrouted and do not publish it.
+GitHub private vulnerability reporting is **enabled** on
+https://github.com/BlinkingSun/wicket-erp — prefer it, because it keeps the
+report, the fix and the advisory in one place. The address above is the
+fallback if you cannot use GitHub.
 
 ## 2. Supported versions
 

@@ -112,7 +112,7 @@ Propose the module first with the module-proposal issue form. Writing it before 
 
 ## 7. How a change reaches main
 
-`main` must move by fast-forward only. Squash-merge must be disabled, because squashing rewrites the signed commits that ADR 0006 requires. Enforcement of that GitHub setting is ABSENT (promised: `TODO.md` T-17): the repository currently permits squash, rebase, and merge commits. Closing those options is a repository Settings change the maintainer makes; a contributor cannot fix it in a pull request. Never force-push.
+`main` must move by fast-forward only. Squash-merge and rebase-merge are **disabled** on the repository (T-17), because both rewrite the signed commits that ADR 0006 requires. Merge commits remain enabled only because GitHub refuses to disable every merge strategy; of the three it is the one that leaves the original signed commits intact. Do not use the merge button regardless — the maintainer lands changes by fast-forward push. Branch protection on `main` is ABSENT: GitHub has no fast-forward-only mode, and its nearest setting (require linear history) would forbid the merge commits the platform insists on allowing. Never force-push.
 
 Within a wave or a concurrent batch of work, one writer owns a file. A second contributor who needs the same file must escalate and wait; they must not edit it in parallel and merge afterward. Three-way merges of concurrently edited files are how this project has repeatedly lost work: 39 of 41 `integrate: merge` commits in this repository are tagged overlapping ownership. A merge is not an integration strategy.
 

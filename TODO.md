@@ -18,8 +18,8 @@ the item is real.
 
 **Stage 0 is the contribution product, and it comes first.** It needs no decision
 from the owner. It stops documents from lying to contributors now. Do it first.
-Most of Stage 0 landed in the 2026-09-14 swarm. Remaining: T-01 (owner contacts),
-T-13 (licence-identifier backfill), T-17 (GitHub merge settings, owner).
+Most of Stage 0 landed in the 2026-09-14 swarm. T-01 and T-17 closed 2026-09-15.
+**Remaining: T-13 (licence-identifier backfill).**
 
 **Stage 1 is the keystone, and it is blocked on accepting
 [ADR 0010](docs/adr/0010-one-registry.md).** Seven separate items from four analyses
@@ -37,7 +37,7 @@ that are currently false.
 
 | ID | Work | Size | Done when |
 |---|---|---|---|
-| T-01 | Fill the conduct and security contacts | S | `CODE_OF_CONDUCT.md:39` and `SECURITY.md:9` hold real addresses instead of placeholders; SECURITY states whether GitHub private vulnerability reporting is enabled |
+| T-01 | **DONE.** Fill the conduct and security contacts | S | `CODE_OF_CONDUCT.md:39` and `SECURITY.md:9` hold real addresses instead of placeholders; SECURITY states whether GitHub private vulnerability reporting is enabled |
 | T-02 | **DONE.** Pull request template carrying the four-goal gate | S | `.github/pull_request_template.md` requires an answer or a reasoned "not applicable" for each goal, plus sign-off and local gate confirmation |
 | T-03 | **DONE.** Issue templates and a published label set | S | Bug, feature, module proposal and request-for-comment forms exist; the label set is documented in `CONTRIBUTING.md` |
 | T-04 | **DONE.** Sign-off check in CI | S | `scripts/check-dco.sh` is wired in `.github/workflows/ci.yml` job `lint-policy`. A pull request whose commits lack `Signed-off-by` fails the build |
@@ -53,7 +53,7 @@ that are currently false.
 | T-14 | **DONE.** Unimplemented-macro scanner | S | `scripts/lint-unimplemented.sh` fails CI on a placeholder macro outside compile-fail fixtures |
 | T-15 | **DONE.** The acceptance suite is outside the default gate | S | `README.md` §5 and `CONTRIBUTING.md` name `just ci` as the offline lint/lib gate and `just ci-db` as slice acceptance. `just ci` still ends in `test-lib` (`--lib`); that is now documented rather than mislabeled |
 | T-16 | **DONE.** The build file describes a passing recipe as expected to fail | S | `justfile` no longer says ci-db is "expected RED until harness lands". Public CI's `just ci-db` is green |
-| T-17 | Repository settings contradict the merge policy | S | GitHub `allow_squash_merge` is false, matching `CONTRIBUTING.md` §7 and `GOALS.md` GOV-5. Branch protection on `main` either enforces fast-forward or is recorded as ABSENT. Private vulnerability reporting is on, or `SECURITY.md:9-11` states it is off (see T-01). **Owner action, not a file change:** the repository has `allow_squash_merge`, `allow_rebase_merge` and `allow_merge_commit` all true. The documents describe a rule the platform does not enforce |
+| T-17 | **DONE.** Repository settings contradict the merge policy | S | GitHub `allow_squash_merge` is false, matching `CONTRIBUTING.md` §7 and `GOALS.md` GOV-5. Branch protection on `main` either enforces fast-forward or is recorded as ABSENT. Private vulnerability reporting is on, or `SECURITY.md:9-11` states it is off (see T-01). Closed 2026-09-15: `allow_squash_merge` and `allow_rebase_merge` set false; private vulnerability reporting enabled; `CONTRIBUTING.md` §7 and `SECURITY.md` updated to match. Two residuals recorded rather than hidden: `allow_merge_commit` stays true because GitHub refuses to disable every merge strategy (it is the only one that does not rewrite signed commits), and branch protection on `main` is **ABSENT** because GitHub has no fast-forward-only mode |
 | T-18 | **DONE.** One writer per file per wave | S | `CONTRIBUTING.md` §7 and `AGENTS.md` state one writer per file per wave. Historical `integrate: merge` overlapping-ownership commits remain in git history; new waves must not add more |
 
 ---
@@ -87,7 +87,7 @@ the wire. None of it is new functionality.
 
 | ID | Work | Size | Depends | Done when |
 |---|---|---|---|---|
-| T-30 | Mount the module reads and writes that already have handlers | M | T-24 | Item list and patch, location list, tree, patch and deactivate, lot list, serial creation, work-order list, and the genealogy impact and job routes all respond |
+| T-30 | **DONE.** Mount the module reads and writes that already have handlers | M | T-24 | Item list and patch, location list, tree, patch and deactivate, lot list, serial creation, work-order list, and the genealogy impact and job routes all respond |
 | T-31 | Inventory writes | L | T-24 | Issues, moves, adjustments, document read and void are mounted with tests, or their declarations are removed in the same change |
 | T-32 | Remaining machine edges | M | T-24 | Item obsolete, work-order cancel, and the document lifecycle edges each have an operation with optimistic concurrency |
 | T-33 | Job status, enqueue and cancel | M | T-24 | A job identifier returned by a trace resolves. Today `modules/genealogy` returns one into a route that does not exist |
