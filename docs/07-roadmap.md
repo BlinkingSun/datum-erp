@@ -7,7 +7,7 @@ use at each point. Nothing in this document is scheduled with dates: the build i
 parallel lanes on a single critical path, and the honest unit of progress is a gate that
 passes, not a calendar week.*
 
-**Conforms to:** ADR 0001, 0004, 0005, 0006, 0007, 0008, 0009, 0010 (Proposed); `PLAN.md` v2 §1a and §3;
+**Conforms to:** ADR 0001, 0004, 0005, 0006, 0007, 0008, 0009 (Accepted 2026-09-15), 0010 (Proposed); `PLAN.md` v2 §1a and §3;
 DECISION D-W1-5 (installation profiles).
 
 ---

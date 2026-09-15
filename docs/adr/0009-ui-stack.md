@@ -2,9 +2,9 @@
 
 Audience: contributor. Status: absent.
 
-Status:   Proposed
-Date:     2026-09-11
-Decider:  project lead
+Status:   **Accepted** (2026-09-15)
+Date:     2026-09-11, accepted 2026-09-15
+Decider:  project owner
 
 ## Context
 
@@ -31,6 +31,29 @@ architecture's own topology already says the floor tablet is a browser.
 record-rendering service. The UI is not a renderer. Travelers, certificates, labels,
 and packing lists must archive, and a screen change must not change a historical
 document.
+
+## Acceptance note (2026-09-15)
+
+Accepted by the owner. The document-level status stays **absent** because no interface
+crate exists yet; acceptance settles the decision, not the delivery.
+
+What acceptance binds:
+
+- The wrapper is a **client of the HTTP API and nothing else**. No wrapper links a kernel
+  crate. This is the same rule ADR 0010 applies to the router: one surface, no second path.
+- **One generated TypeScript client** is the wrapper contract. It is generated from the
+  OpenAPI document, which is generated from the capability table, which `just ci` now pins
+  to a committed fixture (T-44). A wrapper on any platform consumes that client.
+- **One application, three interaction modes** — office, shop floor, quality/planning are
+  route trees over one component library and one token set, not three codebases.
+- Tauri v2 carries the same application to macOS, Linux, Windows, Android and iOS. A browser
+  on the LAN remains a complete client for v1, so no platform shell is load-bearing.
+
+What acceptance does **not** unblock: interface work waits on Goal 2. A wrapper can only be
+honest about "every function has an API" once the capability table actually covers the
+engine. Today it does not — `wicket-identity` exposes login and logout and nothing else,
+and numbering, units of measure, the module registry and the ledger are unreachable
+(`TODO.md` T-31..T-42, gate T-43).
 
 ## Decision
 

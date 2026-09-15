@@ -48,7 +48,7 @@ The specific conditions that should reopen this.
 | [0006](0006-license.md) | License: AGPL-3.0-or-later, contributions under the DCO | Accepted |
 | [0007](0007-defer-general-ledger.md) | Do not build a general ledger | Proposed |
 | [0008](0008-single-tenant.md) | Single tenant per installation; residency is an installation property | Proposed |
-| [0009](0009-ui-stack.md) | TypeScript and React for the UI, Tauri for the desktop shell | Proposed |
+| [0009](0009-ui-stack.md) | TypeScript and React for the UI, Tauri for the desktop shell | **Accepted** (2026-09-15) |
 | [0010](0010-one-registry.md) | One capability registry generates the router, the document, and the agent surface | Proposed |
 
 0003 is Accepted, as amended; 0006 is Accepted. Everything else is Proposed. Proposed
