@@ -404,8 +404,17 @@ lint-mounts:
 lint-module-manifests:
     bash "{{root}}/scripts/lint-module-manifests.sh"
 
-# Offline CI: format, clippy, SQL fence, mount lint, module manifests, lib tests.
-ci: fmt-check clippy lint-sql lint-mounts lint-module-manifests test-lib
+# T-44: capability table (method, path) set vs committed OpenAPI operation fixture.
+lint-openapi-fixture:
+    bash "{{root}}/scripts/lint-openapi-fixture.sh"
+
+# T-44: rewrite the OpenAPI operation fixture from the capability table.
+# Explicit act. Must not become a dependency of ci / ci-db.
+openapi-fixture:
+    bash "{{root}}/scripts/lint-openapi-fixture.sh" --write
+
+# Offline CI: format, clippy, SQL fence, mount lint, module manifests, OpenAPI fixture, lib tests.
+ci: fmt-check clippy lint-sql lint-mounts lint-module-manifests lint-openapi-fixture test-lib
 
 # CI plus database tests (`ci` then `test-db`). This recipe, not `ci`, runs the
 # integration tests under crates/*/tests/, including Wave 2s slice acceptance,

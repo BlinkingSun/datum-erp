@@ -300,7 +300,7 @@ async fn adopt_wicket_db_history(pool: &PgPool) -> Result<()> {
 pub async fn build_kernel(pool: Pool, profile: Profile) -> Result<Kernel> {
     let mut builder = Kernel::builder(pool, profile.clone());
     wicket_mod_items::register(&mut builder, &profile)?;
-    builder.apply_manifest(&wicket_mod_locations::manifest()?)?;
+    wicket_mod_locations::register(&mut builder, &profile)?;
     // ADDENDUM 1 item 5: lots are registered under the live profile so
     // `lot.release` is Required on regulated-device (refused under NoSignatures).
     wicket_mod_lots::register(&mut builder, &profile)?;

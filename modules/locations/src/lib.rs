@@ -28,7 +28,7 @@ pub use store::{
     list, list_flat, location_id_by_code, seed_install, site_id_by_code, update,
 };
 
-use wicket_module::ModuleManifest;
+use wicket_module::{KernelBuilder, ModuleManifest, Profile};
 
 /// Embedded migrator.
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
@@ -36,6 +36,16 @@ pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 /// Parsed manifest from `module.toml`.
 pub fn manifest() -> Result<ModuleManifest> {
     Ok(ModuleManifest::parse(include_str!("../module.toml"))?)
+}
+
+/// Register location event schemas and apply the module manifest on `builder`.
+///
+/// Locations has no machines, hooks, or jobs. Schemas still belong at boot so
+/// deactivate can publish without a per-request registry call.
+pub fn register(builder: &mut KernelBuilder, _profile: &Profile) -> Result<()> {
+    register_schemas_global()?;
+    builder.apply_manifest(&manifest()?)?;
+    Ok(())
 }
 
 /// Run this crate's migrations on `pool` (after kernel migrators).

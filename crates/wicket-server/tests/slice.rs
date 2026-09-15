@@ -13,6 +13,7 @@ use axum::http::StatusCode;
 use common::{World, pass, qty};
 use serde_json::{Value, json};
 use sqlx::query_scalar;
+use std::collections::BTreeSet;
 use tower::ServiceExt;
 use wicket_core::{
     Actor, ActorKind, AnyQuantity, DimensionKind, GroupKind, Identifier, ItemId, LocationId,
@@ -1572,6 +1573,69 @@ async fn openapi_listed_paths_are_not_bare_404() {
             .call("GET", "/api/v1/mod-does-not-exist/foo", None, None)
             .await;
         assert_eq!(st, StatusCode::NOT_FOUND);
+    }
+}
+
+fn parse_openapi_operation_fixture(raw: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for (i, line) in raw.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((method, path)) = line.split_once(' ') else {
+            panic!(
+                "openapi fixture line {}: expected METHOD path, got {line:?}",
+                i + 1
+            );
+        };
+        out.push((method.to_string(), path.to_string()));
+    }
+    out.sort();
+    out
+}
+
+fn assert_operation_set_diff(
+    got: &[(String, String)],
+    expected: &[(String, String)],
+    got_label: &str,
+    expected_label: &str,
+) {
+    let got_set: BTreeSet<_> = got.iter().cloned().collect();
+    let expected_set: BTreeSet<_> = expected.iter().cloned().collect();
+    let extra: Vec<String> = got_set
+        .difference(&expected_set)
+        .map(|(m, p)| format!("{m} {p}"))
+        .collect();
+    let missing: Vec<String> = expected_set
+        .difference(&got_set)
+        .map(|(m, p)| format!("{m} {p}"))
+        .collect();
+    assert!(
+        extra.is_empty() && missing.is_empty(),
+        "{got_label} vs {expected_label}: extra [{}] missing [{}]",
+        extra.join(", "),
+        missing.join(", ")
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn served_openapi_matches_committed_operation_fixture() {
+    if common::skip_if_no_pg() {
+        return;
+    }
+    let fixture = parse_openapi_operation_fixture(include_str!("fixtures/openapi-operations.txt"));
+    for profile in profiles() {
+        let w = common::boot(profile).await;
+        let (st, body) = w.get("/api/v1/openapi.json").await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        let listed = registered_operations(&body);
+        assert_operation_set_diff(
+            &listed,
+            &fixture,
+            "served OpenAPI",
+            "committed operation fixture",
+        );
     }
 }
 

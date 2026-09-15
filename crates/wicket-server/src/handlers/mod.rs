@@ -1090,7 +1090,6 @@ async fn deactivate_location_inner(
     raw: &[u8],
 ) -> Result<(u16, Value)> {
     let session = extract::require_mutation(state, headers, request_id, "locations.edit").await?;
-    wicket_mod_locations::register_schemas_global().map_err(map_locations_err)?;
     let key = idempotency::require_key(headers)?;
     let hash = idempotency::body_hash(raw);
     let expected = require_if_match(headers)?;
